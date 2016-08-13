@@ -1513,6 +1513,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if shared.Settings.WASM_BACKEND:
       # we also received wasm at this stage
       wasm_temp = final[:-3] + '.wast'
+      if shared.mydebug:
+        print 'Move: mv %s %s' % (wasm_temp, wasm_text_target)
       shutil.move(wasm_temp, wasm_text_target)
       open(wasm_text_target + '.mappedGlobals', 'w').write('{}') # no need for mapped globals for now, but perhaps some day
 
@@ -1582,10 +1584,14 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     # Apply a source code transformation, if requested
     if js_transform:
+      if shared.mydebug:
+        print 'Copy: cp %s %s' % (final, final + '.tr.js')
       shutil.copyfile(final, final + '.tr.js')
       final += '.tr.js'
       posix = True if not shared.WINDOWS else False
       logging.debug('applying transform: %s', js_transform)
+      if shared.mydebug:
+        print 'check_call: ' + ' '.join(shlex.split(js_transform, posix=posix) + [os.path.abspath(final)])
       subprocess.check_call(shlex.split(js_transform, posix=posix) + [os.path.abspath(final)])
       if DEBUG: save_intermediate('transformed')
 
@@ -1842,6 +1848,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       import json
       try:
         # move temp js to final position, alongside its mem init file
+        if shared.mydebug:
+          print 'Move: mv %s %s' % (final, js_target)
         shutil.move(final, js_target)
         args = [shared.PYTHON, shared.path_from_root('tools', 'emterpretify.py'), js_target, final + '.em.js', json.dumps(shared.Settings.EMTERPRETIFY_BLACKLIST), json.dumps(shared.Settings.EMTERPRETIFY_WHITELIST), '', str(shared.Settings.SWAPPABLE_ASM_MODULE)]
         if shared.Settings.EMTERPRETIFY_ASYNC:
@@ -1905,6 +1913,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
            '--offset', str(0)])
 
     # Move final output to the js target
+    if shared.mydebug:
+      print 'Move: mv %s %s' % (final, js_target)
     shutil.move(final, js_target)
 
     generated_text_files_with_native_eols = [js_target]
@@ -1913,14 +1923,20 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if (separate_asm or shared.Settings.BINARYEN) and not shared.Settings.WASM_BACKEND:
       logging.debug('separating asm')
       with misc_temp_files.get_file(suffix='.js') as temp_target:
+        if shared.mydebug:
+          print 'check_call: ' + shared.PYTHON + ' ' + shared.path_from_root('tools', 'separate_asm.py') + ' ' + js_target + ' ' + asm_target + ' ' + temp_target
         subprocess.check_call([shared.PYTHON, shared.path_from_root('tools', 'separate_asm.py'), js_target, asm_target, temp_target])
         generated_text_files_with_native_eols += [asm_target]
+        if shared.mydebug:
+          print 'Move: mv %s %s' % (temp_target, js_target)
         shutil.move(temp_target, js_target)
 
       # extra only-my-code logic
       if shared.Settings.ONLY_MY_CODE:
         temp = asm_target + '.only.js'
         print jsrun.run_js(shared.path_from_root('tools', 'js-optimizer.js'), shared.NODE_JS, args=[asm_target, 'eliminateDeadGlobals', 'last', 'asm'], stdout=open(temp, 'w'))
+        if shared.mydebug:
+          print 'Move: mv %s %s' % (temp, asm_target)
         shutil.move(temp, asm_target)
 
     if shared.Settings.BINARYEN:
@@ -1951,6 +1967,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           cmd += ['--no-opts']
         logging.debug('asm2wasm (asm.js => WebAssembly): ' + ' '.join(cmd))
         TimeLogger.update()
+        if shared.mydebug:
+          print 'check_call: ' + ' '.join(cmd) + ' > ' + wasm_text_target
         subprocess.check_call(cmd, stdout=open(wasm_text_target, 'w'))
         log_time('asm2wasm')
       if shared.Settings.BINARYEN_SCRIPTS:
@@ -1963,11 +1981,17 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           script_env['PYTHONPATH'] = root_dir
         for script in shared.Settings.BINARYEN_SCRIPTS.split(','):
           logging.debug('running binaryen script: ' + script)
+          if shared.mydebug:
+            print 'check_call: ' + shared.PYTHON + ' ' + os.path.join(binaryen_scripts, script) + ' ' + js_target + ' ' + wasm_text_target
           subprocess.check_call([shared.PYTHON, os.path.join(binaryen_scripts, script), js_target, wasm_text_target], env=script_env)
       if 'native-wasm' in shared.Settings.BINARYEN_METHOD or 'interpret-binary' in shared.Settings.BINARYEN_METHOD:
         logging.debug('wasm-as (wasm => binary)')
+        if shared.mydebug:
+          print 'check_call: ' + os.path.join(binaryen_bin, 'wasm-as') + ' ' + wasm_text_target + ' -o ' + wasm_binary_target
         subprocess.check_call([os.path.join(binaryen_bin, 'wasm-as'), wasm_text_target, '-o', wasm_binary_target])
         if os.path.exists(wasm_text_target + '.mappedGlobals'): # TODO: remove once we no longer use .mappedGlobals files at all, as binaryen is moving to https://github.com/WebAssembly/binaryen/issues/675
+          if shared.mydebug:
+            print 'Copy: cp %s %s' % (wasm_text_target + '.mappedGlobals', wasm_binary_target + '.mappedGlobals')
           shutil.copyfile(wasm_text_target + '.mappedGlobals', wasm_binary_target + '.mappedGlobals')
 
     # If we were asked to also generate HTML, do that
@@ -2123,7 +2147,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   finally:
     if not TEMP_DIR:
       try:
-        shutil.rmtree(temp_dir)
+        #shutil.rmtree(temp_dir)
+        pass
       except:
         pass
     else:

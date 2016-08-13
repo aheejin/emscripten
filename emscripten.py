@@ -142,6 +142,8 @@ def get_and_parse_backend(infile, settings, temp_files, DEBUG):
       if DEBUG:
         logging.debug('emscript: llvm backend: ' + ' '.join(backend_args))
         t = time.time()
+      if shared.mydebug:
+        print 'Popen: ' + ' '.join(backend_args)
       shared.jsrun.timeout_run(subprocess.Popen(backend_args, stdout=subprocess.PIPE))
       if DEBUG:
         logging.debug('  emscript: llvm backend took %s seconds' % (time.time() - t))
@@ -279,6 +281,8 @@ def compiler_glue(metadata, settings, libraries, compiler_engine, temp_files, DE
         s.write(settings_text)
         s.close()
       save_settings()
+      if shared.mydebug:
+        print 'save_settings: ' + settings_file
 
       # Call js compiler
       out = jsrun.run_js(path_from_root('src', 'compiler.js'), compiler_engine,
@@ -291,6 +295,31 @@ def compiler_glue(metadata, settings, libraries, compiler_engine, temp_files, DE
       logging.debug('  emscript: glue took %s seconds' % (time.time() - t))
 
     return glue, forwarded_data
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data, settings, outfile, DEBUG):
 
@@ -1299,6 +1328,34 @@ Runtime.registerFunctions(%(sigs)s, Module);
       with open(cd_file_name, "w") as cd_file:
         json.dump({ 'cyberdwarf': metadata['cyberdwarf_data'] }, cd_file)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def emscript_wasm_backend(infile, settings, outfile, libraries=None, compiler_engine=None,
                           temp_files=None, DEBUG=None):
   # Overview:
@@ -1441,9 +1498,13 @@ def emscript_wasm_backend(infile, settings, outfile, libraries=None, compiler_en
       s.write(settings_text)
       s.close()
     save_settings()
+    if shared.mydebug:
+      print 'save_settings: ' + settings_file
 
     # Call js compiler
     if DEBUG: t = time.time()
+    if shared.mydebug:
+      print 'jsrun.run_js: compiler_engine = %s  settings_file = %s  libraries = %s' % (compiler_engine, settings_file, str(libraries))
     out = jsrun.run_js(path_from_root('src', 'compiler.js'), compiler_engine,
                        [settings_file] + libraries, stdout=subprocess.PIPE, stderr=STDERR_FILE,
                        cwd=path_from_root('src'), error_limit=300)

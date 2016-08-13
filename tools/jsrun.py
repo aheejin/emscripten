@@ -2,6 +2,9 @@ from toolchain_profiler import ToolchainProfiler
 import time, os, sys, logging
 from subprocess import Popen, PIPE, STDOUT
 
+#mydebug = False
+mydebug = True
+
 TRACK_PROCESS_SPAWNS = True if (os.getenv('EM_BUILD_VERBOSE') and int(os.getenv('EM_BUILD_VERBOSE')) >= 3) else False
 
 def timeout_run(proc, timeout=None, note='unnamed process', full_output=False):
@@ -56,6 +59,8 @@ def run_js(filename, engine=None, args=[], check_timeout=False, stdin=None, stdo
   command = make_command(filename, engine, args)
   try:
     if cwd is not None: os.environ['EMCC_BUILD_DIR'] = os.getcwd()
+    if mydebug:
+      print 'Popen: ' + ' '.join(command)
     proc = Popen(
         command,
         stdin=stdin,

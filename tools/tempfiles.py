@@ -69,8 +69,8 @@ class TempFiles:
       import sys
       print >> sys.stderr, 'not cleaning up temp files since in debug-save mode, see them in %s' % (self.tmp,)
       return
-    for filename in self.to_clean:
-      try_delete(filename)
+    #for filename in self.to_clean:
+    #  try_delete(filename)
     self.to_clean = []
 
   def run_and_clean(self, func):

@@ -10,6 +10,8 @@ import logging, platform, multiprocessing
 # Temp file utilities
 from tempfiles import try_delete
 
+mydebug = jsrun.mydebug
+
 # On Windows python suffers from a particularly nasty bug if python is spawning new processes while python itself is spawned from some other non-console process.
 # Use a custom replacement for Popen on Windows to avoid the "WindowsError: [Error 6] The handle is invalid" errors when emcc is driven through cmake or mingw32-make.
 # See http://bugs.python.org/issue3905
@@ -1562,6 +1564,8 @@ class Building:
 
     if not just_calculate:
       logging.debug('emcc: llvm-linking: %s to %s', actual_files, target)
+      if mydebug:
+        print 'Popen: ' + LLVM_LINK + ' ' + ' '.join(link_args) + ' -o ' + target
       output = Popen([LLVM_LINK] + link_args + ['-o', target], stdout=PIPE).communicate()[0]
       assert os.path.exists(target) and (output is None or 'Could not open input file' not in output), 'Linking error: ' + output
       return target
@@ -1601,6 +1605,8 @@ class Building:
 
     logging.debug('emcc: LLVM opts: ' + ' '.join(opts) + '  [num inputs: ' + str(len(inputs)) + ']')
     target = out or (filename + '.opt.bc')
+    if mydebug:
+      print 'Popen: ' + LLVM_OPT + ' ' + ' '.join(inputs) + ' ' + ' '.join(opts) + ' -o ' + target + '\n'
     output = Popen([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE).communicate()[0]
     assert os.path.exists(target), 'Failed to run llvm optimizations: ' + output
     if not out:
@@ -2129,6 +2135,8 @@ class JS:
 
 def execute(cmd, *args, **kw):
   try:
+    if mydebug:
+      print 'execute: %s' % ' '.join(cmd)
     return Popen(cmd, *args, **kw).communicate() # let compiler frontend print directly, so colors are saved (PIPE kills that)
   except:
     if not isinstance(cmd, str):
@@ -2140,6 +2148,8 @@ def check_execute(cmd, *args, **kw):
   # TODO: use in more places. execute doesn't actually check that return values
   # are nonzero
   try:
+    if mydebug:
+      print 'check_execute: %s' % ' '.join(cmd)
     subprocess.check_output(cmd, *args, **kw)
     logging.debug("Successfuly executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
@@ -2148,6 +2158,8 @@ def check_execute(cmd, *args, **kw):
 
 def check_call(cmd, *args, **kw):
   try:
+    if mydebug:
+      print 'check_call: %s' % ' '.join(cmd)
     subprocess.check_call(cmd, *args, **kw)
     logging.debug("Successfully executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
@@ -2168,6 +2180,8 @@ def unsuffixed_basename(name):
   return os.path.basename(unsuffixed(name))
 
 def safe_move(src, dst):
+  if mydebug:
+    print 'Move: mv %s %s' % (src, dst)
   src = os.path.abspath(src)
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
@@ -2177,6 +2191,8 @@ def safe_move(src, dst):
   shutil.move(src, dst)
 
 def safe_copy(src, dst):
+  if mydebug:
+    print 'Copy: mv %s %s' % (src, dst)
   src = os.path.abspath(src)
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
