@@ -55,7 +55,8 @@ class TempFiles:
         return self_.file.name
 
       def __exit__(self_, type, value, traceback):
-        try_delete(self_.file.name)
+        #try_delete(self_.file.name)
+        pass
     return TempFileObject()
 
   def get_dir(self):
