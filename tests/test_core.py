@@ -43,7 +43,7 @@ class T(RunnerCore): # Short name, to make it more fun to use manually on the co
     return 'SPLIT_MEMORY=' in str(self.emcc_args)
   def is_wasm(self):
     return 'BINARYEN' in str(self.emcc_args) or self.is_wasm_backend()
-"""
+
   def test_hello_world(self):
       test_path = path_from_root('tests', 'core', 'test_hello_world')
       src, output = (test_path + s for s in ('.in', '.out'))
@@ -1142,7 +1142,7 @@ base align: 0, 0, 0, 0'''])
       src, output = (test_path + s for s in ('.in', '.out'))
 
       self.do_run_from_file(src, output)
-"""
+
   def test_longjmp(self):
     test_path = path_from_root('tests', 'core', 'test_longjmp')
     src, output = (test_path + s for s in ('.in', '.out'))
@@ -1282,7 +1282,7 @@ int main() {
 '''
 
     self.do_run(src, r'''ok.''')
-"""
+
   def test_exceptions(self):
       Settings.EXCEPTION_DEBUG = 1
 
@@ -8191,7 +8191,7 @@ int main(int argc, char **argv) {
   def test_binaryen(self):
     self.emcc_args += ['-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="interpret-binary"']
     self.do_run(open(path_from_root('tests', 'hello_world.c')).read(), 'hello, world!')
-"""
+
 
   def test_sbrk(self):
     self.do_run(open(path_from_root('tests', 'sbrk_brk.cpp')).read(), 'OK.')
