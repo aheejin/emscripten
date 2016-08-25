@@ -104,7 +104,12 @@ test_modes = [
   'asm2f',
   'asm2g',
   'asm2i',
-  'asm2nn'
+  'asm2nn',
+  'binaryen0',
+  'binaryen1',
+  'binaryen2',
+  'binaryen3',
+  'binaryen_native'
 ]
 nondefault_test_modes = [
   'binaryen0',
