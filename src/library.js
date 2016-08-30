@@ -2634,7 +2634,7 @@ LibraryManager.library = {
   // setjmp.h
   // ==========================================================================
 
-  // asm.js-style setjmp/longjmp support for wasm
+  // asm.js-style setjmp/longjmp support for wasm binaryen backend.
   // In asm.js compilation, various variables including setjmpId will be
   // generated within 'var asm' in emscripten.py, while in wasm compilation,
   // wasm side is considered as 'asm' so they are not generated. But
@@ -2713,6 +2713,14 @@ LibraryManager.library = {
   emscripten_longjmp: function(env, value) {
     _longjmp(env, value);
   },
+#if WASM_BACKEND == 1
+  // We need this wrapper from llvm wasm backend, but this is generated only
+  // in asm.js compilation, so.
+  emscripten_longjmp__wrapper: function(env, value) {
+    _longjmp(env, value);
+  },
+#endif
+
 
   // ==========================================================================
   // sys/wait.h
