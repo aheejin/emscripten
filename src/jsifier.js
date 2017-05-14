@@ -68,6 +68,10 @@ function JSify(data, functionsOnly) {
           libFuncsToInclude.push(key);
         }
       }
+      // mark implemented functions as already added (so if memcpy is in the forced full JS library, but also done in C, we just need the C)
+      for (var added in IMPLEMENTED_FUNCTIONS) {
+        addedLibraryItems[added.substr(1)] = true;
+      }
     } else {
       libFuncsToInclude = DEFAULT_LIBRARY_FUNCS_TO_INCLUDE;
     }
@@ -292,14 +296,17 @@ function JSify(data, functionsOnly) {
         Variables.generatedGlobalBase = true;
         // Globals are done, here is the rest of static memory
         if (!SIDE_MODULE) {
-          print('STATIC_BASE = ' + Runtime.GLOBAL_BASE + ';\n');
+          print('STATIC_BASE = Runtime.GLOBAL_BASE;\n');
           print('STATICTOP = STATIC_BASE + ' + Runtime.alignMemory(Variables.nextIndexedOffset) + ';\n');
         } else {
           print('gb = Runtime.alignMemory(getMemory({{{ STATIC_BUMP }}}, ' + MAX_GLOBAL_ALIGN + ' || 1));\n');
           print('// STATICTOP = STATIC_BASE + ' + Runtime.alignMemory(Variables.nextIndexedOffset) + ';\n'); // comment as metadata only
         }
         if (BINARYEN) {
+          // export static base and bump, needed for linking in wasm binary's memory, dynamic linking, etc.
           print('var STATIC_BUMP = {{{ STATIC_BUMP }}};');
+          print('Module["STATIC_BASE"] = STATIC_BASE;');
+          print('Module["STATIC_BUMP"] = STATIC_BUMP;');
         }
       }
       var generated = itemsDict.function.concat(itemsDict.type).concat(itemsDict.GlobalVariableStub).concat(itemsDict.GlobalVariable);
@@ -384,6 +391,7 @@ function JSify(data, functionsOnly) {
       if (USE_PTHREADS) print('if (!ENVIRONMENT_IS_PTHREAD) {\n // Only main thread initializes these, pthreads copy them over at thread worker init time (in pthread-main.js)');
       print('DYNAMICTOP_PTR = allocate(1, "i32", ALLOC_STATIC);\n');
       print('STACK_BASE = STACKTOP = Runtime.alignMemory(STATICTOP);\n');
+      if (STACK_START > 0) print('if (STACKTOP < ' + STACK_START + ') STACK_BASE = STACKTOP = Runtime.alignMemory(' + STACK_START + ');\n');
       print('STACK_MAX = STACK_BASE + TOTAL_STACK;\n');
       print('DYNAMIC_BASE = Runtime.alignMemory(STACK_MAX);\n');
       print('HEAP32[DYNAMICTOP_PTR>>2] = DYNAMIC_BASE;\n');

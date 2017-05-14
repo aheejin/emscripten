@@ -1848,6 +1848,7 @@ function detectType(node, asmInfo, inVarDef) {
         if (ret !== ASM_NONE) return ret;
       }
       if (!inVarDef) {
+        if (ASM_FLOAT_ZERO && ASM_FLOAT_ZERO === node[1]) return ASM_FLOAT;
         switch (node[1]) {
           case 'inf': case 'nan': return ASM_DOUBLE; // TODO: when minified
           case 'tempRet0': return ASM_INT;
@@ -2604,6 +2605,10 @@ function registerizeHarder(ast) {
       if (type === 'new') abort = true;
     });
     if (abort) return;
+
+    // Do not process the dceable helper function for wasm, which declares
+    // types, we need to alive for asm2wasm
+    if (fun[1] == '__emscripten_dceable_type_decls') return;
 
     var asmData = normalizeAsm(fun);
 
@@ -5540,6 +5545,32 @@ function outline(ast) {
     return ret;
   }
 
+  // if we add stack usage, we must pop it too
+  function addStackPopping(func) {
+    function makePop() {
+      return ['stat', makeAssign(['name', 'STACKTOP'], ['name', 'sp'])];
+    }
+    traverse(func, function(node, type) {
+      var stats = getStatements(node);
+      if (!stats) return;
+      for (var i = 0; i < stats.length; i++) {
+        var subNode = stats[i];
+        if (subNode[0] === 'stat') subNode = subNode[1];
+        if (subNode[0] == 'return') {
+          stats.splice(i, 0, makePop());
+          i++;
+        }
+      }
+    });
+    // pop the stack at the end if there is not a return
+    var stats = getStatements(func);
+    var last = stats[stats.length-1];
+    if (last[0] === 'stat') last = last[1];
+    if (last[0] !== 'return') {
+      stats.push(makePop());
+    }
+  }
+
   //
 
   if (ast[0] !== 'toplevel') {
@@ -5599,6 +5630,8 @@ function outline(ast) {
                 }
               }
               assert(found);
+              // we also need to restore STACKTOP in each return, otherwise we leak stack
+              addStackPopping(func);
             }
           } else if (!('sp' in asmData.params)) { // if sp is a param, then we are an outlined function, no need to add stack support for us
             // add sp variable and stack bump
@@ -5609,27 +5642,7 @@ function outline(ast) {
             );
             asmData.vars.sp = ASM_INT; // no need to add to vars, we are about to denormalize anyhow
             // we added sp, so we must add stack popping
-            function makePop() {
-              return ['stat', makeAssign(['name', 'STACKTOP'], ['name', 'sp'])];
-            }
-            traverse(func, function(node, type) {
-              var stats = getStatements(node);
-              if (!stats) return;
-              for (var i = 0; i < stats.length; i++) {
-                var subNode = stats[i];
-                if (subNode[0] === 'stat') subNode = subNode[1];
-                if (subNode[0] == 'return') {
-                  stats.splice(i, 0, makePop());
-                  i++;
-                }
-              }
-            });
-            // pop the stack at the end if there is not a return
-            var last = stats[stats.length-1];
-            if (last[0] === 'stat') last = last[1];
-            if (last[0] !== 'return') {
-              stats.push(makePop());
-            }
+            addStackPopping(func);
           }
         }
         if (ret) {
@@ -6640,7 +6653,9 @@ function emterpretify(ast) {
             if (type === ASM_INT) {
               opcode = 'ADD';
               tryNumSymmetrical();
-            } else if (type === ASM_DOUBLE) opcode = 'ADDD';
+            } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+              opcode = 'ADDD';
+            }
             break;
           }
         }
@@ -6648,14 +6663,18 @@ function emterpretify(ast) {
           if (type === ASM_INT) {
             opcode = 'SUB';
             tryNumAsymmetrical();
-          } else if (type === ASM_DOUBLE) opcode = 'SUBD';
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'SUBD';
+          }
           break;
         }
         case '*': {
           if (type === ASM_INT) {
             opcode = 'MUL';
             tryNumSymmetrical();
-          } else if (type === ASM_DOUBLE) opcode = 'MULD';
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'MULD';
+          }
           break;
         }
         case '/': {
@@ -6664,8 +6683,9 @@ function emterpretify(ast) {
             if (sign === ASM_SIGNED) opcode = 'SDIV';
             else opcode = 'UDIV';
             tryNumAsymmetrical(sign === ASM_UNSIGNED);
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'DIVD';
           }
-          else if (type === ASM_DOUBLE) opcode = 'DIVD';
           break;
         }
         case '%': {
@@ -6674,8 +6694,9 @@ function emterpretify(ast) {
             if (sign === ASM_SIGNED) opcode = 'SMOD';
             else opcode = 'UMOD';
             tryNumAsymmetrical(sign === ASM_UNSIGNED);
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'MODD';
           }
-          else if (type === ASM_DOUBLE) opcode = 'MODD';
           break;
         }
         case '<': {
@@ -6684,8 +6705,9 @@ function emterpretify(ast) {
             if (sign === ASM_SIGNED) opcode = 'SLT';
             else opcode = 'ULT';
             tryNumAsymmetrical(sign === ASM_UNSIGNED);
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'LTD';
           }
-          else if (type === ASM_DOUBLE) opcode = 'LTD';
           break;
         }
         case '<=': {
@@ -6694,17 +6716,18 @@ function emterpretify(ast) {
             if (sign === ASM_SIGNED) opcode = 'SLE';
             else opcode = 'ULE';
             tryNumAsymmetrical(sign === ASM_UNSIGNED);
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'LED';
           }
-          else if (type === ASM_DOUBLE) opcode = 'LED';
           break;
         }
         case '>': {
-          assert(type === ASM_DOUBLE);
+          assert(type === ASM_DOUBLE || type === ASM_FLOAT);
           opcode = 'GTD';
           break;
         }
         case '>=': {
-          assert(type === ASM_DOUBLE);
+          assert(type === ASM_DOUBLE || type === ASM_FLOAT);
           opcode = 'GED';
           break;
         }
@@ -6712,14 +6735,18 @@ function emterpretify(ast) {
           if (type === ASM_INT) {
             opcode = 'EQ';
             tryNumSymmetrical();
-          } else if (type === ASM_DOUBLE) opcode = 'EQD';
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'EQD';
+          }
           break;
         }
         case '!=': {
           if (type === ASM_INT) {
             opcode = 'NE';
             tryNumSymmetrical();
-          } else if (type === ASM_DOUBLE) opcode = 'NED';
+          } else if (type === ASM_DOUBLE || type === ASM_FLOAT) {
+            opcode = 'NED';
+          }
           break;
         }
         case '&': opcode = 'AND'; tryNumSymmetrical(); break;
@@ -6730,7 +6757,7 @@ function emterpretify(ast) {
         case '>>>': opcode = 'LSHR'; tryNumAsymmetrical(true); break;
         default: throw 'bad ' + node[1];
       }
-      if (!opcode) assert(0, JSON.stringify([node, type, sign]));
+      assert(opcode, 'failed to find the proper opcode in makeBinary: ' + JSON.stringify([node, type, sign]));
       var x, y, z;
       var usingNumValue = numValue !== null && ((!numValueUnsigned && ((numValue << 24 >> 24) === numValue)) ||
                                                 ( numValueUnsigned && ((numValue & 255) === numValue)));
@@ -7713,16 +7740,22 @@ function eliminateDeadGlobals(ast) {
     for (var i = 0; i < stats.length; i++) {
       var asmFunc = stats[i];
       if (asmFunc[0] === 'defun') {
-        var asmData = normalizeAsm(asmFunc);
+        // the memory growth function does not contain valid asm.js, and can be ignored
+        var isAsmJS = asmFunc[1] !== '_emscripten_replace_memory';
+        if (isAsmJS) {
+          var asmData = normalizeAsm(asmFunc);
+        }
         traverse(asmFunc, function(node, type) {
           if (type == 'name') {
             var name = node[1];
-            if (!(name in asmData.params || name in asmData.vars)) {
+            if (!isAsmJS || !(name in asmData.params || name in asmData.vars)) {
               used[name] = 1;
             }
           }
         });
-        denormalizeAsm(asmFunc, asmData);
+        if (isAsmJS) {
+          denormalizeAsm(asmFunc, asmData);
+        }
       } else {
         traverse(asmFunc, function(node, type) {
           if (type == 'name') {
@@ -7794,14 +7827,31 @@ function JSDCE(ast) {
     });
     return ast;
   }
+  var isVarNameOrObjectKeys = [];
+  // isVarNameOrObjectKeys is a stack which saves the state the node is defining a variable or in an object literal.
+  // the second argument `type` passed into the callback function called by traverse() could be a variable name or object key name.
+  // You cannot distinguish the `type` is a real type or not without isVarNameOrObjectKeys.
+  // ex.) var name = true;          // `type` can be 'name'
+  //      var obj = { defun: true } // `type` can be 'defun'
   traverse(ast, function(node, type) {
+    if (isVarNameOrObjectKeys[isVarNameOrObjectKeys.length - 1]) { // check parent node defines a variable or is an object literal
+      // `type` is a variable name or an object key name
+      isVarNameOrObjectKeys.push(false); // doesn't define a variable nor be an object literal
+      return;
+    }
     if (type === 'var') {
       node[1].forEach(function(varItem, j) {
         var name = varItem[0];
         ensureData(scopes[scopes.length-1], name).def = 1;
       });
+      isVarNameOrObjectKeys.push(true); // this `node` defines a varible
       return;
     }
+    if (type === 'object') {
+      isVarNameOrObjectKeys.push(true); // this `node` is an object literal
+      return;
+    }
+    isVarNameOrObjectKeys.push(false); // doesn't define a variable nor be an object literal
     if (type === 'defun' || type === 'function') {
       if (node[1]) ensureData(scopes[scopes.length-1], node[1]).def = 1;
       var scope = {};
@@ -7816,6 +7866,8 @@ function JSDCE(ast) {
       ensureData(scopes[scopes.length-1], node[1]).use = 1;
     }
   }, function(node, type) {
+    isVarNameOrObjectKeys.pop();
+    if (isVarNameOrObjectKeys[isVarNameOrObjectKeys.length - 1]) return; // `type` is a variable name or an object key name
     if (type === 'defun' || type === 'function') {
       var scope = scopes.pop();
       var names = set();

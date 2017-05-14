@@ -30,6 +30,8 @@ var LibraryPThreadStub = {
   pthread_mutex_init: function() {},
   pthread_mutex_destroy: function() {},
   pthread_mutexattr_init: function() {},
+  pthread_mutexattr_setschedparam: function() {},
+  pthread_mutexattr_setprotocol: function() {},
   pthread_mutexattr_settype: function() {},
   pthread_mutexattr_destroy: function() {},
 
@@ -77,12 +79,6 @@ var LibraryPThreadStub = {
     return 0;
   },
 
-  pthread_self__asm: true,
-  pthread_self__sig: 'i',
-  pthread_self: function() {
-    return 0;
-  },
-
   pthread_attr_init: function(attr) {
     /* int pthread_attr_init(pthread_attr_t *attr); */
     //FIXME: should allocate a pthread_attr_t
@@ -108,10 +104,12 @@ var LibraryPThreadStub = {
     return 0;
   },
 
+  pthread_setcancelstate: function() { return 0; },
+
   pthread_once: function(ptr, func) {
     if (!_pthread_once.seen) _pthread_once.seen = {};
     if (ptr in _pthread_once.seen) return;
-    Runtime.dynCall('v', func);
+    Module['dynCall_v'](func);
     _pthread_once.seen[ptr] = 1;
   },
 
@@ -153,7 +151,7 @@ var LibraryPThreadStub = {
   },
 
   pthread_cleanup_push: function(routine, arg) {
-    __ATEXIT__.push(function() { Runtime.dynCall('vi', routine, [arg]) })
+    __ATEXIT__.push(function() { Module['dynCall_vi'](routine, arg) })
     _pthread_cleanup_push.level = __ATEXIT__.length;
   },
 
@@ -185,15 +183,27 @@ var LibraryPThreadStub = {
   pthread_spin_unlock: function() { return 0; },
 
   pthread_attr_setdetachstate: function() {},
+  pthread_attr_setschedparam: function() {},
+  pthread_attr_setstacksize: function() {},
 
   pthread_create: function() {
     return {{{ cDefine('EAGAIN') }}};
   },
-  pthread_exit: function() {},
+  pthread_cancel: function() {},
+  pthread_exit__deps: ['exit'],
+  pthread_exit: function(status) {
+    _exit(status);
+  },
 
   pthread_equal: function() {},
   pthread_join: function() {},
   pthread_detach: function() {},
+
+  sem_init: function() {},
+  sem_post: function() {},
+  sem_wait: function() {},
+  sem_trywait: function() {},
+  sem_destroy: function() {},
 
   // When pthreads is not enabled, we can't use the Atomics futex api to do proper sleeps, so simulate a busy spin wait loop instead.
   usleep: function(useconds) {
@@ -213,6 +223,18 @@ var LibraryPThreadStub = {
       }
     }
     return 0;
+  },
+
+  nanosleep__deps: ['usleep'],
+  nanosleep: function(rqtp, rmtp) {
+    // int nanosleep(const struct timespec  *rqtp, struct timespec *rmtp);
+    var seconds = {{{ makeGetValue('rqtp', C_STRUCTS.timespec.tv_sec, 'i32') }}};
+    var nanoseconds = {{{ makeGetValue('rqtp', C_STRUCTS.timespec.tv_nsec, 'i32') }}};
+    if (rmtp !== 0) {
+      {{{ makeSetValue('rmtp', C_STRUCTS.timespec.tv_sec, '0', 'i32') }}};
+      {{{ makeSetValue('rmtp', C_STRUCTS.timespec.tv_nsec, '0', 'i32') }}};
+    }
+    return _usleep((seconds * 1e6) + (nanoseconds / 1000));
   },
 
   llvm_memory_barrier: function(){},
@@ -315,6 +337,8 @@ var LibraryPThreadStub = {
   _emscripten_atomic_fetch_and_and_u64: '__atomic_fetch_and_8',
   _emscripten_atomic_fetch_and_or_u64: '__atomic_fetch_or_8',
   _emscripten_atomic_fetch_and_xor_u64: '__atomic_fetch_xor_8',
+
+  __wait: function() {},
 };
 
 mergeInto(LibraryManager.library, LibraryPThreadStub);

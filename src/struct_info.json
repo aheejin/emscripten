@@ -467,7 +467,8 @@
             "F_GETOWN_EX",
             "F_SETFD", 
             "O_EXCL", 
-            "F_GETFL"
+            "F_GETFL",
+            "O_LARGEFILE"
         ],
         "structs": {}
     }, 
@@ -491,7 +492,8 @@
             "TCGETS",
             "TCSETS",
             "TIOCGPGRP",
-            "TIOCSPGRP"
+            "TIOCSPGRP",
+            "TIOCGWINSZ"
         ],
         "structs": {}
     }, 
@@ -1451,7 +1453,6 @@
             "EM_PROXIED_FPATHCONF",
             "EM_PROXIED_CONFSTR",
             "EM_PROXIED_SYSCONF",
-            "EM_PROXIED_SBRK",
             "EM_PROXIED_ATEXIT",
             "EM_PROXIED_GETENV",
             "EM_PROXIED_CLEARENV",
@@ -1483,10 +1484,21 @@
               "stack",
               "stack_size",
               "attr",
+              "robust_list",
               "tid",
               "pid",
               "canceldisable",
-              "cancelasync"
+              "cancelasync",
+              "locale"
+            ]
+        },
+        "defines": []
+    },
+    {
+        "file": "../lib/libc/musl/src/internal/libc.h",
+        "structs": {
+            "libc": [
+              "global_locale"
             ]
         },
         "defines": []

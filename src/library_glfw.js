@@ -57,6 +57,7 @@ var LibraryGLFW = {
       };
       this.buttons = 0;
       this.keys = new Array();
+      this.domKeys = new Array();
       this.shouldClose = 0;
       this.title = null;
       this.windowPosFunc = null; // GLFWwindowposfun
@@ -135,6 +136,7 @@ var LibraryGLFW = {
         case 0xDE:return 39; // DOM_VK_QUOTE -> GLFW_KEY_APOSTROPHE
         case 0xBC:return 44; // DOM_VK_COMMA -> GLFW_KEY_COMMA
         case 0xAD:return 45; // DOM_VK_HYPHEN_MINUS -> GLFW_KEY_MINUS
+        case 0xBD:return 45; // DOM_VK_MINUS -> GLFW_KEY_MINUS
         case 0xBE:return 46; // DOM_VK_PERIOD -> GLFW_KEY_PERIOD
         case 0xBF:return 47; // DOM_VK_SLASH -> GLFW_KEY_SLASH
         case 0x30:return 48; // DOM_VK_0 -> GLFW_KEY_0
@@ -148,7 +150,8 @@ var LibraryGLFW = {
         case 0x38:return 56; // DOM_VK_8 -> GLFW_KEY_8
         case 0x39:return 57; // DOM_VK_9 -> GLFW_KEY_9
         case 0x3B:return 59; // DOM_VK_SEMICOLON -> GLFW_KEY_SEMICOLON
-        case 0x61:return 61; // DOM_VK_EQUALS -> GLFW_KEY_EQUAL
+        case 0x3D:return 61; // DOM_VK_EQUALS -> GLFW_KEY_EQUAL
+        case 0xBB:return 61; // DOM_VK_EQUALS -> GLFW_KEY_EQUAL
         case 0x41:return 65; // DOM_VK_A -> GLFW_KEY_A
         case 0x42:return 66; // DOM_VK_B -> GLFW_KEY_B
         case 0x43:return 67; // DOM_VK_C -> GLFW_KEY_C
@@ -208,10 +211,10 @@ var LibraryGLFW = {
         case 0x86:return (256+24); // DOM_VK_F23 -> GLFW_KEY_F23
         case 0x87:return (256+25); // DOM_VK_F24 -> GLFW_KEY_F24
         case 0x88:return (256+26); // 0x88 (not used?) -> GLFW_KEY_F25
-        case 0x27:return (256+27); // DOM_VK_RIGHT -> GLFW_KEY_RIGHT
-        case 0x25:return (256+28); // DOM_VK_LEFT -> GLFW_KEY_LEFT
-        case 0x28:return (256+29); // DOM_VK_DOWN -> GLFW_KEY_DOWN
-        case 0x26:return (256+30); // DOM_VK_UP -> GLFW_KEY_UP
+        case 0x27:return (256+30); // DOM_VK_RIGHT -> GLFW_KEY_RIGHT
+        case 0x25:return (256+29); // DOM_VK_LEFT -> GLFW_KEY_LEFT
+        case 0x28:return (256+28); // DOM_VK_DOWN -> GLFW_KEY_DOWN
+        case 0x26:return (256+27); // DOM_VK_UP -> GLFW_KEY_UP
         case 0x10:return (256+31); // DOM_VK_SHIFT -> GLFW_KEY_LSHIFT
         // #define GLFW_KEY_RSHIFT       (GLFW_KEY_SPECIAL+32)
         case 0x11:return (256+33); // DOM_VK_CONTROL -> GLFW_KEY_LCTRL
@@ -341,44 +344,46 @@ var LibraryGLFW = {
 
     onKeyPress: function(event) {
       if (!GLFW.active || !GLFW.active.charFunc) return;
+      if (event.ctrlKey || event.metaKey) return;
 
       // correct unicode charCode is only available with onKeyPress event
       var charCode = event.charCode;
       if (charCode == 0 || (charCode >= 0x00 && charCode <= 0x1F)) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vii', GLFW.active.charFunc, [charCode, 1]);
+      Module['dynCall_vii'](GLFW.active.charFunc, charCode, 1);
 #endif
 
 #if USE_GLFW == 3
-      Runtime.dynCall('vii', GLFW.active.charFunc, [GLFW.active.id, charCode]);
+      Module['dynCall_vii'](GLFW.active.charFunc, GLFW.active.id, charCode);
 #endif
     },
 
-    onKeyChanged: function(event, status) {
+    onKeyChanged: function(keyCode, status) {
       if (!GLFW.active) return;
 
-      var key = GLFW.DOMToGLFWKeyCode(event.keyCode);
+      var key = GLFW.DOMToGLFWKeyCode(keyCode);
       if (key == -1) return;
 
 #if USE_GLFW == 3
       var repeat = status && GLFW.active.keys[key];
 #endif
       GLFW.active.keys[key] = status;
+      GLFW.active.domKeys[keyCode] = status;
       if (!GLFW.active.keyFunc) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vii', GLFW.active.keyFunc, [key, status]);
+      Module['dynCall_vii'](GLFW.active.keyFunc, key, status);
 #endif
 
 #if USE_GLFW == 3
       if (repeat) status = 2; // GLFW_REPEAT
-      Runtime.dynCall('viiiii', GLFW.active.keyFunc, [GLFW.active.id, key, event.keyCode, status, GLFW.getModBits(GLFW.active)]);
+      Module['dynCall_viiiii'](GLFW.active.keyFunc, GLFW.active.id, key, keyCode, status, GLFW.getModBits(GLFW.active));
 #endif
     },
 
     onKeydown: function(event) {
-      GLFW.onKeyChanged(event, 1); // GLFW_PRESS or GLFW_REPEAT
+      GLFW.onKeyChanged(event.keyCode, 1); // GLFW_PRESS or GLFW_REPEAT
 
       // This logic comes directly from the sdl implementation. We cannot
       // call preventDefault on all keydown events otherwise onKeyPress will
@@ -389,7 +394,17 @@ var LibraryGLFW = {
     },
 
     onKeyup: function(event) {
-      GLFW.onKeyChanged(event, 0); // GLFW_RELEASE
+      GLFW.onKeyChanged(event.keyCode, 0); // GLFW_RELEASE
+    },
+
+    onBlur: function(event) {
+      if (!GLFW.active) return;
+
+      for (var i = 0; i < GLFW.active.domKeys.length; ++i) {
+        if (GLFW.active.domKeys[i]) {
+          GLFW.onKeyChanged(i, 0); // GLFW_RELEASE
+        }
+      }
     },
 
     onMousemove: function(event) {
@@ -400,12 +415,26 @@ var LibraryGLFW = {
       if (event.target != Module["canvas"] || !GLFW.active.cursorPosFunc) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vii', GLFW.active.cursorPosFunc, [Browser.mouseX, Browser.mouseY]);
+      Module['dynCall_vii'](GLFW.active.cursorPosFunc, Browser.mouseX, Browser.mouseY);
 #endif
 
 #if USE_GLFW == 3
-      Runtime.dynCall('vidd', GLFW.active.cursorPosFunc, [GLFW.active.id, Browser.mouseX, Browser.mouseY]);
+      Module['dynCall_vidd'](GLFW.active.cursorPosFunc, GLFW.active.id, Browser.mouseX, Browser.mouseY);
 #endif
+    },
+
+    DOMToGLFWMouseButton: function(event) {
+      // DOM and glfw have different button codes.
+      // See http://www.w3schools.com/jsref/event_button.asp.
+      var eventButton = event['button'];
+      if (eventButton > 0) {
+        if (eventButton == 1) {
+          eventButton = 2;
+        } else {
+          eventButton = 1;
+        }
+      }
+      return eventButton;
     },
 
     onMouseenter: function(event) {
@@ -414,7 +443,7 @@ var LibraryGLFW = {
       if (event.target != Module["canvas"] || !GLFW.active.cursorEnterFunc) return;
 
 #if USE_GLFW == 3
-      Runtime.dynCall('vii', GLFW.active.cursorEnterFunc, [GLFW.active.id, 1]);
+      Module['dynCall_vii'](GLFW.active.cursorEnterFunc, GLFW.active.id, 1);
 #endif
     },
 
@@ -424,51 +453,46 @@ var LibraryGLFW = {
       if (event.target != Module["canvas"] || !GLFW.active.cursorEnterFunc) return;
 
 #if USE_GLFW == 3
-      Runtime.dynCall('vii', GLFW.active.cursorEnterFunc, [GLFW.active.id, 0]);
+      Module['dynCall_vii'](GLFW.active.cursorEnterFunc, GLFW.active.id, 0);
 #endif
     },
 
     onMouseButtonChanged: function(event, status) {
-      if (!GLFW.active || !GLFW.active.mouseButtonFunc) return;
+      if (!GLFW.active) return;
 
       Browser.calculateMouseEvent(event);
 
       if (event.target != Module["canvas"]) return;
 
+      eventButton = GLFW.DOMToGLFWMouseButton(event);
+
       if (status == 1) { // GLFW_PRESS
+        GLFW.active.buttons |= (1 << eventButton);
         try {
           event.target.setCapture();
         } catch (e) {}
+      } else {  // GLFW_RELEASE
+        GLFW.active.buttons &= ~(1 << eventButton);
       }
 
-      // DOM and glfw have different button codes
-      var eventButton = event['button'];
-      if (eventButton > 0) {
-        if (eventButton == 1) {
-          eventButton = 2;
-        } else {
-          eventButton = 1;
-        }
-      }
+      if (!GLFW.active.mouseButtonFunc) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vii', GLFW.active.mouseButtonFunc, [eventButton, status]);
+      Module['dynCall_vii'](GLFW.active.mouseButtonFunc, eventButton, status);
 #endif
 
 #if USE_GLFW == 3
-      Runtime.dynCall('viiii', GLFW.active.mouseButtonFunc, [GLFW.active.id, eventButton, status, GLFW.getModBits(GLFW.active)]);
+      Module['dynCall_viiii'](GLFW.active.mouseButtonFunc, GLFW.active.id, eventButton, status, GLFW.getModBits(GLFW.active));
 #endif
     },
 
     onMouseButtonDown: function(event) {
       if (!GLFW.active) return;
-      GLFW.active.buttons |= (1 << event['button']);
       GLFW.onMouseButtonChanged(event, 1); // GLFW_PRESS
     },
 
     onMouseButtonUp: function(event) {
       if (!GLFW.active) return;
-      GLFW.active.buttons &= ~(1 << event['button']);
       GLFW.onMouseButtonChanged(event, 0); // GLFW_RELEASE
     },
 
@@ -481,7 +505,7 @@ var LibraryGLFW = {
       if (!GLFW.active || !GLFW.active.scrollFunc || event.target != Module['canvas']) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vi', GLFW.active.scrollFunc, [GLFW.wheelPos]);
+      Module['dynCall_vi'](GLFW.active.scrollFunc, GLFW.wheelPos);
 #endif
 
 #if USE_GLFW == 3
@@ -495,7 +519,7 @@ var LibraryGLFW = {
         sy = event.deltaY;
       }
 
-      Runtime.dynCall('vidd', GLFW.active.scrollFunc, [GLFW.active.id, sx, sy]);
+      Module['dynCall_vidd'](GLFW.active.scrollFunc, GLFW.active.id, sx, sy);
 #endif
 
       event.preventDefault();
@@ -536,7 +560,7 @@ var LibraryGLFW = {
       // If any of the above conditions were true, we need to resize the canvas
       if (resizeNeeded) {
         // resets the canvas size to counter the aspect preservation of Browser.updateCanvasDimensions
-        Browser.setCanvasSize(GLFW.active.width, GLFW.active.height);
+        Browser.setCanvasSize(GLFW.active.width, GLFW.active.height, true);
         // TODO: Client dimensions (clientWidth/clientHeight) vs pixel dimensions (width/height) of
         // the canvas should drive window and framebuffer size respectfully.
         GLFW.onWindowSizeChanged();
@@ -550,11 +574,11 @@ var LibraryGLFW = {
       if (!GLFW.active.windowSizeFunc) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vii', GLFW.active.windowSizeFunc, [GLFW.active.width, GLFW.active.height]);
+      Module['dynCall_vii'](GLFW.active.windowSizeFunc, GLFW.active.width, GLFW.active.height);
 #endif
 
 #if USE_GLFW == 3
-      Runtime.dynCall('viii', GLFW.active.windowSizeFunc, [GLFW.active.id, GLFW.active.width, GLFW.active.height]);
+      Module['dynCall_viii'](GLFW.active.windowSizeFunc, GLFW.active.id, GLFW.active.width, GLFW.active.height);
 #endif
     },
 
@@ -564,7 +588,7 @@ var LibraryGLFW = {
       if (!GLFW.active.framebufferSizeFunc) return;
 
 #if USE_GLFW == 3
-      Runtime.dynCall('viii', GLFW.active.framebufferSizeFunc, [GLFW.active.id, GLFW.active.width, GLFW.active.height]);
+      Module['dynCall_viii'](GLFW.active.framebufferSizeFunc, GLFW.active.id, GLFW.active.width, GLFW.active.height);
 #endif
     },
 
@@ -658,7 +682,7 @@ var LibraryGLFW = {
       // function returns.
       // GLFW3 on the over hand doesn't have this behavior (https://github.com/glfw/glfw/issues/62).
       if (!win.windowSizeFunc) return;
-      Runtime.dynCall('vii', win.windowSizeFunc, [win.width, win.height]);
+      Module['dynCall_vii'](win.windowSizeFunc, win.width, win.height);
 #endif
     },
 
@@ -804,11 +828,11 @@ var LibraryGLFW = {
       if (!win.windowSizeFunc) return;
 
 #if USE_GLFW == 2
-      Runtime.dynCall('vii', win.windowSizeFunc, [width, height]);
+      Module['dynCall_vii'](win.windowSizeFunc, width, height);
 #endif
 
 #if USE_GLFW == 3
-      Runtime.dynCall('viii', win.windowSizeFunc, [win.id, width, height]);
+      Module['dynCall_viii'](win.windowSizeFunc, win.id, width, height);
 #endif
     },
 
@@ -864,7 +888,7 @@ var LibraryGLFW = {
 
 #if USE_GLFW == 3
       if (win.windowCloseFunc)
-        Runtime.dynCall('vi', win.windowCloseFunc, [win.id]);
+        Module['dynCall_vi'](win.windowCloseFunc, win.id);
 #endif
 
       GLFW.windows[win.id - 1] = null;
@@ -933,6 +957,7 @@ var LibraryGLFW = {
     window.addEventListener("keydown", GLFW.onKeydown, true);
     window.addEventListener("keypress", GLFW.onKeyPress, true);
     window.addEventListener("keyup", GLFW.onKeyup, true);
+    window.addEventListener("blur", GLFW.onBlur, true);
     Module["canvas"].addEventListener("mousemove", GLFW.onMousemove, true);
     Module["canvas"].addEventListener("mousedown", GLFW.onMouseButtonDown, true);
     Module["canvas"].addEventListener("mouseup", GLFW.onMouseButtonUp, true);
@@ -951,6 +976,7 @@ var LibraryGLFW = {
     window.removeEventListener("keydown", GLFW.onKeydown, true);
     window.removeEventListener("keypress", GLFW.onKeyPress, true);
     window.removeEventListener("keyup", GLFW.onKeyup, true);
+    window.removeEventListener("blur", GLFW.onBlur, true);
     Module["canvas"].removeEventListener("mousemove", GLFW.onMousemove, true);
     Module["canvas"].removeEventListener("mousedown", GLFW.onMouseButtonDown, true);
     Module["canvas"].removeEventListener("mouseup", GLFW.onMouseButtonUp, true);
@@ -972,8 +998,8 @@ var LibraryGLFW = {
 
 #if USE_GLFW == 3
     setValue(major, 3, 'i32');
-    setValue(minor, 0, 'i32');
-    setValue(rev, 0, 'i32');
+    setValue(minor, 2, 'i32');
+    setValue(rev, 1, 'i32');
 #endif
   },
 
@@ -1016,7 +1042,7 @@ var LibraryGLFW = {
 #if USE_GLFW == 3
   glfwGetVersionString: function() {
     if (!GLFW.versionString) {
-      GLFW.versionString = allocate(intArrayFromString("3.0.0 JS WebGL Emscripten"), 'i8', ALLOC_NORMAL);
+      GLFW.versionString = allocate(intArrayFromString("3.2.1 JS WebGL Emscripten"), 'i8', ALLOC_NORMAL);
     }
     return GLFW.versionString;
   },
@@ -1024,6 +1050,10 @@ var LibraryGLFW = {
   glfwSetErrorCallback: function(cbfun) {
     GLFW.errorFunc = cbfun;
   },
+
+  glfwWaitEventsTimeout: function(timeout) {},
+
+  glfwPostEmptyEvent: function() {},
 
   glfwGetMonitors: function(count) {
     setValue(count, 1, 'i32');
@@ -1210,6 +1240,28 @@ var LibraryGLFW = {
     win.windowIconifyFunc = cbfun;
   },
 
+  glfwSetWindowIcon: function(winid, count, images) {},
+
+  glfwSetWindowSizeLimits: function(winid, minwidth, minheight, maxwidth, maxheight) {},
+
+  glfwSetWindowAspectRatio: function(winid, numer, denom) {},
+
+  glfwGetWindowFrameSize: function(winid, left, top, right, bottom) { throw "glfwGetWindowFrameSize not implemented."; },
+
+  glfwMaximizeWindow: function(winid) {},
+
+  glfwFocusWindow: function(winid) {},
+
+  glfwSetWindowMonitor: function(winid, monitor, xpos, ypos, width, height, refreshRate) { throw "glfwSetWindowMonitor not implemented."; },
+
+  glfwCreateCursor: function(image, xhot, yhot) {},
+
+  glfwCreateStandardCursor: function(shape) {},
+
+  glfwDestroyCursor: function(cursor) {},
+
+  glfwSetCursor: function(winid, cursor) {},
+
   glfwSetFramebufferSizeCallback: function(winid, cbfun) {
     var win = GLFW.WindowFromId(winid);
     if (!win) return;
@@ -1219,6 +1271,17 @@ var LibraryGLFW = {
   glfwGetInputMode: function(winid, mode) {
     var win = GLFW.WindowFromId(winid);
     if (!win) return;
+
+    switch (mode) {
+      case 0x00033001: { // GLFW_CURSOR
+        if (Browser.pointerLock) {
+          win.inputModes[mode] = 0x00034003; // GLFW_CURSOR_DISABLED
+        } else {
+          win.inputModes[mode] = 0x00034001; // GLFW_CURSOR_NORMAL
+        }
+      }
+    }
+
     return win.inputModes[mode];
   },
 
@@ -1229,6 +1292,8 @@ var LibraryGLFW = {
   glfwGetKey: function(winid, key) {
     return GLFW.getKey(winid, key);
   },
+
+  glfwGetKeyName: function(key, scancode) { throw "glfwGetKeyName not implemented."; },
 
   glfwGetMouseButton: function(winid, button) {
     return GLFW.getMouseButton(winid, button);
@@ -1251,6 +1316,8 @@ var LibraryGLFW = {
     GLFW.setCharCallback(winid, cbfun);
   },
 
+  glfwSetCharModsCallback: function(winid, cbfun) { throw "glfwSetCharModsCallback not implemented."; },
+
   glfwSetMouseButtonCallback: function(winid, cbfun) {
     GLFW.setMouseButtonCallback(winid, cbfun);
   },
@@ -1268,6 +1335,26 @@ var LibraryGLFW = {
   glfwSetScrollCallback: function(winid, cbfun) {
     GLFW.setScrollCallback(winid, cbfun);
   },
+
+  glfwVulkanSupported: function() {
+    return 0;
+  },
+
+  glfwSetDropCallback: function(winid, cbfun) { throw "glfwSetDropCallback is not implemented."; },
+
+  glfwGetTimerValue: function() { throw "glfwGetTimerValue is not implemented."; },
+
+  glfwGetTimerFrequency: function() { throw "glfwGetTimerFrequency is not implemented."; },
+
+  glfwGetRequiredInstanceExtensions: function(count) { throw "glfwGetRequiredInstanceExtensions is not implemented."; },
+
+  glfwGetInstanceProcAddress: function(instance, procname) { throw "glfwGetInstanceProcAddress is not implemented."; },
+
+  glfwGetPhysicalDevicePresentationSupport: function(instance, device, queuefamily) { throw "glfwGetPhysicalDevicePresentationSupport is not implemented"; },
+
+  glfwCreateWindowSurface: function(instance, winid, allocator, surface) { throw "glfwCreateWindowSurface is not implemented."; },
+
+  glfwSetJoystickCallback: function(cbfun) { throw "glfwSetJoystickCallback is not implemented."; },
 
   glfwJoystickPresent: function(joy) { throw "glfwJoystickPresent is not implemented."; },
 

@@ -289,7 +289,19 @@ LibraryManager.library = {
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/sysconf.html
     switch(name) {
       case {{{ cDefine('_SC_PAGE_SIZE') }}}: return PAGE_SIZE;
-      case {{{ cDefine('_SC_PHYS_PAGES') }}}: return totalMemory / PAGE_SIZE;
+      case {{{ cDefine('_SC_PHYS_PAGES') }}}:
+#if BINARYEN
+        var maxHeapSize = 2*1024*1024*1024 - 65536;
+#else
+        var maxHeapSize = 2*1024*1024*1024 - 16777216;
+#endif
+#if BINARYEN_MEM_MAX != -1
+        maxHeapSize = {{{ BINARYEN_MEM_MAX }}};
+#endif
+#if !ALLOW_MEMORY_GROWTH
+        maxHeapSize = HEAPU8.length;
+#endif
+        return maxHeapSize / PAGE_SIZE;
       case {{{ cDefine('_SC_ADVISORY_INFO') }}}:
       case {{{ cDefine('_SC_BARRIERS') }}}:
       case {{{ cDefine('_SC_ASYNCHRONOUS_IO') }}}:
@@ -449,7 +461,7 @@ LibraryManager.library = {
     // Perform a compare-and-swap loop to update the new dynamic top value. This is because
     // this function can becalled simultaneously in multiple threads.
     do {
-      oldDynamicTop = Atomics_load(HEAP32, DYNAMICTOP_PTR>>2);
+      oldDynamicTop = Atomics_load(HEAP32, DYNAMICTOP_PTR>>2)|0;
       newDynamicTop = oldDynamicTop + increment | 0;
       // Asking to increase dynamic top to a too high value? In pthreads builds we cannot
       // enlarge memory, so this needs to fail.
@@ -465,7 +477,7 @@ LibraryManager.library = {
       }
       // Attempt to update the dynamic top to new value. Another thread may have beat this thread to the update,
       // in which case we will need to start over by iterating the loop body again.
-      oldDynamicTopOnChange = Atomics_compareExchange(HEAP32, DYNAMICTOP_PTR>>2, oldDynamicTop|0, newDynamicTop|0);
+      oldDynamicTopOnChange = Atomics_compareExchange(HEAP32, DYNAMICTOP_PTR>>2, oldDynamicTop|0, newDynamicTop|0)|0;
     } while((oldDynamicTopOnChange|0) != (oldDynamicTop|0));
 #else // singlethreaded build: (-s USE_PTHREADS=0)
     oldDynamicTop = HEAP32[DYNAMICTOP_PTR>>2]|0;
@@ -511,7 +523,7 @@ LibraryManager.library = {
       return -1;
 #endif
     }
-    Atomics_store(HEAP32, DYNAMICTOP_PTR>>2, newDynamicTop|0);
+    Atomics_store(HEAP32, DYNAMICTOP_PTR>>2, newDynamicTop|0)|0;
 #else // singlethreaded build: (-s USE_PTHREADS=0)
     if ((newDynamicTop|0) < 0) {
 #if ABORTING_MALLOC
@@ -804,9 +816,24 @@ LibraryManager.library = {
   memcpy: function(dest, src, num) {
     dest = dest|0; src = src|0; num = num|0;
     var ret = 0;
-    if ((num|0) >= 4096) return _emscripten_memcpy_big(dest|0, src|0, num|0)|0;
+    var aligned_dest_end = 0;
+    var block_aligned_dest_end = 0;
+    var dest_end = 0;
+    // Test against a benchmarked cutoff limit for when HEAPU8.set() becomes faster to use.
+    if ((num|0) >=
+#if SIMD
+      196608
+#else
+      8192
+#endif
+    ) {
+      return _emscripten_memcpy_big(dest|0, src|0, num|0)|0;
+    }
+
     ret = dest|0;
+    dest_end = (dest + num)|0;
     if ((dest&3) == (src&3)) {
+      // The initial unaligned < 4-byte front.
       while (dest & 3) {
         if ((num|0) == 0) return ret|0;
         {{{ makeSetValueAsm('dest', 0, makeGetValueAsm('src', 0, 'i8'), 'i8') }}};
@@ -814,18 +841,57 @@ LibraryManager.library = {
         src = (src+1)|0;
         num = (num-1)|0;
       }
-      while ((num|0) >= 4) {
+      aligned_dest_end = (dest_end & -4)|0;
+      block_aligned_dest_end = (aligned_dest_end - 64)|0;
+      while ((dest|0) <= (block_aligned_dest_end|0) ) {
+#if SIMD
+        SIMD_Int32x4_store(HEAPU8, dest, SIMD_Int32x4_load(HEAPU8, src));
+        SIMD_Int32x4_store(HEAPU8, dest+16, SIMD_Int32x4_load(HEAPU8, src+16));
+        SIMD_Int32x4_store(HEAPU8, dest+32, SIMD_Int32x4_load(HEAPU8, src+32));
+        SIMD_Int32x4_store(HEAPU8, dest+48, SIMD_Int32x4_load(HEAPU8, src+48));
+#else
+        {{{ makeSetValueAsm('dest', 0, makeGetValueAsm('src', 0, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 4, makeGetValueAsm('src', 4, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 8, makeGetValueAsm('src', 8, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 12, makeGetValueAsm('src', 12, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 16, makeGetValueAsm('src', 16, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 20, makeGetValueAsm('src', 20, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 24, makeGetValueAsm('src', 24, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 28, makeGetValueAsm('src', 28, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 32, makeGetValueAsm('src', 32, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 36, makeGetValueAsm('src', 36, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 40, makeGetValueAsm('src', 40, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 44, makeGetValueAsm('src', 44, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 48, makeGetValueAsm('src', 48, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 52, makeGetValueAsm('src', 52, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 56, makeGetValueAsm('src', 56, 'i32'), 'i32') }}};
+        {{{ makeSetValueAsm('dest', 60, makeGetValueAsm('src', 60, 'i32'), 'i32') }}};
+#endif
+        dest = (dest+64)|0;
+        src = (src+64)|0;
+      }
+      while ((dest|0) < (aligned_dest_end|0) ) {
         {{{ makeSetValueAsm('dest', 0, makeGetValueAsm('src', 0, 'i32'), 'i32') }}};
         dest = (dest+4)|0;
         src = (src+4)|0;
-        num = (num-4)|0;
+      }
+    } else {
+      // In the unaligned copy case, unroll a bit as well.
+      aligned_dest_end = (dest_end - 4)|0;
+      while ((dest|0) < (aligned_dest_end|0) ) {
+        {{{ makeSetValueAsm('dest', 0, makeGetValueAsm('src', 0, 'i8'), 'i8') }}};
+        {{{ makeSetValueAsm('dest', 1, makeGetValueAsm('src', 1, 'i8'), 'i8') }}};
+        {{{ makeSetValueAsm('dest', 2, makeGetValueAsm('src', 2, 'i8'), 'i8') }}};
+        {{{ makeSetValueAsm('dest', 3, makeGetValueAsm('src', 3, 'i8'), 'i8') }}};
+        dest = (dest+4)|0;
+        src = (src+4)|0;
       }
     }
-    while ((num|0) > 0) {
+    // The remaining unaligned < 4 byte tail.
+    while ((dest|0) < (dest_end|0)) {
       {{{ makeSetValueAsm('dest', 0, makeGetValueAsm('src', 0, 'i8'), 'i8') }}};
       dest = (dest+1)|0;
       src = (src+1)|0;
-      num = (num-1)|0;
     }
     return ret|0;
   },
@@ -870,31 +936,64 @@ LibraryManager.library = {
   memset__asm: true,
   memset: function(ptr, value, num) {
     ptr = ptr|0; value = value|0; num = num|0;
-    var stop = 0, value4 = 0, stop4 = 0, unaligned = 0;
-    stop = (ptr + num)|0;
-    if ((num|0) >= {{{ Math.round(2.5*UNROLL_LOOP_MAX) }}}) {
-      // This is unaligned, but quite large, so work hard to get to aligned settings
-      value = value & 0xff;
-      unaligned = ptr & 3;
-      value4 = value | (value << 8) | (value << 16) | (value << 24);
-      stop4 = stop & ~3;
-      if (unaligned) {
-        unaligned = (ptr + 4 - unaligned)|0;
-        while ((ptr|0) < (unaligned|0)) { // no need to check for stop, since we have large num
-          {{{ makeSetValueAsm('ptr', 0, 'value', 'i8') }}};
-          ptr = (ptr+1)|0;
-        }
+    var end = 0, aligned_end = 0, block_aligned_end = 0, value4 = 0;
+#if SIMD
+    var value16 = SIMD_Int32x4(0,0,0,0);
+#endif
+    end = (ptr + num)|0;
+
+    value = value & 0xff;
+    if ((num|0) >= 67 /* 64 bytes for an unrolled loop + 3 bytes for unaligned head*/) {
+      while ((ptr&3) != 0) {
+        {{{ makeSetValueAsm('ptr', 0, 'value', 'i8') }}};
+        ptr = (ptr+1)|0;
       }
-      while ((ptr|0) < (stop4|0)) {
+
+      aligned_end = (end & -4)|0;
+      block_aligned_end = (aligned_end - 64)|0;
+      value4 = value | (value << 8) | (value << 16) | (value << 24);
+#if SIMD
+      value16 = SIMD_Int32x4_splat(value4);
+#endif
+
+      while((ptr|0) <= (block_aligned_end|0)) {
+#if SIMD
+        SIMD_Int32x4_store(HEAPU8, ptr, value16);
+        SIMD_Int32x4_store(HEAPU8, ptr+16, value16);
+        SIMD_Int32x4_store(HEAPU8, ptr+32, value16);
+        SIMD_Int32x4_store(HEAPU8, ptr+48, value16);
+#else
+        {{{ makeSetValueAsm('ptr', 0, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 4, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 8, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 12, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 16, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 20, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 24, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 28, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 32, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 36, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 40, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 44, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 48, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 52, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 56, 'value4', 'i32') }}};
+        {{{ makeSetValueAsm('ptr', 60, 'value4', 'i32') }}};
+#endif
+        ptr = (ptr + 64)|0;
+      }
+
+      while ((ptr|0) < (aligned_end|0) ) {
         {{{ makeSetValueAsm('ptr', 0, 'value4', 'i32') }}};
         ptr = (ptr+4)|0;
       }
     }
-    while ((ptr|0) < (stop|0)) {
+    // The remaining bytes.
+    while ((ptr|0) < (end|0)) {
       {{{ makeSetValueAsm('ptr', 0, 'value', 'i8') }}};
       ptr = (ptr+1)|0;
     }
-    return (ptr-num)|0;
+    return (end-num)|0;
   },
   llvm_memset_i32: 'memset',
   llvm_memset_p0i8_i32: 'memset',
@@ -944,6 +1043,22 @@ LibraryManager.library = {
     var retl = _llvm_bswap_i32(h)>>>0;
     var reth = _llvm_bswap_i32(l)>>>0;
     {{{ makeStructuralReturn(['retl', 'reth']) }}};
+  },
+
+  llvm_ctlz_i8__asm: true,
+  llvm_ctlz_i8__sig: 'ii',
+  llvm_ctlz_i8: function(x, isZeroUndef) {
+    x = x | 0;
+    isZeroUndef = isZeroUndef | 0;
+    return (Math_clz32(x & 0xff) | 0) - 24 | 0;
+  },
+
+  llvm_ctlz_i16__asm: true,
+  llvm_ctlz_i16__sig: 'ii',
+  llvm_ctlz_i16: function(x, isZeroUndef) {
+    x = x | 0;
+    isZeroUndef = isZeroUndef | 0;
+    return (Math_clz32(x & 0xffff) | 0) - 16 | 0
   },
 
   llvm_ctlz_i64__asm: true,
@@ -1070,13 +1185,16 @@ LibraryManager.library = {
       var info = EXCEPTIONS.infos[ptr];
       assert(info.refcount > 0);
       info.refcount--;
-      if (info.refcount === 0) {
+      // A rethrown exception can reach refcount 0; it must not be discarded
+      // Its next handler will clear the rethrown flag and addRef it, prior to
+      // final decRef and destruction here
+      if (info.refcount === 0 && !info.rethrown) {
         if (info.destructor) {
 #if WASM_BACKEND == 0
-          Runtime.dynCall('vi', info.destructor, [ptr]);
+          Module['dynCall_vi'](info.destructor, ptr);
 #else
           // In Wasm, destructors return 'this' as in ARM
-          Runtime.dynCall('ii', info.destructor, [ptr]);
+          Module['dynCall_ii'](info.destructor, ptr);
 #endif
         }
         delete EXCEPTIONS.infos[ptr];
@@ -1130,7 +1248,8 @@ LibraryManager.library = {
       type: type,
       destructor: destructor,
       refcount: 0,
-      caught: false
+      caught: false,
+      rethrown: false
     };
     EXCEPTIONS.last = ptr;
     if (!("uncaught_exception" in __ZSt18uncaught_exceptionv)) {
@@ -1145,8 +1264,12 @@ LibraryManager.library = {
   // pop that here from the caught exceptions.
   __cxa_rethrow__deps: ['__cxa_end_catch', '$EXCEPTIONS'],
   __cxa_rethrow: function() {
-    ___cxa_end_catch.rethrown = true;
     var ptr = EXCEPTIONS.caught.pop();
+    if (!EXCEPTIONS.infos[ptr].rethrown) {
+      // Only pop if the corresponding push was through rethrow_primary_exception
+      EXCEPTIONS.caught.push(ptr)
+      EXCEPTIONS.infos[ptr].rethrown = true;
+    }
 #if EXCEPTION_DEBUG
     Module.printErr('Compiled code RE-throwing an exception, popped ' + [ptr, EXCEPTIONS.last, 'stack', EXCEPTIONS.caught]);
 #endif
@@ -1176,6 +1299,7 @@ LibraryManager.library = {
       info.caught = true;
       __ZSt18uncaught_exceptionv.uncaught_exception--;
     }
+    if (info) info.rethrown = false;
     EXCEPTIONS.caught.push(ptr);
 #if EXCEPTION_DEBUG
 		Module.printErr('cxa_begin_catch ' + [ptr, 'stack', EXCEPTIONS.caught]);
@@ -1189,12 +1313,8 @@ LibraryManager.library = {
   // an invalid index into the FUNCTION_TABLE, so something has gone wrong.
   __cxa_end_catch__deps: ['__cxa_free_exception', '$EXCEPTIONS'],
   __cxa_end_catch: function() {
-    if (___cxa_end_catch.rethrown) {
-      ___cxa_end_catch.rethrown = false;
-      return;
-    }
     // Clear state flag.
-    asm['setThrew'](0);
+    Module['setThrew'](0);
     // Call destructor if one is registered then clear it.
     var ptr = EXCEPTIONS.caught.pop();
 #if EXCEPTION_DEBUG
@@ -1236,6 +1356,7 @@ LibraryManager.library = {
   __cxa_rethrow_primary_exception: function(ptr) {
     if (!ptr) return;
     EXCEPTIONS.caught.push(ptr);
+    EXCEPTIONS.infos[ptr].rethrown = true;
     ___cxa_rethrow();
   },
 
@@ -1308,7 +1429,6 @@ LibraryManager.library = {
     Module.print("Resuming exception " + [ptr, EXCEPTIONS.last]);
 #endif
     if (!EXCEPTIONS.last) { EXCEPTIONS.last = ptr; }
-    EXCEPTIONS.clearRef(EXCEPTIONS.deAdjust(ptr)); // exception refcount should be cleared, but don't free it
     {{{ makeThrow('ptr') }}}
   },
 
@@ -1455,12 +1575,33 @@ LibraryManager.library = {
   llvm_log_f64: 'Math_log',
   llvm_exp_f32: 'Math_exp',
   llvm_exp_f64: 'Math_exp',
+  llvm_cos_f32: 'Math_cos',
+  llvm_cos_f64: 'Math_cos',
   llvm_sin_f32: 'Math_sin',
   llvm_sin_f64: 'Math_sin',
   llvm_trunc_f32: 'Math_trunc',
   llvm_trunc_f64: 'Math_trunc',
+  llvm_ceil_f32: 'Math_ceil',
+  llvm_ceil_f64: 'Math_ceil',
   llvm_floor_f32: 'Math_floor',
   llvm_floor_f64: 'Math_floor',
+  llvm_round_f32: 'Math_round',
+  llvm_round_f64: 'Math_round',
+
+  llvm_exp2_f32: function(x) {
+    return Math.pow(2, x);
+  },
+  llvm_exp2_f64: 'llvm_exp2_f32',
+
+  llvm_log2_f32: function(x) {
+    return Math.log(x) / Math.LN2; // TODO: Math.log2, when browser support is there
+  },
+  llvm_log2_f64: 'llvm_log2_f32',
+
+  llvm_log10_f32: function(x) {
+    return Math.log(x) / Math.LN10; // TODO: Math.log10, when browser support is there
+  },
+  llvm_log10_f64: 'llvm_log10_f32',
 
   llvm_copysign_f32: function(x, y) {
     return y < 0 || (y === 0 && 1/y < 0) ? -Math_abs(x) : Math_abs(x);
@@ -1516,7 +1657,32 @@ LibraryManager.library = {
 #endif
     // void *dlopen(const char *file, int mode);
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/dlopen.html
-    filename = filename === 0 ? '__self__' : (ENV['LD_LIBRARY_PATH'] || '/') + Pointer_stringify(filename);
+    var searchpaths = [];
+    if (filename === 0) {
+      filename = '__self__';
+    } else {
+      var strfilename = Pointer_stringify(filename);
+      var isValidFile = function (filename) {
+        var target = FS.findObject(filename);
+        return target && !target.isFolder && !target.isDevice;
+      };
+
+      if (isValidFile(strfilename)) {
+        filename = strfilename;
+      } else {
+        if (ENV['LD_LIBRARY_PATH']) {
+          searchpaths = ENV['LD_LIBRARY_PATH'].split(':');
+        }
+
+        for (var ident in searchpaths) {
+          var searchfile = PATH.join2(searchpaths[ident],strfilename);
+          if (isValidFile(searchfile)) {
+            filename = searchfile;
+            break;
+          }
+        }
+      }
+    }
 
     if (DLFCN.loadedLibNames[filename]) {
       // Already loaded; increment ref count and return.
@@ -1534,21 +1700,30 @@ LibraryManager.library = {
       if (!target || target.isFolder || target.isDevice) {
         DLFCN.errorMsg = 'Could not find dynamic lib: ' + filename;
         return 0;
-      } else {
-        FS.forceLoadFile(target);
-        var lib_data = FS.readFile(filename, { encoding: 'utf8' });
       }
+      FS.forceLoadFile(target);
 
+      var lib_module;
       try {
-        var lib_module = eval(lib_data)(
+#if BINARYEN
+        // the shared library is a shared wasm library (see tools/shared.py WebAssembly.make_shared_library)
+        var lib_data = FS.readFile(filename, { encoding: 'binary' });
+        if (!(lib_data instanceof Uint8Array)) lib_data = new Uint8Array(lib_data);
+        //Module.printErr('libfile ' + filename + ' size: ' + lib_data.length);
+        lib_module = Runtime.loadWebAssemblyModule(lib_data);
+#else
+        // the shared library is a JS file, which we eval
+        var lib_data = FS.readFile(filename, { encoding: 'utf8' });
+        lib_module = eval(lib_data)(
           Runtime.alignFunctionTables(),
           Module
         );
+#endif
       } catch (e) {
 #if ASSERTIONS
         Module.printErr('Error in loading dynamic library: ' + e);
 #endif
-        DLFCN.errorMsg = 'Could not evaluate dynamic lib: ' + filename;
+        DLFCN.errorMsg = 'Could not evaluate dynamic lib: ' + filename + '\n' + e;
         return 0;
       }
 
@@ -1562,7 +1737,22 @@ LibraryManager.library = {
       if (flag & 256) { // RTLD_GLOBAL
         for (var ident in lib_module) {
           if (lib_module.hasOwnProperty(ident)) {
-            Module[ident] = lib_module[ident];
+            // When RTLD_GLOBAL is enable, the symbols defined by this shared object will be made
+            // available for symbol resolution of subsequently loaded shared objects.
+            //
+            // We should copy the symbols (which include methods and variables) from SIDE_MODULE to MAIN_MODULE.
+            //
+            // Module of SIDE_MODULE has not only the symbols (which should be copied)
+            // but also others (print*, asmGlobal*, FUNCTION_TABLE_**, NAMED_GLOBALS, and so on).
+            //
+            // When the symbol (which should be copied) is method, Module._* 's type becomes function.
+            // When the symbol (which should be copied) is variable, Module._* 's type becomes number.
+            //
+            // Except for the symbol prefix (_), there is no difference in the symbols (which should be copied) and others.
+            // So this just copies over compiled symbols (which start with _).
+            if (ident[0] == '_') {
+              Module[ident] = lib_module[ident];
+            }
           }
         }
       }
@@ -1623,6 +1813,7 @@ LibraryManager.library = {
         var result = lib.module[symbol];
         if (typeof result == 'function') {
           result = Runtime.addFunction(result);
+          //Module.printErr('adding function dlsym result for ' + symbol + ' => ' + result);
           lib.cached_functions = result;
         }
         return result;
@@ -1912,6 +2103,12 @@ LibraryManager.library = {
 
   stime__deps: ['$ERRNO_CODES', '__setErrNo'],
   stime: function(when) {
+    ___setErrNo(ERRNO_CODES.EPERM);
+    return -1;
+  },
+
+  __map_file__deps: ['$ERRNO_CODES', '__setErrNo'],
+  __map_file: function(pathname, size) {
     ___setErrNo(ERRNO_CODES.EPERM);
     return -1;
   },
@@ -2518,17 +2715,6 @@ LibraryManager.library = {
   // sys/time.h
   // ==========================================================================
 
-  nanosleep__deps: ['usleep'],
-  nanosleep: function(rqtp, rmtp) {
-    // int nanosleep(const struct timespec  *rqtp, struct timespec *rmtp);
-    var seconds = {{{ makeGetValue('rqtp', C_STRUCTS.timespec.tv_sec, 'i32') }}};
-    var nanoseconds = {{{ makeGetValue('rqtp', C_STRUCTS.timespec.tv_nsec, 'i32') }}};
-    if (rmtp !== 0) {
-      {{{ makeSetValue('rmtp', C_STRUCTS.timespec.tv_sec, '0', 'i32') }}};
-      {{{ makeSetValue('rmtp', C_STRUCTS.timespec.tv_nsec, '0', 'i32') }}};
-    }
-    return _usleep((seconds * 1e6) + (nanoseconds / 1000));
-  },
   clock_gettime__deps: ['emscripten_get_now', 'emscripten_get_now_is_monotonic', '$ERRNO_CODES', '__setErrNo'],
   clock_gettime: function(clk_id, tp) {
     // int clock_gettime(clockid_t clk_id, struct timespec *tp);
@@ -2707,7 +2893,7 @@ LibraryManager.library = {
 
   longjmp__deps: ['saveSetjmp', 'testSetjmp'],
   longjmp: function(env, value) {
-    asm['setThrew'](env, value || 1);
+    Module['setThrew'](env, value || 1);
     throw 'longjmp';
   },
   emscripten_longjmp__deps: ['longjmp'],
@@ -3760,9 +3946,10 @@ LibraryManager.library = {
   emscripten_run_script_string: function(ptr) {
     {{{ makeEval("var s = eval(Pointer_stringify(ptr)) + '';") }}}
     var me = _emscripten_run_script_string;
-    if (!me.bufferSize || me.bufferSize < s.length+1) {
+    var len = lengthBytesUTF8(s);
+    if (!me.bufferSize || me.bufferSize < len+1) {
       if (me.bufferSize) _free(me.buffer);
-      me.bufferSize = s.length+1;
+      me.bufferSize = len+1;
       me.buffer = _malloc(me.bufferSize);
     }
     stringToUTF8(s, me.buffer, me.bufferSize);
@@ -4101,7 +4288,7 @@ LibraryManager.library = {
   _pthread_cleanup_push: function(){},
   _pthread_cleanup_pop: function(){},
   __pthread_self: function() { abort() },
-  pthread_setcancelstate: function() { return 0 },
+  __pthread_setcancelstate: function() { return 0 },
 
   // libunwind
 
@@ -4110,7 +4297,7 @@ LibraryManager.library = {
     var trace = _emscripten_get_callstack_js();
     var parts = trace.split('\n');
     for (var i = 0; i < parts.length; i++) {
-      var ret = Module.dynCall('iii', [0, arg]);
+      var ret = Module['dynCall_iii'](func, 0, arg);
       if (ret !== 0) return;
     }
   },
