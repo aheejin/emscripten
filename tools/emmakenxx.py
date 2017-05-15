@@ -5,6 +5,7 @@ see emmaken.py
 '''
 
 import os, subprocess, sys
+import mylog
 
 __rootpath__ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def path_from_root(*pathelems):
@@ -14,5 +15,6 @@ from tools.shared import *
 
 emmaken = path_from_root('tools', 'emmaken.py')
 os.environ['EMMAKEN_CXX'] = '1'
+mylog.log_cmd([PYTHON, emmaken] + sys.argv[1:])
 exit(subprocess.call([PYTHON, emmaken] + sys.argv[1:]))
 

@@ -32,6 +32,7 @@ useful when this fails.
 
 import os, sys
 from subprocess import Popen, PIPE, STDOUT
+import mylog
 
 __rootpath__ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def path_from_root(*pathelems):
@@ -39,9 +40,11 @@ def path_from_root(*pathelems):
 sys.path += [path_from_root('')]
 from tools.shared import *
 
+mylog.log_cmd([LLVM_OPT, sys.argv[1], '-strip-debug', '-o', sys.argv[1]+'.clean.bc'])
 Popen([LLVM_OPT, sys.argv[1], '-strip-debug', '-o', sys.argv[1]+'.clean.bc']).communicate()[0]
 
 # Execute with empty environment - just like the JS script will have
+mylog.log_cmd([LLVM_INTERPRETER, sys.argv[1]+'.clean.bc'] + sys.argv[2:], env={'HOME': '.'})
 Popen([LLVM_INTERPRETER, sys.argv[1]+'.clean.bc'] + sys.argv[2:], env={'HOME': '.'}).communicate()[0]
 
 #Popen([LLVM_COMPILER, '-march=c', sys.argv[1], '-o', sys.argv[1]+'.cbe.c']).communicate()[0]

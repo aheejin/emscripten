@@ -1,9 +1,7 @@
 from toolchain_profiler import ToolchainProfiler
 import time, os, sys, logging
 from subprocess import Popen, PIPE, STDOUT
-
-#mydebug = False
-mydebug = True
+import mylog
 
 TRACK_PROCESS_SPAWNS = True if (os.getenv('EM_BUILD_VERBOSE') and int(os.getenv('EM_BUILD_VERBOSE')) >= 3) else False
 WORKING_ENGINES = {} # Holds all configured engines and whether they work: maps path -> True/False
@@ -96,8 +94,7 @@ def run_js(filename, engine=None, args=[], check_timeout=False, stdin=None, stdo
   command = make_command(filename, engine, args)
   try:
     if cwd is not None: os.environ['EMCC_BUILD_DIR'] = os.getcwd()
-    if mydebug:
-      print 'Popen: ' + ' '.join(command)
+    mylog.log_cmd(command)
     proc = Popen(
         command,
         stdin=stdin,

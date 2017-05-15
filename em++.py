@@ -4,6 +4,7 @@
 # It also tells emcc.py that we want C++ and not C by default
 
 import sys
+from tools import mylog
 
 sys.argv += ['--emscripten-cxx']
 
@@ -14,4 +15,5 @@ if sys.version_info.major == 2:
 else:
   import os, subprocess
   if __name__ == '__main__':
+    mylog.log_cmd(['python2', os.path.join(os.path.dirname(__file__), 'emcc.py')] + sys.argv[1:])
     sys.exit(subprocess.call(['python2', os.path.join(os.path.dirname(__file__), 'emcc.py')] + sys.argv[1:]))

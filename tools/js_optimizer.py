@@ -5,6 +5,7 @@ if __name__ == '__main__':
 
 import os, sys, subprocess, multiprocessing, re, string, json, shutil, logging
 import shared
+import mylog
 
 configuration = shared.configuration
 temp_files = configuration.get_temp_files()
@@ -122,6 +123,7 @@ def get_native_optimizer():
           cmake_generators = ['Unix Makefiles']
 
         for cmake_generator in cmake_generators:
+          mylog.log_cmd(['cmake', '-G', cmake_generator, '-DCMAKE_BUILD_TYPE='+cmake_build_type, shared.path_from_root('tools', 'optimizer')], cwd=build_path, stdin=log_output, stdout=log_output, stderr=log_output)
           proc = subprocess.Popen(['cmake', '-G', cmake_generator, '-DCMAKE_BUILD_TYPE='+cmake_build_type, shared.path_from_root('tools', 'optimizer')], cwd=build_path, stdin=log_output, stdout=log_output, stderr=log_output)
           proc.communicate()
           make_env = os.environ.copy()
@@ -135,12 +137,15 @@ def get_native_optimizer():
             else:
               make = ['make']
 
+            mylog.log_cmd(make, cwd=build_path, stdin=log_output, stdout=log_output, stderr=log_output, env=make_env)
             proc = subprocess.Popen(make, cwd=build_path, stdin=log_output, stdout=log_output, stderr=log_output, env=make_env)
             proc.communicate()
             if proc.returncode == 0:
               if WINDOWS and 'Visual Studio' in cmake_generator:
+                mylog.log_copy(os.path.join(build_path, cmake_build_type, 'optimizer.exe'), output)
                 shutil.copyfile(os.path.join(build_path, cmake_build_type, 'optimizer.exe'), output)
               else:
+                mylog.log_copy(os.path.join(build_path, 'optimizer'), output)
                 shutil.copyfile(os.path.join(build_path, 'optimizer'), output)
               return output
             else:
@@ -156,6 +161,13 @@ def get_native_optimizer():
         for compiler in [shared.CLANG, 'g++', 'clang++']: # try our clang first, otherwise hope for a system compiler in the path
           shared.logging.debug('  using ' + compiler)
           try:
+            mylog.log_cmd([compiler,
+                                         shared.path_from_root('tools', 'optimizer', 'parser.cpp'),
+                                         shared.path_from_root('tools', 'optimizer', 'simple_ast.cpp'),
+                                         shared.path_from_root('tools', 'optimizer', 'optimizer.cpp'),
+                                         shared.path_from_root('tools', 'optimizer', 'optimizer-shared.cpp'),
+                                         shared.path_from_root('tools', 'optimizer', 'optimizer-main.cpp'),
+                                         '-O3', '-std=c++11', '-fno-exceptions', '-fno-rtti', '-o', output] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             out, err = subprocess.Popen([compiler,
                                          shared.path_from_root('tools', 'optimizer', 'parser.cpp'),
                                          shared.path_from_root('tools', 'optimizer', 'simple_ast.cpp'),
@@ -238,6 +250,11 @@ class Minifier:
       f.write('// EXTRA_INFO:' + json.dumps(self.serialize()))
       f.close()
 
+      mylog.log_cmd(self.js_engine +
+          [JS_OPTIMIZER, temp_file, 'minifyGlobals', 'noPrintMetadata'] +
+          (['minifyWhitespace'] if minify_whitespace else []) +
+          (['--debug'] if source_map else []),
+          stdout=subprocess.PIPE)
       output = subprocess.Popen(self.js_engine +
           [JS_OPTIMIZER, temp_file, 'minifyGlobals', 'noPrintMetadata'] +
           (['minifyWhitespace'] if minify_whitespace else []) +
@@ -280,8 +297,10 @@ def run_on_chunk(command):
       saved = 'save_' + os.path.basename(filename)
       while os.path.exists(saved): saved = 'input' + str(int(saved.replace('input', '').replace('.txt', ''))+1) + '.txt'
       print >> sys.stderr, 'running js optimizer command', ' '.join(map(lambda c: c if c != filename else saved, command))
+      mylog.log_copy(filename, os.path.join(shared.get_emscripten_temp_dir(), saved))
       shutil.copyfile(filename, os.path.join(shared.get_emscripten_temp_dir(), saved))
     if shared.EM_BUILD_VERBOSE_LEVEL >= 3: print >> sys.stderr, 'run_on_chunk: ' + str(command)
+    mylog.log_cmd(command, stdout=subprocess.PIPE)
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
     output = proc.communicate()[0]
     assert proc.returncode == 0, 'Error in optimizer (return code ' + str(proc.returncode) + '): ' + output
@@ -497,6 +516,7 @@ EMSCRIPTEN_FUNCS();
           if DEBUG: print >> sys.stderr, 'running cleanup on shell code'
           next = cld + '.cl.js'
           temp_files.note(next)
+          mylog.log_cmd(js_engine + [JS_OPTIMIZER, cld, 'noPrintMetadata', 'JSDCE'] + (['minifyWhitespace'] if 'minifyWhitespace' in passes else []), stdout=open(next, 'w'))
           proc = subprocess.Popen(js_engine + [JS_OPTIMIZER, cld, 'noPrintMetadata', 'JSDCE'] + (['minifyWhitespace'] if 'minifyWhitespace' in passes else []), stdout=open(next, 'w'))
           proc.communicate()
           assert proc.returncode == 0
@@ -572,6 +592,7 @@ if __name__ == '__main__':
     else:
       extra_info = None
     out = run(sys.argv[1], sys.argv[2:], extra_info=extra_info)
+    mylog.log_copy(out, sys.argv[1] + '.jsopt.js')
     shutil.copyfile(out, sys.argv[1] + '.jsopt.js')
   except Exception, e:
     ToolchainProfiler.record_process_exit(1)

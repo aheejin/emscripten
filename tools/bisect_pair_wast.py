@@ -6,6 +6,7 @@ diff that makes the outputs different.
 
 import os, sys, shutil
 from subprocess import Popen, PIPE, STDOUT
+import mylog
 
 __rootpath__ = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 def path_from_root(*pathelems):
@@ -24,6 +25,7 @@ rightf.write(file2)
 rightf.close()
 
 def run_code(name):
+  mylog.log_copy(name, 'src.cpp.o.wast')
   shutil.copyfile(name, 'src.cpp.o.wast')
   ret = run_js('src.cpp.o.js', stderr=PIPE, full_output=True, assert_returncode=None, engine=SPIDERMONKEY_ENGINE)
   # fix stack traces
@@ -37,6 +39,7 @@ assert left_result != right_result
 
 # Calculate diff chunks
 print 'diffing'
+mylog.log_cmd(['diff', '-U', '5', 'left', 'right'], stdout=PIPE)
 diff = Popen(['diff', '-U', '5', 'left', 'right'], stdout=PIPE).communicate()[0].split('\n')
 pre_diff = diff[:2]
 diff = diff[2:]
@@ -66,6 +69,7 @@ for mid in range(high):
   difff.write(curr_diff)
   difff.close()
   shutil.copy('left', 'middle')
+  mylog.log_cmd(['patch', 'middle', 'diff.diff'], stdout=PIPE):
   Popen(['patch', 'middle', 'diff.diff'], stdout=PIPE).communicate()
   shutil.copyfile('middle', 'middle' + str(mid))
   result = run_code('middle')
@@ -81,6 +85,7 @@ for mid in range(high):
     found = mid
     break
 
+mylog.log_cmd(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE)
 critical = Popen(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE).communicate()[0]
 c = open('critical.diff', 'w')
 c.write(critical)

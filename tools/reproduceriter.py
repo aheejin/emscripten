@@ -121,6 +121,7 @@ shell = not not window_location
 dirs_to_drop = 0 if not os.path.dirname(first_js) else len(os.path.dirname(first_js).split('/'))
 
 if os.path.exists(out_dir):
+  mylog.log_remove(out_dir)
   shutil.rmtree(out_dir)
 assert os.path.exists(os.path.join(in_dir, first_js))
 
@@ -128,6 +129,7 @@ assert os.path.exists(os.path.join(in_dir, first_js))
 
 print 'copying tree...'
 
+mylog.log_copy(in_dir, out_dir)
 shutil.copytree(in_dir, out_dir)
 
 # Add customizations in all JS files

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import socket, json, sys, uuid, datetime, time, logging, cgi, zipfile, os, tempfile, atexit, subprocess, re, base64, struct, imghdr
+import mylog
 
 WINDOWS = sys.platform == 'win32'
 if WINDOWS:
@@ -175,6 +176,7 @@ def print_applist(applist, running_app_manifests, print_removable):
 
 def adb_devices():
   try:
+    mylog.log_cmd([ADB, 'devices'])
     devices = subprocess.check_output([ADB, 'devices'])
     devices = devices.strip().split('\n')[1:]
     devices = map(lambda x: x.strip().split('\t'), devices)
@@ -183,9 +185,11 @@ def adb_devices():
     return []
 
 def b2g_get_prefs_filename():
+  mylog.log_cmd([ADB, 'shell', 'echo', '-n', '/data/b2g/mozilla/*.default/prefs.js'])
   return subprocess.check_output([ADB, 'shell', 'echo', '-n', '/data/b2g/mozilla/*.default/prefs.js'])
 
 def b2g_get_prefs_data():
+  mylog.log_cmd([ADB, 'shell', 'cat', '/data/b2g/mozilla/*.default/prefs.js'])
   return subprocess.check_output([ADB, 'shell', 'cat', '/data/b2g/mozilla/*.default/prefs.js'])
 
 def b2g_get_pref(sub):
@@ -216,6 +220,9 @@ def b2g_set_pref(pref, value):
   os.write(oshandle, '\n'.join(new_prefs_data));
 
   # Write the new pref
+  mylog.log_cmd([ADB, 'shell', 'stop', 'b2g'])
+  mylog.log_cmd([ADB, 'push', tempfilename, b2g_get_prefs_filename()])
+  mylog.log_cmd([ADB, 'shell', 'start', 'b2g'])
   subprocess.check_output([ADB, 'shell', 'stop', 'b2g'])
   subprocess.check_output([ADB, 'push', tempfilename, b2g_get_prefs_filename()])
   subprocess.check_output([ADB, 'shell', 'start', 'b2g'])
@@ -570,6 +577,7 @@ def main():
         print 'Error! Failed to connect to B2G ' + ('simulator' if connect_to_simulator else 'device') + ' debugger socket at address ' + HOST + ':' + str(PORT) + '!'
         sys.exit(1)
       try:
+        mylog.log_cmd(cmd)
         retcode = subprocess.check_call(cmd)
       except Exception, e:
         print 'Error! Failed to execute adb: ' + str(e)

@@ -13,6 +13,7 @@ if __name__ == '__main__':
 
 import os, subprocess, sys
 from tools import shared
+from tools import mylog
 
 #
 # Main run() function
@@ -51,6 +52,7 @@ def run():
             full_newname = os.path.join(dir_name, newname)
             if not os.path.exists(full_newname):
               try: # it is ok to fail here, we just don't get hashing
+                mylog.log_copy(orig_name, full_newname)
                 shutil.copyfile(orig_name, full_newname)
                 newargs[j] = full_newname
                 to_delete.append(full_newname)
@@ -58,6 +60,7 @@ def run():
                 pass
           break
         i += 1
+    mylog.log_cmd(newargs)
     subprocess.call(newargs)
     for d in to_delete:
       shared.try_delete(d)

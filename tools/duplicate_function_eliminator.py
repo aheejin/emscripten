@@ -1,6 +1,7 @@
 
 import os, sys, subprocess, multiprocessing, re, string, json, shutil, logging, traceback
 import shared
+import mylog
 from js_optimizer import *
 
 DUPLICATE_FUNCTION_ELIMINATOR = path_from_root('tools', 'eliminate-duplicate-functions.js')
@@ -16,6 +17,9 @@ def process_shell(js, js_engine, shell, equivalentfn_hash_info=None):
     f.write(equivalentfn_hash_info)
     f.close()
 
+    mylog.log_cmd(js_engine +
+        [DUPLICATE_FUNCTION_ELIMINATOR, temp_file, '--use-hash-info', '--no-minimize-whitespace'],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (output,error) = subprocess.Popen(js_engine +
         [DUPLICATE_FUNCTION_ELIMINATOR, temp_file, '--use-hash-info', '--no-minimize-whitespace'],
         stdout=subprocess.PIPE,stderr=subprocess.PIPE).communicate()
@@ -37,10 +41,12 @@ def run_on_chunk(command):
       saved = 'save_' + os.path.basename(filename)
       while os.path.exists(saved): saved = 'input' + str(int(saved.replace('input', '').replace('.txt', ''))+1) + '.txt'
       print >> sys.stderr, 'running DFE command', ' '.join(map(lambda c: c if c != filename else saved, command))
+      mylog.log_copy(filename, os.path.join(shared.get_emscripten_temp_dir(), saved))
       shutil.copyfile(filename, os.path.join(shared.get_emscripten_temp_dir(), saved))
 
     if shared.EM_BUILD_VERBOSE_LEVEL >= 3: print >> sys.stderr, 'run_on_chunk: ' + str(command)
 
+    mylog.log_cmd(command, stdout=subprocess.PIPE)
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
     output = proc.communicate()[0]
     assert proc.returncode == 0, 'Error in optimizer (return code ' + str(proc.returncode) + '): ' + output
@@ -317,6 +323,7 @@ def save_temp_file(file_to_process):
       os.makedirs(os.path.dirname(destinationFile))
 
     print >> sys.stderr, "Copying {} to {}".format(file_to_process, destinationFile)
+    mylog.log_copy(file_to_process, destinationFile)
     shutil.copyfile(file_to_process, destinationFile)
 
 def get_func_names(javascript_file):

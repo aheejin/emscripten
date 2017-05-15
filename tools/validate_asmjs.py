@@ -13,6 +13,7 @@
 
 import subprocess, sys, re, tempfile, os, time
 import shared
+import mylog
 
 # Given a .js file, returns True/False depending on if that file is valid asm.js
 def validate_asmjs_jsfile(filename, muteOutput):
@@ -21,6 +22,7 @@ def validate_asmjs_jsfile(filename, muteOutput):
     print >> sys.stderr, 'Could not find SpiderMonkey engine! Please set its location to SPIDERMONKEY_ENGINE in your ' + shared.hint_config_file_location() + ' configuration file!'
     return False
   try:
+    mylog.log_cmd(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
   except Exception, e:
     print >> sys.stderr, 'Executing command ' + str(cmd) + ' failed due to an exception: ' + str(e) + '!'

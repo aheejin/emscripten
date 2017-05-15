@@ -6,6 +6,7 @@ This is an LTO-like operation, and to avoid parsing the entire tree (we might fa
 
 import os, sys, json, subprocess, time
 import shared, js_optimizer
+import mylog
 from tempfiles import try_delete
 
 js_file = sys.argv[1]
@@ -243,6 +244,7 @@ console.log(JSON.stringify([numSuccessful, Array.prototype.slice.call(heap.subar
     err_file = config.get_temp_files().get('.err').name
     out_file_handle = open(out_file, 'w')
     err_file_handle = open(err_file, 'w')
+    mylog.log_cmd(shared.NODE_JS + [temp_file], stdout=out_file_handle, stderr=err_file_handle)
     proc = subprocess.Popen(shared.NODE_JS + [temp_file], stdout=out_file_handle, stderr=err_file_handle)
     try:
       shared.jsrun.timeout_run(proc, timeout=10, full_output=True)
@@ -283,6 +285,7 @@ def eval_ctors_wasm(js, wasm_file, num):
   ctors_start, ctors_end, all_ctors, ctors = find_ctors_data(js, num)
   cmd = [os.path.join(binaryen_bin, 'wasm-ctor-eval'), wasm_file, '-o', wasm_file, '--ctors=' + ','.join(ctors)]
   shared.logging.debug('wasm ctor cmd: ' + str(cmd))
+  mylog.log_cmd(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
   out, err = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
   num_successful = err.count('success on')
   shared.logging.debug(err)

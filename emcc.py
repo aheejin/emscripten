@@ -30,6 +30,7 @@ if __name__ == '__main__':
 import os, sys, shutil, tempfile, subprocess, shlex, time, re, logging, urllib
 from subprocess import PIPE
 from tools import shared, jsrun, system_libs
+from tools import mylog
 from tools.shared import execute, suffix, unsuffixed, unsuffixed_basename, WINDOWS, safe_move
 from tools.response_file import read_response_file
 import tools.line_endings
@@ -176,6 +177,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   elif len(sys.argv) == 2 and sys.argv[1] == '-v': # -v with no inputs
     # autoconf likes to see 'GNU' in the output to enable shared object support
     print 'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) %s' % shared.EMSCRIPTEN_VERSION
+    mylog.log_cmd([shared.CLANG, '-v'])
     code = subprocess.call([shared.CLANG, '-v'])
     shared.check_sanity(force=True)
     exit(code)
@@ -191,6 +193,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     args = filter(lambda x: x != '--cflags', sys.argv)
     with misc_temp_files.get_file(suffix='.o') as temp_target:
       input_file = 'hello_world.c'
+      mylog.log_cmd([shared.PYTHON] + args + [shared.path_from_root('tests', input_file), '-c', '-o', temp_target], stderr=subprocess.PIPE, env=debug_env)
       out, err = subprocess.Popen([shared.PYTHON] + args + [shared.path_from_root('tests', input_file), '-c', '-o', temp_target], stderr=subprocess.PIPE, env=debug_env).communicate()
       lines = filter(lambda x: shared.CLANG_CC in x and input_file in x, err.split(os.linesep))
       line = lines[0]
@@ -282,6 +285,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if debug_configure: open(tempout, 'a').write('emcc, just configuring: ' + ' '.join(cmd) + '\n\n')
 
     if not use_js:
+      mylog.log_cmd(cmd)
       exit(subprocess.call(cmd))
     else:
       only_object = '-c' in cmd
@@ -294,12 +298,14 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if not target:
         target = 'a.out.js'
       os.environ['EMMAKEN_JUST_CONFIGURE_RECURSE'] = '1'
+      mylog.log_cmd(cmd)
       ret = subprocess.call(cmd)
       os.environ['EMMAKEN_JUST_CONFIGURE_RECURSE'] = ''
       if not os.path.exists(target): exit(ret) # note that emcc -c will cause target to have the wrong value here;
                                                # but then, we don't care about bitcode outputs anyhow, below, so
                                                # skipping to exit(ret) is fine
       if target.endswith('.js'):
+        mylog.log_copy(target, target[:-3])
         shutil.copyfile(target, target[:-3])
         target = target[:-3]
       if not target.endswith(BITCODE_ENDINGS):
@@ -369,7 +375,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   if TEMP_DIR:
     temp_dir = TEMP_DIR
     if os.path.exists(temp_dir):
-      shutil.rmtree(temp_dir) # clear it
+      #mylog.log_remove(temp_dir)
+      #shutil.rmtree(temp_dir) # clear it
+      pass
     os.makedirs(temp_dir)
   else:
     temp_root = shared.TEMP_DIR
@@ -1443,6 +1451,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           cmd += ['-o', specified_target]
         # Do not compile, but just output the result from preprocessing stage or output the dependency rule. Warning: clang and gcc behave differently with -MF! (clang seems to not recognize it)
         logging.debug(('just preprocessor ' if '-E' in newargs else 'just dependencies: ') + ' '.join(cmd))
+        mylog.log_cmd(cmd)
         exit(subprocess.call(cmd))
 
       def compile_source_file(i, input_file):
@@ -1517,6 +1526,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             if temp_file != input_file:
               safe_move(temp_file, bitcode_target)
             else:
+              mylog.log_copy(temp_file, bitcode_target)
               shutil.copyfile(temp_file, bitcode_target)
             temp_output_base = unsuffixed(temp_file)
             if os.path.exists(temp_output_base + '.d'):
@@ -1590,12 +1600,15 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           _, input_file = input_files[0]
           final = in_temp(target_basename + '.bc')
           if temp_file != input_file:
+            mylog.log_move(temp_file, final)
             shutil.move(temp_file, final)
           else:
+            mylog.log_copy(temp_file, final)
             shutil.copyfile(temp_file, final)
         else:
           _, input_file = input_files[0]
           final = in_temp(input_file)
+          mylog.log_copy(input_file, final)
           shutil.copyfile(input_file, final)
 
     # exit block 'link'
@@ -1613,6 +1626,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           if type(final) != str:
             logging.debug('(not saving intermediate %s because deferring linking)' % name)
             return
+          mylog.log_copy(final, name)
           shutil.copyfile(final, name)
           Intermediate.counter += 1
 
@@ -1662,6 +1676,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             final = shared.Building.llvm_opt(final, link_opts, DEFAULT_FINAL)
             if DEBUG: save_intermediate('linktime', 'bc')
           if save_bc:
+            mylog.log_copy(final, save_bc)
             shutil.copyfile(final, save_bc)
 
       # Prepare .ll for Emscripten
@@ -1696,12 +1711,15 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         # we also received wast and wasm at this stage
         temp_basename = final[:-3]
         wast_temp = temp_basename + '.wast'
+        mylog.log_move(wast_temp, wasm_text_target)
         shutil.move(wast_temp, wasm_text_target)
+        mylog.log_move(temp_basename + '.wasm', wasm_binary_target)
         shutil.move(temp_basename + '.wasm', wasm_binary_target)
         open(wasm_text_target + '.mappedGlobals', 'w').write('{}') # no need for mapped globals for now, but perhaps some day
 
       if shared.Settings.CYBERDWARF:
         cd_target = final + '.cd'
+        mylog.log_move(cd_target, target + '.cd')
         shutil.move(cd_target, target + '.cd')
 
     # exit block 'emscript'
@@ -1757,10 +1775,12 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # Apply a source code transformation, if requested
       if js_transform:
+        mylog.log_copy(final, final + '.tr.js')
         shutil.copyfile(final, final + '.tr.js')
         final += '.tr.js'
         posix = True if not shared.WINDOWS else False
         logging.debug('applying transform: %s', js_transform)
+        mylog.log_cmd(shlex.split(js_transform, posix=posix) + [os.path.abspath(final)])
         subprocess.check_call(shlex.split(js_transform, posix=posix) + [os.path.abspath(final)])
         if DEBUG: save_intermediate('transformed')
 
@@ -1815,6 +1835,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           src = None
 
       if shared.Settings.USE_PTHREADS:
+        mylog.log_copy(shared.path_from_root('src', 'pthread-main.js'), os.path.join(os.path.dirname(os.path.abspath(target)), 'pthread-main.js'))
         shutil.copyfile(shared.path_from_root('src', 'pthread-main.js'), os.path.join(os.path.dirname(os.path.abspath(target)), 'pthread-main.js'))
 
       # Generate the fetch-worker.js script for multithreaded emscripten_fetch() support if targeting pthreads.
@@ -2015,6 +2036,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         import json
         try:
           # move temp js to final position, alongside its mem init file
+          mylog.log_move(final, js_target)
           shutil.move(final, js_target)
           args = [shared.PYTHON, shared.path_from_root('tools', 'emterpretify.py'), js_target, final + '.em.js', json.dumps(shared.Settings.EMTERPRETIFY_BLACKLIST), json.dumps(shared.Settings.EMTERPRETIFY_WHITELIST), '', str(shared.Settings.SWAPPABLE_ASM_MODULE)]
           if shared.Settings.EMTERPRETIFY_ASYNC:
@@ -2085,6 +2107,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       # Separate out the asm.js code, if asked. Or, if necessary for another option
       if (separate_asm or shared.Settings.BINARYEN) and not shared.Settings.WASM_BACKEND:
         logging.debug('separating asm')
+        mylog.log_cmd([shared.PYTHON, shared.path_from_root('tools', 'separate_asm.py'), final, asm_target, final])
         subprocess.check_call([shared.PYTHON, shared.path_from_root('tools', 'separate_asm.py'), final, asm_target, final])
         generated_text_files_with_native_eols += [asm_target]
 
@@ -2092,6 +2115,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if shared.Settings.ONLY_MY_CODE:
           temp = asm_target + '.only.js'
           print jsrun.run_js(shared.path_from_root('tools', 'js-optimizer.js'), shared.NODE_JS, args=[asm_target, 'eliminateDeadGlobals', 'last', 'asm'], stdout=open(temp, 'w'))
+          mylog.log_move(temp, asm_target)
           shutil.move(temp, asm_target)
 
       if shared.Settings.BINARYEN_METHOD:
@@ -2175,6 +2199,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             wrote_wasm_text = True
           logging.debug('asm2wasm (asm.js => WebAssembly): ' + ' '.join(cmd))
           TimeLogger.update()
+          mylog.log_cmd(cmd)
           subprocess.check_call(cmd)
 
           if not target_binary:
@@ -2182,6 +2207,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             if debug_level >= 2 or profiling_funcs:
               cmd += ['-g']
             logging.debug('wasm-as (text => binary): ' + ' '.join(cmd))
+            mylog.log_cmd(cmd)
             subprocess.check_call(cmd)
           if import_mem_init:
             # remove and forget about the mem init file in later processing; it does not need to be prefetched in the html, etc.
@@ -2192,13 +2218,16 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             memory_init_file = False
           log_time('asm2wasm')
         if shared.Settings.BINARYEN_PASSES:
+          mylog.log_move(wasm_binary_target, wasm_binary_target + '.pre')
           shutil.move(wasm_binary_target, wasm_binary_target + '.pre')
           cmd = [os.path.join(binaryen_bin, 'wasm-opt'), wasm_binary_target + '.pre', '-o', wasm_binary_target] + map(lambda p: '--' + p, shared.Settings.BINARYEN_PASSES.split(','))
           logging.debug('wasm-opt on BINARYEN_PASSES: ' + ' '.join(cmd))
+          mylog.log_cmd(cmd)
           subprocess.check_call(cmd)
         if not wrote_wasm_text and 'interpret-s-expr' in shared.Settings.BINARYEN_METHOD:
           cmd = [os.path.join(binaryen_bin, 'wasm-dis'), wasm_binary_target, '-o', wasm_text_target]
           logging.debug('wasm-dis (binary => text): ' + ' '.join(cmd))
+          mylog.log_cmd(cmd)
           subprocess.check_call(cmd)
         if shared.Settings.BINARYEN_SCRIPTS:
           binaryen_scripts = os.path.join(shared.Settings.BINARYEN_ROOT, 'scripts')
@@ -2210,6 +2239,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             script_env['PYTHONPATH'] = root_dir
           for script in shared.Settings.BINARYEN_SCRIPTS.split(','):
             logging.debug('running binaryen script: ' + script)
+            mylog.log_cmd([shared.PYTHON, os.path.join(binaryen_scripts, script), final, wasm_text_target], env=script_env)
             subprocess.check_call([shared.PYTHON, os.path.join(binaryen_scripts, script), final, wasm_text_target], env=script_env)
         if shared.Settings.EVAL_CTORS:
           shared.Building.eval_ctors(final, wasm_binary_target, binaryen_bin)
@@ -2218,6 +2248,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           if shared.Settings.SIDE_MODULE:
             wso = shared.WebAssembly.make_shared_library(final, wasm_binary_target)
             # replace the wasm binary output with the dynamic library. TODO: use a specific suffix for such files?
+            mylog.log_move(wso, wasm_binary_target)
             shutil.move(wso, wasm_binary_target)
             if not DEBUG:
               os.unlink(asm_target) # we don't need the asm.js, it can just confuse
@@ -2255,6 +2286,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if DEBUG: save_intermediate('modularized', 'js')
 
       # The JS is now final. Move it to its final location
+      mylog.log_move(final, js_target)
       shutil.move(final, js_target)
 
       generated_text_files_with_native_eols += [js_target]
@@ -2399,6 +2431,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         html.close()
       else: # final_suffix != html
         if proxy_to_worker:
+          mylog.log_move(js_target, js_target[:-3] + '.worker.js') # compiler output goes in .worker.js file
           shutil.move(js_target, js_target[:-3] + '.worker.js') # compiler output goes in .worker.js file
           worker_target_basename = target_basename + '.worker'
           target_contents = open(shared.path_from_root('src', 'webGLClient.js')).read() + '\n' + open(shared.path_from_root('src', 'proxyClient.js')).read().replace('{{{ filename }}}', shared.Settings.PROXY_TO_WORKER_FILENAME or worker_target_basename).replace('{{{ IDBStore.js }}}', open(shared.path_from_root('src', 'IDBStore.js')).read())
@@ -2414,7 +2447,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   finally:
     if not TEMP_DIR:
       try:
-        shutil.rmtree(temp_dir)
+        #mylog.log_remove(temp_dir)
+        #shutil.rmtree(temp_dir)
+        pass
       except:
         pass
     else:

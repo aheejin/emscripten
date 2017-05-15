@@ -77,6 +77,7 @@ The JSON output format is based on the return value of Runtime.generateStructInf
 
 import sys, os, re, json, argparse, tempfile, subprocess
 import shared
+import mylog
 
 DEBUG = os.environ.get('EMCC_DEBUG')
 if DEBUG == "0":
@@ -387,6 +388,7 @@ def inspect_code(headers, cpp_opts, structs, defines):
     try:
       # Compile the program.
       show('Compiling generated code...')
+      mylog.log_cmd([shared.PYTHON, shared.EMCC] + cpp_opts + ['-o', js_file[1], src_file[1], '-s', 'BOOTSTRAPPING_STRUCT_INFO=1', '-s', 'WARN_ON_UNDEFINED_SYMBOLS=0', '-Oz', '--js-opts', '0', '--memory-init-file', '0'], env=safe_env) # -Oz optimizes enough to avoid warnings on code size/num locals
       subprocess.check_call([shared.PYTHON, shared.EMCC] + cpp_opts + ['-o', js_file[1], src_file[1], '-s', 'BOOTSTRAPPING_STRUCT_INFO=1', '-s', 'WARN_ON_UNDEFINED_SYMBOLS=0', '-Oz', '--js-opts', '0', '--memory-init-file', '0'], env=safe_env) # -Oz optimizes enough to avoid warnings on code size/num locals
     except:
       sys.stderr.write('FAIL: Compilation failed!\n')

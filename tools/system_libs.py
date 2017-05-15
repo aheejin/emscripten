@@ -4,11 +4,13 @@ from subprocess import Popen, CalledProcessError
 import subprocess, multiprocessing, re
 from sys import maxint
 from tools.shared import check_call
+import mylog
 
 stdout = None
 stderr = None
 
 def call_process(cmd):
+  mylog.log_cmd(cmd, stdout=stdout, stderr=stderr)
   proc = Popen(cmd, stdout=stdout, stderr=stderr)
   proc.communicate()
   if proc.returncode != 0:
@@ -595,6 +597,7 @@ class Ports:
       cmake_build_type = 'Release'
 
       # Configure
+      mylog.log_cmd(['cmake', '-DCMAKE_BUILD_TYPE=' + cmake_build_type, '.'])
       subprocess.check_call(['cmake', '-DCMAKE_BUILD_TYPE=' + cmake_build_type, '.'])
 
       # Check which CMake generator CMake used so we know which form to pass parameters to make/msbuild/etc. build tool.
@@ -607,6 +610,7 @@ class Ports:
       elif 'Visual Studio' in generator: make_args = ['--config', cmake_build_type, '--', '/maxcpucount:' + num_cores]
 
       # Kick off the build.
+      mylog.log_cmd(['cmake', '--build', '.'] + make_args)
       subprocess.check_call(['cmake', '--build', '.'] + make_args)
     finally:
       os.chdir(old)

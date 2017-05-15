@@ -11,6 +11,7 @@ def try_delete(filename):
     pass
   if not os.path.exists(filename): return
   try:
+    mylog.log_remove(filename, ignore_errors=True)
     shutil.rmtree(filename, ignore_errors=True)
   except:
     pass
@@ -23,6 +24,7 @@ def try_delete(filename):
         func(path)
       else:
         raise
+    mylog.log_remove(filename, onerror=remove_readonly_and_try_again)
     shutil.rmtree(filename, onerror=remove_readonly_and_try_again)
   except:
     pass

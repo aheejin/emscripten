@@ -6,11 +6,10 @@ from distutils.spawn import find_executable
 import jsrun, cache, tempfiles
 import response_file
 import logging, platform, multiprocessing
+import mylog
 
 # Temp file utilities
 from tempfiles import try_delete
-
-mydebug = jsrun.mydebug
 
 # On Windows python suffers from a particularly nasty bug if python is spawning new processes while python itself is spawned from some other non-console process.
 # Use a custom replacement for Popen on Windows to avoid the "WindowsError: [Error 6] The handle is invalid" errors when emcc is driven through cmake or mingw32-make.
@@ -45,6 +44,7 @@ class WindowsPopen:
 
     try:
       # Call the process with fixed streams.
+      mylog.log_cmd(args, cwd=cwd)
       self.process = subprocess.Popen(args, bufsize, executable, self.stdin_, self.stdout_, self.stderr_, preexec_fn, close_fds, shell, cwd, env, universal_newlines, startupinfo, creationflags)
       self.pid = self.process.pid
     except Exception, e:
@@ -329,6 +329,7 @@ actual_clang_version = None
 def get_clang_version():
   global actual_clang_version
   if actual_clang_version is None:
+    mylog.log_cmd([CLANG, '-v'], stderr=PIPE)
     response = Popen([CLANG, '-v'], stderr=PIPE).communicate()[1]
     m = re.search(r'[Vv]ersion\s+(\d+\.\d+)', response)
     actual_clang_version = m and m.group(1)
@@ -367,6 +368,7 @@ def get_fastcomp_src_dir():
 
 def get_llc_targets():
   try:
+    mylog.log_cmd([LLVM_COMPILER, '--version'], stdout=PIPE)
     llc_version_info = Popen([LLVM_COMPILER, '--version'], stdout=PIPE).communicate()[0]
     pre, targets = llc_version_info.split('Registered Targets:')
     return targets
@@ -448,6 +450,7 @@ def check_node_version():
 
 def check_closure_compiler():
   try:
+    mylog.log_cmd([JAVA, '-version'], stdout=PIPE, stderr=PIPE)
     subprocess.call([JAVA, '-version'], stdout=PIPE, stderr=PIPE)
   except:
     logging.warning('java does not seem to exist, required for closure compiler, which is optional (define JAVA in ' + hint_config_file_location() + ' if you want it)')
@@ -561,6 +564,7 @@ def check_sanity(force=False):
 
     if not os.path.exists(PYTHON) and not os.path.exists(cmd + '.exe'):
       try:
+        mylog.log_cmd([PYTHON, '--version'], stdout=PIPE, stderr=PIPE)
         subprocess.check_call([PYTHON, '--version'], stdout=PIPE, stderr=PIPE)
       except:
         logging.critical('Cannot find %s, check the paths in %s' % (PYTHON, EM_CONFIG))
@@ -1543,7 +1547,9 @@ class Building:
     if copy_project:
       project_dir = os.path.join(temp_dir, name)
       if os.path.exists(project_dir):
+        mylog.log_remove(project_dir)
         shutil.rmtree(project_dir)
+      mylog.log_copy(source_dir, project_dir) # Useful in debugging sometimes to comment this out, and two lines above
       shutil.copytree(source_dir, project_dir) # Useful in debugging sometimes to comment this out, and two lines above
     else:
       project_dir = build_dir
@@ -1797,8 +1803,7 @@ class Building:
 
     if not just_calculate:
       logging.debug('emcc: llvm-linking: %s to %s', actual_files, target)
-      if mydebug:
-        print 'Popen: ' + LLVM_LINK + ' ' + ' '.join(link_args) + ' -o ' + target
+      mylog.log_cmd([LLVM_LINK] + link_args + ['-o', target], stdout=PIPE)
       output = Popen([LLVM_LINK] + link_args + ['-o', target], stdout=PIPE).communicate()[0]
       assert os.path.exists(target) and (output is None or 'Could not open input file' not in output), 'Linking error: ' + output
       return target
@@ -1838,17 +1843,18 @@ class Building:
 
     logging.debug('emcc: LLVM opts: ' + ' '.join(opts) + '  [num inputs: ' + str(len(inputs)) + ']')
     target = out or (filename + '.opt.bc')
-    if mydebug:
-      print 'Popen: ' + LLVM_OPT + ' ' + ' '.join(inputs) + ' ' + ' '.join(opts) + ' -o ' + target + '\n'
+    mylog.log_cmd([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE)
     output = Popen([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE).communicate()[0]
     assert os.path.exists(target), 'Failed to run llvm optimizations: ' + output
     if not out:
+      mylog.log_move(filename + '.opt.bc', filename)
       shutil.move(filename + '.opt.bc', filename)
     return target
 
   @staticmethod
   def llvm_opts(filename): # deprecated version, only for test runner. TODO: remove
     if Building.LLVM_OPTS:
+      mylog.log_move(filename + '.o', filename + '.o.pre')
       shutil.move(filename + '.o', filename + '.o.pre')
       output = Popen([LLVM_OPT, filename + '.o.pre'] + Building.LLVM_OPT_OPTS + ['-o', filename + '.o'], stdout=PIPE).communicate()[0]
       assert os.path.exists(filename + '.o'), 'Failed to run llvm optimizations: ' + output
@@ -2059,12 +2065,14 @@ class Building:
   @staticmethod
   def js_optimizer_no_asmjs(filename, passes):
     next = filename + '.jso.js'
+    mylog.log_cmd(NODE_JS + [js_optimizer.JS_OPTIMIZER, filename] + passes, stdout=open(next, 'w'))
     subprocess.check_call(NODE_JS + [js_optimizer.JS_OPTIMIZER, filename] + passes, stdout=open(next, 'w'))
     return next
 
   # evals ctors. if binaryen_bin is provided, it is the dir of the binaryen tool for this, and we are in wasm mode
   @staticmethod
   def eval_ctors(js_file, binary_file, binaryen_bin=''):
+    mylog.log_cmd([PYTHON, path_from_root('tools', 'ctor_evaller.py'), js_file, binary_file, str(Settings.TOTAL_MEMORY), str(Settings.TOTAL_STACK), str(Settings.GLOBAL_BASE), binaryen_bin])
     subprocess.check_call([PYTHON, path_from_root('tools', 'ctor_evaller.py'), js_file, binary_file, str(Settings.TOTAL_MEMORY), str(Settings.TOTAL_STACK), str(Settings.GLOBAL_BASE), binaryen_bin])
 
   @staticmethod
@@ -2542,8 +2550,7 @@ class WebAssembly:
 
 def execute(cmd, *args, **kw):
   try:
-    if mydebug:
-      print 'execute: %s' % ' '.join(cmd)
+    mylog.log_cmd(cmd, *args, **kw)
     return Popen(cmd, *args, **kw).communicate() # let compiler frontend print directly, so colors are saved (PIPE kills that)
   except:
     if not isinstance(cmd, str):
@@ -2555,8 +2562,7 @@ def check_execute(cmd, *args, **kw):
   # TODO: use in more places. execute doesn't actually check that return values
   # are nonzero
   try:
-    if mydebug:
-      print 'check_execute: %s' % ' '.join(cmd)
+    mylog.log_cmd(cmd, *args, **kw)
     subprocess.check_output(cmd, *args, **kw)
     logging.debug("Successfuly executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
@@ -2565,8 +2571,7 @@ def check_execute(cmd, *args, **kw):
 
 def check_call(cmd, *args, **kw):
   try:
-    if mydebug:
-      print 'check_call: %s' % ' '.join(cmd)
+    mylog.log_cmd(cmd, *args, **kw)
     subprocess.check_call(cmd, *args, **kw)
     logging.debug("Successfully executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
@@ -2584,29 +2589,30 @@ def unsuffixed_basename(name):
   return os.path.basename(unsuffixed(name))
 
 def safe_move(src, dst):
-  if mydebug:
-    print 'Move: mv %s %s' % (src, dst)
+  mylog.log_move(src, dst)
   src = os.path.abspath(src)
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
     dst = os.path.join(dst, os.path.basename(src))
   if src == dst: return
   if dst == '/dev/null': return
+  mylog.log_move(src, dst)
   shutil.move(src, dst)
 
 def safe_copy(src, dst):
-  if mydebug:
-    print 'Copy: mv %s %s' % (src, dst)
+  mylog.log_copy(src, dst)
   src = os.path.abspath(src)
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
     dst = os.path.join(dst, os.path.basename(src))
   if src == dst: return
   if dst == '/dev/null': return
+  mylog.log_copy(src, dst)
   shutil.copyfile(src, dst)
 
 def clang_preprocess(filename):
   # TODO: REMOVE HACK AND PASS PREPROCESSOR FLAGS TO CLANG.
+  mylog.log_cmd([CLANG_CC, '-DFETCH_DEBUG=1', '-E', '-P', '-C', '-x', 'c', filename])
   return subprocess.check_output([CLANG_CC, '-DFETCH_DEBUG=1', '-E', '-P', '-C', '-x', 'c', filename])
 
 def read_and_preprocess(filename):

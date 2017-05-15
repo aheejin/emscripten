@@ -97,6 +97,7 @@ emmaken can be influenced by a few environment variables:
 import sys
 import os
 import subprocess
+import mylog
 
 print >> sys.stderr, 'emmaken.py: ', ' '.join(sys.argv)
 
@@ -113,6 +114,7 @@ if CONFIGURE_CONFIG or CMAKE_CONFIG:
   compiler = 'g++' if 'CXXCompiler' in ' '.join(sys.argv) or os.environ.get('EMMAKEN_CXX') else 'gcc'
   cmd = [compiler] + EMSDK_OPTS + sys.argv[1:]
   print >> sys.stderr, 'emmaken.py, just configuring: ', cmd
+  mylog.log_cmd(cmd)
   exit(subprocess.call(cmd))
 
 try:
@@ -214,6 +216,7 @@ try:
       newargs.append('-c') 
   else:
     print >> sys.stderr, 'Just copy.'
+    mylog.log_copy(sys.argv[-1], sys.argv[-2])
     shutil.copy(sys.argv[-1], sys.argv[-2])
     exit(0)
 
@@ -223,6 +226,7 @@ try:
 
   print >> sys.stderr, "Running:", call, ' '.join(newargs)
 
+  mylog.log_cmd([call] + newargs)
   subprocess.call([call] + newargs)
 except Exception, e:
   print 'Error in emmaken.py. (Is the config file %s set up properly?) Error:' % EM_CONFIG, e

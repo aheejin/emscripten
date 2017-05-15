@@ -6,6 +6,7 @@ diff that makes the outputs different.
 
 import os, sys, shutil
 from subprocess import Popen, PIPE, STDOUT
+import mylog
 
 __rootpath__ = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 def path_from_root(*pathelems):
@@ -36,6 +37,7 @@ assert left_result != right_result
 
 # Calculate diff chunks
 print 'diffing'
+mylog.log_cmd(['diff', '-U', '5', 'left', 'right'], stdout=PIPE)
 diff = Popen(['diff', '-U', '5', 'left', 'right'], stdout=PIPE).communicate()[0].split('\n')
 pre_diff = diff[:2]
 diff = diff[2:]
@@ -64,8 +66,11 @@ for mid in range(high):
   difff = open('diff.diff', 'w')
   difff.write(curr_diff)
   difff.close()
+  mylog.log_copy('left', 'middle')
   shutil.copy('left', 'middle')
+  mylog.log_cmd(['patch', 'middle', 'diff.diff'], stdout=PIPE)
   Popen(['patch', 'middle', 'diff.diff'], stdout=PIPE).communicate()
+  mylog.log_copy('middle', 'middle' + str(mid))
   shutil.copyfile('middle', 'middle' + str(mid))
   result = run_code('middle')
   print result == left_result, result == right_result#, 'XXX', left_result, 'YYY', result, 'ZZZ', right_result
@@ -80,6 +85,7 @@ for mid in range(high):
     found = mid
     break
 
+mylog.log_cmd(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE)
 critical = Popen(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE).communicate()[0]
 c = open('critical.diff', 'w')
 c.write(critical)

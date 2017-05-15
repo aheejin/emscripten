@@ -15,6 +15,7 @@ for arg in sys.argv:
 # Deletes all previously captured log files to make room for a new clean run.
 def delete_profiler_logs():
   try:
+    mylog.log_remove(profiler_logs_path)
     shutil.rmtree(profiler_logs_path)
   except:
     pass

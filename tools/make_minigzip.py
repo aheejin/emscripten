@@ -2,6 +2,7 @@ import os, sys
 from subprocess import Popen, PIPE, STDOUT
 
 import shared
+import mylog
 
 print 'Building zlib'
 
@@ -10,5 +11,6 @@ zlib = shared.Building.build_library('zlib', emscripten_temp_dir, emscripten_tem
 
 print 'Building minigzip'
 
+mylog.log_cmd([shared.PYTHON, shared.EMCC, '-O2', shared.path_from_root('tests', 'zlib', 'minigzip.c'), zlib, '-o', shared.path_from_root('tools', 'minigzip.js')])
 Popen([shared.PYTHON, shared.EMCC, '-O2', shared.path_from_root('tests', 'zlib', 'minigzip.c'), zlib, '-o', shared.path_from_root('tools', 'minigzip.js')]).communicate()
 

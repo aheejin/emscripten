@@ -48,6 +48,7 @@ while True:
   mid = int((low + high)/2)
   print low, high, '  current: %d' % mid,
   open('middle', 'w').write('\n'.join(left_lines[:mid] + right_lines[mid:]))
+  mylog.log_copy('middle', 'middle' + str(mid))
   shutil.copyfile('middle', 'middle' + str(mid))
   result = run_code('middle')
   print result == left_result, result == right_result#, 'XXX', left_result, 'YYY', result, 'ZZZ', right_result

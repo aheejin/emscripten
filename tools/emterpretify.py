@@ -751,6 +751,7 @@ if __name__ == '__main__':
   if DEBUG or SWAPPABLE:
     orig = infile + '.orig.js'
     shared.logging.debug('saving original (non-emterpreted) code to ' + orig)
+    mylog.log_copy(infile, orig)
     shutil.copyfile(infile, orig)
 
   if len(WHITELIST) > 0:

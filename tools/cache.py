@@ -1,6 +1,7 @@
 from toolchain_profiler import ToolchainProfiler
 import os.path, sys, shutil, time, logging
 import tempfiles, filelock
+import mylog
 
 # Permanent cache for dlmalloc and stdlibc++
 class Cache:
@@ -99,6 +100,7 @@ class Cache:
       self.ensure()
       temp = creator()
       if temp != cachename:
+        mylog.log_copy(temp, cachename)
         shutil.copyfile(temp, cachename)
       logging.info(' - ok')
     finally:

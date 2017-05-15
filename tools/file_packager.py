@@ -72,6 +72,7 @@ from jsrun import run_js
 from subprocess import Popen, PIPE, STDOUT
 import fnmatch
 import json
+import mylog
 
 if len(sys.argv) == 1:
   print '''Usage: file_packager.py TARGET [--preload A...] [--embed B...] [--exclude C...] [--no-closure] [--crunch[=X]] [--js-output=OUTPUT.js] [--no-force] [--use-preload-cache] [--no-heap-copy] [--separate-metadata]
@@ -319,6 +320,7 @@ metadata = {'files': []}
 
 # Crunch files
 if crunch:
+  mylog.log_copy(shared.path_from_root('tools', 'crunch-worker.js'), 'crunch-worker.js')
   shutil.copyfile(shared.path_from_root('tools', 'crunch-worker.js'), 'crunch-worker.js')
   ret += '''
     var decrunchWorker = new Worker('crunch-worker.js');
@@ -356,6 +358,7 @@ if crunch:
 
       # guess at format. this lets us tell crunch to not try to be clever and use odd formats like DXT5_AGBR
       try:
+        mylog.log_cmd(['file', file_['srcpath']], stdout=PIPE)
         format = Popen(['file', file_['srcpath']], stdout=PIPE).communicate()[0]
         if 'DXT5' in format:
           format = ['-dxt5']
@@ -365,6 +368,7 @@ if crunch:
           raise Exception('unknown format')
       except:
         format = []
+      mylog.log_cmd([CRUNCH, '-outsamedir', '-file', src_dds_name, '-quality', crunch] + format, stdout=sys.stderr)
       Popen([CRUNCH, '-outsamedir', '-file', src_dds_name, '-quality', crunch] + format, stdout=sys.stderr).communicate()
       #if not os.path.exists(os.path.basename(crunch_name)):
       #  print >> sys.stderr, 'Failed to crunch, perhaps a weird dxt format? Looking for a source PNG for the DDS'
@@ -533,6 +537,7 @@ if has_preloaded:
   else:
     # LZ4FS usage
     temp = data_target + '.orig'
+    mylog.log_move(data_target, temp)
     shutil.move(data_target, temp)
     meta = run_js(shared.path_from_root('tools', 'lz4-compress.js'), shared.NODE_JS, [shared.path_from_root('src', 'mini-lz4.js'), temp, data_target], stdout=PIPE)
     os.unlink(temp)

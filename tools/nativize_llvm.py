@@ -11,6 +11,7 @@ from exec_llvm) fails for some reason.
 
 import os, sys
 from subprocess import Popen, PIPE, STDOUT
+import mylog
 
 __rootpath__ = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 def path_from_root(*pathelems):
@@ -21,13 +22,16 @@ filename = sys.argv[1]
 libs = sys.argv[2:] # e.g.: dl for dlopen/dlclose, util for openpty/forkpty
 
 print 'bc => clean bc'
+mylog.log_cmd([LLVM_OPT, filename, '-strip-debug', '-o', filename + '.clean.bc'])
 Popen([LLVM_OPT, filename, '-strip-debug', '-o', filename + '.clean.bc']).communicate()[0]
 print 'bc => s'
 for params in [['-march=x86'], ['-march=x86-64']]: # try x86, then x86-64 FIXME
   print 'params', params
   for triple in [['-mtriple=i386-pc-linux-gnu'], []]:
+    mylog.log_cmd([LLVM_COMPILER] + params + triple + [filename + '.clean.bc', '-o', filename + '.s'])
     Popen([LLVM_COMPILER] + params + triple + [filename + '.clean.bc', '-o', filename + '.s']).communicate()[0]
     print 's => o'
+    mylog.log_cmd(['as', filename + '.s', '-o', filename + '.o'])
     Popen(['as', filename + '.s', '-o', filename + '.o']).communicate()[0]
     if os.path.exists(filename + '.o'): break
   if os.path.exists(filename + '.o'): break
@@ -37,5 +41,6 @@ if not os.path.exists(filename + '.o'):
   sys.exit(1)
 
 print 'o => runnable'
+mylog.log_cmd(['g++', path_from_root('system', 'lib', 'debugging.cpp'), filename + '.o', '-o', filename + '.run'] + ['-l' + lib for lib in libs])
 Popen(['g++', path_from_root('system', 'lib', 'debugging.cpp'), filename + '.o', '-o', filename + '.run'] + ['-l' + lib for lib in libs]).communicate()[0]
 
