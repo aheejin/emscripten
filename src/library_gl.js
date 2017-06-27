@@ -2633,8 +2633,8 @@ var LibraryGL = {
     } else {
       for (var i = 0; i < data.length; i++) {
         switch (type) {
-          case 'Integer': {{{ makeSetValue('params', 'i', 'data[i]', 'i32') }}}; break;
-          case 'Float': {{{ makeSetValue('params', 'i', 'data[i]', 'float') }}}; break;
+          case 'Integer': {{{ makeSetValue('params', 'i*4', 'data[i]', 'i32') }}}; break;
+          case 'Float': {{{ makeSetValue('params', 'i*4', 'data[i]', 'float') }}}; break;
           default: throw 'internal emscriptenWebGLGetUniform() error, bad type: ' + type;
         }
       }
@@ -2731,9 +2731,9 @@ var LibraryGL = {
     } else {
       for (var i = 0; i < data.length; i++) {
         switch (type) {
-          case 'Integer': {{{ makeSetValue('params', 'i', 'data[i]', 'i32') }}}; break;
-          case 'Float': {{{ makeSetValue('params', 'i', 'data[i]', 'float') }}}; break;
-          case 'FloatToInteger': {{{ makeSetValue('params', 'i', 'Math.fround(data[i])', 'i32') }}}; break;
+          case 'Integer': {{{ makeSetValue('params', 'i*4', 'data[i]', 'i32') }}}; break;
+          case 'Float': {{{ makeSetValue('params', 'i*4', 'data[i]', 'float') }}}; break;
+          case 'FloatToInteger': {{{ makeSetValue('params', 'i*4', 'Math.fround(data[i])', 'i32') }}}; break;
           default: throw 'internal emscriptenWebGLGetVertexAttrib() error, bad type: ' + type;
         }
       }
@@ -7128,6 +7128,10 @@ var LibraryGL = {
   },
 
   glPopMatrix: function() {
+    if (GLImmediate.matrixStack[GLImmediate.currentMatrix].length == 0) {
+      GL.recordError(0x0504/*GL_STACK_UNDERFLOW*/);
+      return;
+    }
     GLImmediate.matricesModified = true;
     GLImmediate.matrixVersion[GLImmediate.currentMatrix] = (GLImmediate.matrixVersion[GLImmediate.currentMatrix] + 1)|0;
     GLImmediate.matrix[GLImmediate.currentMatrix] = GLImmediate.matrixStack[GLImmediate.currentMatrix].pop();

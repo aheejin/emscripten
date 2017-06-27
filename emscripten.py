@@ -99,16 +99,10 @@ def emscript(infile, settings, outfile, libraries=None, compiler_engine=None,
       glue, forwarded_data = compiler_glue(metadata, settings, libraries, compiler_engine, temp_files, DEBUG)
 
     with ToolchainProfiler.profile_block('function_tables_and_exports'):
-      (post, funcs_js, sending, receiving, asm_setup, the_global, asm_global_vars,
-       asm_global_funcs, pre_tables, final_function_tables, exports, function_table_data) = (
+      (post, function_table_data, bundled_args) = (
           function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data, settings, outfile, DEBUG))
     with ToolchainProfiler.profile_block('write_output_file'):
-      function_table_sigs = function_table_data.keys()
-      module = create_module(funcs_js, asm_setup, the_global, sending, receiving, asm_global_vars,
-                             asm_global_funcs, pre_tables, final_function_tables, function_table_sigs,
-                             exports, metadata, settings)
-      write_output_file(metadata, post, module, function_table_data, settings, outfile, DEBUG)
-
+      finalize_output(outfile, post, function_table_data, bundled_args, metadata, settings, DEBUG)
     success = True
 
   finally:
@@ -339,13 +333,31 @@ def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data,
       len(exports), len(the_global), len(sending), len(receiving)]))
     logging.debug('  emscript: python processing: function tables and exports took %s seconds' % (time.time() - t))
 
-  return (post, funcs_js, sending, receiving, asm_setup, the_global, asm_global_vars,
-          asm_global_funcs, pre_tables, final_function_tables, exports, function_table_data)
+  bundled_args = (funcs_js, asm_setup, the_global, sending, receiving, asm_global_vars,
+                  asm_global_funcs, pre_tables, final_function_tables, exports)
+  return (post, function_table_data, bundled_args)
 
 
-def create_module(funcs_js, asm_setup, the_global, sending, receiving, asm_global_vars,
-                  asm_global_funcs, pre_tables, final_function_tables, function_table_sigs,
-                  exports, metadata, settings):
+def finalize_output(outfile, post, function_table_data, bundled_args, metadata, settings, DEBUG):
+  function_table_sigs = function_table_data.keys()
+  module = create_module(function_table_sigs, metadata, settings, *bundled_args)
+
+  if DEBUG:
+    logging.debug('emscript: python processing: finalize')
+    t = time.time()
+
+  write_output_file(outfile, post, module)
+  module = None
+
+  if DEBUG:
+    logging.debug('  emscript: python processing: finalize took %s seconds' % (time.time() - t))
+
+  write_cyberdwarf_data(outfile, metadata, settings)
+
+
+def create_module(function_table_sigs, metadata, settings,
+                  funcs_js, asm_setup, the_global, sending, receiving, asm_global_vars,
+                  asm_global_funcs, pre_tables, final_function_tables, exports):
   receiving += create_named_globals(metadata, settings)
   runtime_funcs = create_runtime_funcs(exports, settings)
 
@@ -384,22 +396,16 @@ Runtime.registerFunctions(%(sigs)s, Module);
   return module
 
 
-def write_output_file(metadata, post, module, function_table_data, settings, outfile, DEBUG):
-  if DEBUG:
-    logging.debug('emscript: python processing: finalize')
-    t = time.time()
-
+def write_output_file(outfile, post, module):
   for i in range(len(module)): # do this loop carefully to save memory
-    if WINDOWS: module[i] = module[i].replace('\r\n', '\n') # Normalize to UNIX line endings, otherwise writing to text file will duplicate \r\n to \r\r\n!
+    module[i] = normalize_line_endings(module[i])
     outfile.write(module[i])
-  module = None
 
-  if WINDOWS: post = post.replace('\r\n', '\n') # Normalize to UNIX line endings, otherwise writing to text file will duplicate \r\n to \r\r\n!
+  post = normalize_line_endings(post)
   outfile.write(post)
 
-  if DEBUG:
-    logging.debug('  emscript: python processing: finalize took %s seconds' % (time.time() - t))
 
+def write_cyberdwarf_data(outfile, metadata, settings):
   if settings['CYBERDWARF']:
     assert('cyberdwarf_data' in metadata)
     cd_file_name = outfile.name + ".cd"
@@ -538,13 +544,21 @@ def memory_and_global_initializers(pre, metadata, mem_init, settings):
 
   staticbump = metadata['staticBump']
   while staticbump % 16 != 0: staticbump += 1
-  pre = pre.replace('STATICTOP = STATIC_BASE + 0;', '''STATICTOP = STATIC_BASE + %d;%s
-/* global initializers */ %s __ATINIT__.push(%s);
-%s''' % (staticbump,
-         'assert(STATICTOP < SPLIT_MEMORY, "SPLIT_MEMORY size must be big enough so the entire static memory, need " + STATICTOP);' if settings['SPLIT_MEMORY'] else '',
-         'if (!ENVIRONMENT_IS_PTHREAD)' if settings['USE_PTHREADS'] else '',
-         global_initializers,
-         mem_init))
+  split_memory = ''
+  if settings['SPLIT_MEMORY']:
+    split_memory = ('assert(STATICTOP < SPLIT_MEMORY, "SPLIT_MEMORY size must be big enough so the '
+                    'entire static memory, need " + STATICTOP);')
+  pthread = ''
+  if settings['USE_PTHREADS']:
+    pthread = 'if (!ENVIRONMENT_IS_PTHREAD)'
+  pre = pre.replace('STATICTOP = STATIC_BASE + 0;',
+    '''STATICTOP = STATIC_BASE + {staticbump};{split_memory}
+/* global initializers */ {pthread} __ATINIT__.push({global_initializers});
+{mem_init}'''.format(staticbump=staticbump,
+                     split_memory=split_memory,
+                     pthread=pthread,
+                     global_initializers=global_initializers,
+                     mem_init=mem_init))
 
   if settings['SIDE_MODULE']:
     pre = pre.replace('Runtime.GLOBAL_BASE', 'gb')
@@ -673,7 +687,7 @@ def unfloat(s):
 
 
 def make_function_tables_defs(implemented_functions, all_implemented, function_table_data, settings, metadata):
-  class Counter:
+  class Counter(object):
     next_bad_item = 0
     next_item = 0
     pre = []
@@ -1722,13 +1736,8 @@ def emscript_wasm_backend(infile, settings, outfile, libraries=None, compiler_en
   # finalize
   module = create_module_wasm(sending, receiving, invoke_funcs, settings)
 
-  for i in range(len(module)): # do this loop carefully to save memory
-    if WINDOWS: module[i] = module[i].replace('\r\n', '\n') # Normalize to UNIX line endings, otherwise writing to text file will duplicate \r\n to \r\r\n!
-    outfile.write(module[i])
+  write_output_file(outfile, post, module)
   module = None
-
-  if WINDOWS: post = post.replace('\r\n', '\n') # Normalize to UNIX line endings, otherwise writing to text file will duplicate \r\n to \r\r\n!
-  outfile.write(post)
 
   outfile.close()
 
@@ -1747,7 +1756,7 @@ def build_wasm(temp_files, infile, outfile, settings, DEBUG):
       shutil.copyfile(temp_s, os.path.join(shared.CANONICAL_TEMP_DIR, 'emcc-llvm-backend-output.s'))
 
     assert shared.Settings.BINARYEN_ROOT, 'need BINARYEN_ROOT config set so we can use Binaryen s2wasm on the backend output'
-    basename = outfile.name[:-3]
+    basename = shared.unsuffixed(outfile.name)
     wast = basename + '.wast'
     s2wasm_args = create_s2wasm_args(temp_s)
     if DEBUG:
@@ -1758,6 +1767,8 @@ def build_wasm(temp_files, infile, outfile, settings, DEBUG):
     # Also convert wasm text to binary
     wasm_as_args = [os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 'wasm-as'),
                     wast, '-o', basename + '.wasm']
+    if settings['DEBUG_LEVEL'] >= 2 or settings['PROFILING_FUNCS']:
+      wasm_as_args += ['-g']
     logging.debug('  emscript: binaryen wasm-as: ' + ' '.join(wasm_as_args))
     shared.check_call(wasm_as_args)
 
@@ -1913,9 +1924,9 @@ var asm = Module['asm'](%s, %s, buffer);
 STACKTOP = STACK_BASE + TOTAL_STACK;
 STACK_MAX = STACK_BASE;
 HEAP32[%d >> 2] = STACKTOP;
-Runtime.stackAlloc = Module['stackAlloc'];
-Runtime.stackSave = Module['stackSave'];
-Runtime.stackRestore = Module['stackRestore'];
+Runtime.stackAlloc = Module['_stackAlloc'];
+Runtime.stackSave = Module['_stackSave'];
+Runtime.stackRestore = Module['_stackRestore'];
 Runtime.establishStackSpace = Module['establishStackSpace'];
 ''' % shared.Settings.GLOBAL_BASE)
 
@@ -1949,9 +1960,12 @@ def create_backend_args_wasm(infile, temp_s, settings):
 
 
 def create_s2wasm_args(temp_s):
-  def compiler_rt_fail():
-    raise Exception('Expected wasm_compiler_rt.a to already be built')
-  compiler_rt_lib = shared.Cache.get('wasm_compiler_rt.a', compiler_rt_fail, 'a')
+  def wasm_rt_fail(archive_file):
+    def wrapped():
+      raise Exception('Expected {} to already be built'.format(archive_file))
+    return wrapped
+  compiler_rt_lib = shared.Cache.get('wasm_compiler_rt.a', wasm_rt_fail('wasm_compiler_rt.a'), 'a')
+  libc_rt_lib = shared.Cache.get('wasm_libc_rt.a', wasm_rt_fail('wasm_libc_rt.a'), 'a')
 
   s2wasm_path = os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 's2wasm')
 
@@ -1959,7 +1973,7 @@ def create_s2wasm_args(temp_s):
   args += ['--global-base=%d' % shared.Settings.GLOBAL_BASE]
   args += ['--initial-memory=%d' % shared.Settings.TOTAL_MEMORY]
   args += ['--allow-memory-growth'] if shared.Settings.ALLOW_MEMORY_GROWTH else []
-  args += ['-l', compiler_rt_lib]
+  args += ['-l', compiler_rt_lib, '-l', libc_rt_lib]
   return args
 
 
@@ -2056,12 +2070,25 @@ if os.environ.get('EMCC_FAST_COMPILER') == '0':
   sys.exit(1)
 
 
+def normalize_line_endings(text):
+  """Normalize to UNIX line endings.
+
+  On Windows, writing to text file will duplicate \r\n to \r\r\n otherwise.
+  """
+  if WINDOWS:
+    return text.replace('\r\n', '\n')
+  return text
+
+
 def main(args, compiler_engine, cache, temp_files, DEBUG):
   # Prepare settings for serialization to JSON.
   settings = {}
   for setting in args.settings:
     name, value = setting.strip().split('=', 1)
-    settings[name] = json.loads(value)
+    value = json.loads(value)
+    if isinstance(value, unicode):
+      value = value.encode('utf8')
+    settings[name] = value
 
   # libraries
   libraries = args.libraries[0].split(',') if len(args.libraries) > 0 else []
