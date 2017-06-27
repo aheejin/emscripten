@@ -102,6 +102,7 @@ def save_intermediate(name=None, suffix='js'):
   if type(final) != str:
     logging.debug('(not saving intermediate %s because deferring linking)' % name)
     return
+  mylog.log_copy(final, name)
   shutil.copyfile(final, name)
   Intermediate.counter += 1
 
@@ -1609,7 +1610,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         final += '.tr.js'
         posix = True if not shared.WINDOWS else False
         logging.debug('applying transform: %s', options.js_transform)
-        mylog.log_copy(shared.Building.remove_quotes(shlex.split(options.js_transform, posix=posix) + [os.path.abspath(final)]))
+        mylog.log_cmd(shared.Building.remove_quotes(shlex.split(options.js_transform, posix=posix) + [os.path.abspath(final)]))
         subprocess.check_call(shared.Building.remove_quotes(shlex.split(options.js_transform, posix=posix) + [os.path.abspath(final)]))
         if DEBUG: save_intermediate('transformed')
 
@@ -1836,7 +1837,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   finally:
     if not TEMP_DIR:
       try:
-        shutil.rmtree(temp_dir)
+        #shutil.rmtree(temp_dir)
+        pass
       except:
         pass
     else:
@@ -2115,6 +2117,7 @@ def emterpretify(js_target, optimizer, options):
   import json
   try:
     # move temp js to final position, alongside its mem init file
+    mylog.log_move(final, js_target)
     shutil.move(final, js_target)
     args = [shared.PYTHON,
             shared.path_from_root('tools', 'emterpretify.py'),
@@ -2182,12 +2185,14 @@ def emit_js_source_maps(target, js_transform_tempfiles):
 def separate_asm_js(final, asm_target):
   """Separate out the asm.js code, if asked. Or, if necessary for another option"""
   logging.debug('separating asm')
+  mylog.log_cmd([shared.PYTHON, shared.path_from_root('tools', 'separate_asm.py'), final, asm_target, final])
   subprocess.check_call([shared.PYTHON, shared.path_from_root('tools', 'separate_asm.py'), final, asm_target, final])
 
   # extra only-my-code logic
   if shared.Settings.ONLY_MY_CODE:
     temp = asm_target + '.only.js'
     print jsrun.run_js(shared.path_from_root('tools', 'js-optimizer.js'), shared.NODE_JS, args=[asm_target, 'eliminateDeadGlobals', 'last', 'asm'], stdout=open(temp, 'w'))
+    mylog.log_move(temp, asm_target)
     shutil.move(temp, asm_target)
 
 
@@ -2277,6 +2282,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
       wrote_wasm_text = True
     logging.debug('asm2wasm (asm.js => WebAssembly): ' + ' '.join(cmd))
     TimeLogger.update()
+    mylog.log_cmd(cmd)
     subprocess.check_call(cmd)
 
     if not target_binary:
@@ -2288,6 +2294,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
           if options.source_map_base:
             cmd += ['--source-map-url=' + options.source_map_base + wasm_binary_target + '.map']
       logging.debug('wasm-as (text => binary): ' + ' '.join(cmd))
+      mylog.log_cmd(cmd)
       subprocess.check_call(cmd)
     if import_mem_init:
       # remove and forget about the mem init file in later processing; it does not need to be prefetched in the html, etc.
@@ -2298,15 +2305,18 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
       options.memory_init_file = False
     log_time('asm2wasm')
   if shared.Settings.BINARYEN_PASSES:
+    mylog.log_move(wasm_binary_target, wasm_binary_target + '.pre')
     shutil.move(wasm_binary_target, wasm_binary_target + '.pre')
     # BINARYEN_PASSES is comma-separated, and we support both '-'-prefixed and unprefixed pass names
     passes = map(lambda p: ('--' + p) if p[0] != '-' else p, shared.Settings.BINARYEN_PASSES.split(','))
     cmd = [os.path.join(binaryen_bin, 'wasm-opt'), wasm_binary_target + '.pre', '-o', wasm_binary_target] + passes
     logging.debug('wasm-opt on BINARYEN_PASSES: ' + ' '.join(cmd))
+    mylog.log_cmd(cmd)
     subprocess.check_call(cmd)
   if not wrote_wasm_text and 'interpret-s-expr' in shared.Settings.BINARYEN_METHOD:
     cmd = [os.path.join(binaryen_bin, 'wasm-dis'), wasm_binary_target, '-o', wasm_text_target]
     logging.debug('wasm-dis (binary => text): ' + ' '.join(cmd))
+    mylog.log_cmd(cmd)
     subprocess.check_call(cmd)
   if shared.Settings.BINARYEN_SCRIPTS:
     binaryen_scripts = os.path.join(shared.Settings.BINARYEN_ROOT, 'scripts')
@@ -2318,6 +2328,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
       script_env['PYTHONPATH'] = root_dir
     for script in shared.Settings.BINARYEN_SCRIPTS.split(','):
       logging.debug('running binaryen script: ' + script)
+      mylog.log_cmd([shared.PYTHON, os.path.join(binaryen_scripts, script), final, wasm_text_target], env=script_env)
       subprocess.check_call([shared.PYTHON, os.path.join(binaryen_scripts, script), final, wasm_text_target], env=script_env)
   if shared.Settings.EVAL_CTORS:
     shared.Building.eval_ctors(final, wasm_binary_target, binaryen_bin)
@@ -2326,6 +2337,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
     if shared.Settings.SIDE_MODULE:
       wso = shared.WebAssembly.make_shared_library(final, wasm_binary_target)
       # replace the wasm binary output with the dynamic library. TODO: use a specific suffix for such files?
+      mylog.log_move(wso, wasm_binary_target)
       shutil.move(wso, wasm_binary_target)
       if not DEBUG:
         os.unlink(asm_target) # we don't need the asm.js, it can just confuse
@@ -2504,6 +2516,7 @@ def generate_html(target, options, js_target, target_basename,
 
 
 def generate_worker_js(target, js_target, target_basename):
+  mylog.log_move(js_target, unsuffixed(js_target) + '.worker.js') # compiler output goes in .worker.js file
   shutil.move(js_target, unsuffixed(js_target) + '.worker.js') # compiler output goes in .worker.js file
   worker_target_basename = target_basename + '.worker'
   proxy_worker_filename = shared.Settings.PROXY_TO_WORKER_FILENAME or worker_target_basename
