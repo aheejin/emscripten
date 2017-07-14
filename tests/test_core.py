@@ -198,7 +198,7 @@ class T(RunnerCore): # Short name, to make it more fun to use manually on the co
   def test_literal_negative_zero(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_literal_negative_zero')
 
-  @no_wasm_backend('todo')
+  @no_wasm_backend('test uses calls to expected js imports, rather than using llvm intrinsics directly')
   def test_llvm_intrinsics(self):
     Settings.PRECISE_I64_MATH = 2 # for bswap64
 
@@ -4664,7 +4664,7 @@ PORT: 3979
     expected = open(path_from_root('tests', 'netinet', 'in.out'), 'r').read()
     self.do_run(src, expected)
 
-  @no_wasm_backend()
+  @no_wasm_backend('No dynamic linking support in wasm backend path')
   def test_main_module_static_align(self):
     if Settings.ALLOW_MEMORY_GROWTH: return self.skip('no shared modules with memory growth')
     Settings.MAIN_MODULE = 1
@@ -5808,7 +5808,6 @@ def process(filename):
   ### Integration tests
 
   @sync
-  @no_wasm_backend()
   def test_ccall(self):
     post = '''
 def process(filename):
@@ -5853,7 +5852,7 @@ def process(filename):
       self.emcc_args += ['--closure', '1']
       self.do_run_in_out_file_test('tests', 'core', 'test_ccall', post_build=post)
 
-  @no_wasm_backend()
+  @no_wasm_backend('DEAD_FUNCTIONS elimination is done by the JSOptimizer')
   def test_dead_functions(self):
     src = r'''
       #include <stdio.h>
@@ -6069,7 +6068,7 @@ def process(filename):
     assert '_exported_func_from_response_file_1' in open('src.cpp.o.js').read()
 
   @sync
-  @no_wasm_backend('RuntimeError: function signature mismatch')
+  @no_wasm_backend('no jsCall function pointers are created for wasm backend')
   def test_add_function(self):
     Settings.INVOKE_RUN = 0
     Settings.RESERVED_FUNCTION_POINTERS = 1
@@ -6826,6 +6825,7 @@ Module.printErr = Module['printErr'] = function(){};
     dirname = self.get_dir()
     src_filename = os.path.join(dirname, 'src.cpp')
     out_filename = os.path.join(dirname, 'a.out.js')
+    wasm_filename = os.path.join(dirname, 'a.out.wasm')
     no_maps_filename = os.path.join(dirname, 'no-maps.out.js')
 
     with open(src_filename, 'w') as f: f.write(src)
@@ -6843,12 +6843,13 @@ Module.printErr = Module['printErr'] = function(){};
       import json
       Building.emcc(src_filename, Settings.serialize() + self.emcc_args +
           Building.COMPILER_TEST_OPTS, out_filename, stderr=PIPE)
+      map_referent = out_filename if not Settings.BINARYEN else wasm_filename
       # after removing the @line and @sourceMappingURL comments, the build
       # result should be identical to the non-source-mapped debug version.
       # this is worth checking because the parser AST swaps strings for token
       # objects when generating source maps, so we want to make sure the
       # optimizer can deal with both types.
-      map_filename = out_filename + '.map'
+      map_filename = map_referent + '.map'
 
       def encode_utf8(data):
         if isinstance(data, dict):
@@ -6865,10 +6866,16 @@ Module.printErr = Module['printErr'] = function(){};
           return data
 
       data = encode_utf8(json.load(open(map_filename, 'r')))
-      self.assertPathsIdentical(out_filename, data['file'])
+      if hasattr(data, 'file'):
+        # the file attribute is optional, but if it is present it needs to refer
+        # the output file.
+        self.assertPathsIdentical(map_referent, data['file'])
       assert len(data['sources']) == 1, data['sources']
       self.assertPathsIdentical(src_filename, data['sources'][0])
-      self.assertTextDataIdentical(src, data['sourcesContent'][0])
+      if hasattr(data, 'sourcesContent'):
+        # the sourcesContent attribute is optional, but if it is present it
+        # needs to containt valid source text.
+        self.assertTextDataIdentical(src, data['sourcesContent'][0])
       mappings = encode_utf8(json.loads(jsrun.run_js(
         path_from_root('tools', 'source-maps', 'sourcemap2json.js'),
         tools.shared.NODE_JS, [map_filename])))

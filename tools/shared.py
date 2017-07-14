@@ -228,8 +228,6 @@ else:
     config_file = config_file.replace('\'{{{ EMSCRIPTEN_ROOT }}}\'', repr(__rootpath__))
     llvm_root = os.path.dirname(find_executable('llvm-dis') or '/usr/bin/llvm-dis')
     config_file = config_file.replace('\'{{{ LLVM_ROOT }}}\'', repr(llvm_root))
-    binaryen_root = os.path.dirname(find_executable('asm2wasm') or '') # if we don't find it, we'll use the port
-    config_file = config_file.replace('\'{{{ BINARYEN_ROOT }}}\'', repr(binaryen_root))
 
     node = find_executable('nodejs') or find_executable('node') or 'node'
     config_file = config_file.replace('\'{{{ NODE }}}\'', repr(node))
@@ -1372,9 +1370,9 @@ class Building(object):
             Building.multiprocessing_pool.terminate()
             Building.multiprocessing_pool.join()
             Building.multiprocessing_pool = None
-          except WindowsError, e:
+          except OSError, e:
             # Mute the "WindowsError: [Error 5] Access is denied" errors, raise all others through
-            if e.winerror != 5: raise
+            if not (sys.platform.startswith('win') and isinstance(e, WindowsError) and e.winerror == 5): raise
         atexit.register(close_multiprocessing_pool)
 
     return Building.multiprocessing_pool
@@ -1885,7 +1883,10 @@ class Building(object):
     opts = opts[:]
     #opts += ['-debug-pass=Arguments']
     if not Settings.SIMD:
-      opts += ['-disable-loop-vectorization', '-disable-slp-vectorization', '-vectorize-loops=false', '-vectorize-slp=false', '-vectorize-slp-aggressive=false']
+      opts += ['-disable-loop-vectorization', '-disable-slp-vectorization', '-vectorize-loops=false', '-vectorize-slp=false']
+      if not Settings.WASM_BACKEND:
+        # This option have been removed in llvm ToT
+        opts += ['-vectorize-slp-aggressive=false']
     else:
       opts += ['-bb-vectorize-vector-bits=128']
 

@@ -1635,6 +1635,10 @@ function ensureInitRuntime() {
 #endif
   if (runtimeInitialized) return;
   runtimeInitialized = true;
+#if USE_PTHREADS
+  // Pass the thread address inside the asm.js scope to store it for fast access that avoids the need for a FFI out.
+  __register_pthread_ptr(PThread.mainThreadBlock, /*isMainBrowserThread=*/!ENVIRONMENT_IS_WORKER, /*isMainRuntimeThread=*/1);
+#endif
   callRuntimeCallbacks(__ATINIT__);
 }
 
@@ -2223,16 +2227,21 @@ function integrateWasmJS(Module) {
   }
 
   function getBinary() {
-    var binary;
-    if (Module['wasmBinary']) {
-      binary = Module['wasmBinary'];
-      binary = new Uint8Array(binary);
-    } else if (Module['readBinary']) {
-      binary = Module['readBinary'](wasmBinaryFile);
-    } else {
-      throw "on the web, we need the wasm binary to be preloaded and set on Module['wasmBinary']. emcc.py will do that for you when generating HTML (but not JS)";
+    try {
+      var binary;
+      if (Module['wasmBinary']) {
+        binary = Module['wasmBinary'];
+        binary = new Uint8Array(binary);
+      } else if (Module['readBinary']) {
+        binary = Module['readBinary'](wasmBinaryFile);
+      } else {
+        throw "on the web, we need the wasm binary to be preloaded and set on Module['wasmBinary']. emcc.py will do that for you when generating HTML (but not JS)";
+      }
+      return binary;
     }
-    return binary;
+    catch (err) {
+      abort(err);
+    }
   }
 
   function getBinaryPromise() {
@@ -2324,7 +2333,7 @@ function integrateWasmJS(Module) {
       receiveInstance(output['instance']);
     }).catch(function(reason) {
       Module['printErr']('failed to asynchronously prepare wasm: ' + reason);
-      Module['quit'](1, reason);
+      abort(reason);
     });
     return {}; // no exports yet; we'll fill them in later
 #else
@@ -2491,6 +2500,12 @@ function integrateWasmJS(Module) {
     // try the methods. each should return the exports if it succeeded
 
     var exports;
+#if BINARYEN_METHOD == 'native-wasm'
+    exports = doNativeWasm(global, env, providedBuffer);
+#else
+#if BINARYEN_METHOD == 'asmjs'
+    exports = doJustAsm(global, env, providedBuffer);
+#else
     var methods = method.split(',');
 
     for (var i = 0; i < methods.length; i++) {
@@ -2509,11 +2524,13 @@ function integrateWasmJS(Module) {
       } else if (curr === 'interpret-asm2wasm' || curr === 'interpret-s-expr' || curr === 'interpret-binary') {
         if (exports = doWasmPolyfill(global, env, providedBuffer, curr)) break;
       } else {
-        throw 'bad method: ' + curr;
+        abort('bad method: ' + curr);
       }
     }
 
     if (!exports) throw 'no binaryen method succeeded. consider enabling more options, like interpreting, if you want that: https://github.com/kripken/emscripten/wiki/WebAssembly#binaryen-methods';
+#endif
+#endif
 
 #if RUNTIME_LOGGING
     Module['printErr']('binaryen method succeeded.');

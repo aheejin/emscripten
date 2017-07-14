@@ -2124,6 +2124,8 @@ int f() {
        ['JSDCE']),
       (path_from_root('tests', 'optimizer', 'JSDCE-uglifyjsNodeTypes.js'), open(path_from_root('tests', 'optimizer', 'JSDCE-uglifyjsNodeTypes-output.js')).read(),
        ['JSDCE']),
+      (path_from_root('tests', 'optimizer', 'JSDCE-hasOwnProperty.js'), open(path_from_root('tests', 'optimizer', 'JSDCE-hasOwnProperty-output.js')).read(),
+       ['JSDCE']),
     ]:
       print input, passes
 
@@ -3194,6 +3196,79 @@ int main() {
     output = Popen([PYTHON, EMCC, 'src.cpp', '-s', 'WARN_UNALIGNED=1', '-g'], stderr=PIPE).communicate()
     assert 'emcc: warning: unaligned store' in output[1], output[1]
     assert '@line 11 "src.cpp"' in output[1], output[1]
+
+  def test_on_abort(self):
+    expected_output = 'Module.onAbort was called'
+
+    def add_on_abort_and_verify():
+      with open('a.out.js') as f:
+        js = f.read()
+      with open('a.out.js', 'w') as f:
+        f.write("var Module = { onAbort: function() { console.log('%s') } };\n" % expected_output)
+        f.write(js)
+      self.assertContained(expected_output, run_js('a.out.js', assert_returncode=None))
+
+    # test direct abort() C call
+
+    with open('src.c', 'w') as f:
+      f.write('''
+        #include <stdlib.h>
+        int main() {
+          abort();
+        }
+      ''')
+    subprocess.check_call([PYTHON, EMCC, 'src.c'])
+    add_on_abort_and_verify()
+
+    # test direct abort() JS call
+
+    with open('src.c', 'w') as f:
+      f.write('''
+        #include <emscripten.h>
+        int main() {
+          EM_ASM({ abort() });
+        }
+      ''')
+    subprocess.check_call([PYTHON, EMCC, 'src.c'])
+    add_on_abort_and_verify()
+
+    # test throwing in an abort handler, and catching that
+
+    with open('src.c', 'w') as f:
+      f.write('''
+        #include <emscripten.h>
+        int main() {
+          EM_ASM({
+            try {
+              Module.print('first');
+              abort();
+            } catch (e) {
+              Module.print('second');
+              abort();
+              throw e;
+            }
+          });
+        }
+      ''')
+    subprocess.check_call([PYTHON, EMCC, 'src.c'])
+    with open('a.out.js') as f:
+      js = f.read()
+    with open('a.out.js', 'w') as f:
+      f.write("var Module = { onAbort: function() { console.log('%s'); throw 're-throw'; } };\n" % expected_output)
+      f.write(js)
+    out = run_js('a.out.js', stderr=subprocess.STDOUT, assert_returncode=None)
+    print out
+    self.assertContained(expected_output, out)
+    self.assertContained('re-throw', out)
+    self.assertContained('first', out)
+    self.assertContained('second', out)
+    self.assertEqual(out.count(expected_output), 2)
+
+    # test an abort during startup
+
+    subprocess.check_call([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'WASM=1', '-s', 'BINARYEN_METHOD="interpret-binary"'])
+    os.remove('a.out.wasm') # trigger onAbort by intentionally causing startup to fail
+    add_on_abort_and_verify()
 
   def test_no_exit_runtime(self):
     open('code.cpp', 'w').write(r'''
@@ -6359,6 +6434,29 @@ Resolved: "/" => "/"
     assert sizes[1] < sizes[0]
     assert sizes[3] < sizes[0]
 
+  def test_dlmalloc_modes(self):
+    open('src.cpp', 'w').write(r'''
+      #include <stdlib.h>
+      #include <stdio.h>
+      int main() {
+        void* c = malloc(1024);
+        free(c);
+        free(c);
+        printf("double-freed\n");
+      }
+    ''')
+    subprocess.check_call([PYTHON, EMCC, 'src.cpp'])
+    self.assertContained('double-freed', run_js('a.out.js'))
+    # in debug mode, the double-free is caught
+    subprocess.check_call([PYTHON, EMCC, 'src.cpp', '-g'])
+    seen_error = False
+    out = '?'
+    try:
+      out = run_js('a.out.js')
+    except:
+      seen_error = True
+    assert seen_error, out
+
   def test_split_memory(self): # make sure multiple split memory chunks get used
     open('src.c', 'w').write(r'''
 #include <emscripten.h>
@@ -7673,3 +7771,10 @@ int main() {
     Popen([LLVM_AR, 'r', 'hello_world.a', 'hello_world.o'], env=get_clang_native_env(), stdout=PIPE, stderr=PIPE).communicate()
     out, err = Popen([PYTHON, EMCC, 'hello_world.a', '-o', 'hello_world.js'], stdout=PIPE, stderr=PIPE).communicate()
     assert 'exists but was not an LLVM bitcode file suitable for Emscripten. Perhaps accidentally mixing native built object files with Emscripten?' in err
+
+  # Tests that the warning message about pairing WASM with EVAL_CTORS appropriately triggers the warning about NO_EXIT_RUNTIME.
+  def test_binaryen_no_exit_runtime_warn_message(self):
+    out, err = Popen([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-o', 'hello_world.js', '-s', 'WASM=1', '-Oz'], stdout=PIPE, stderr=PIPE).communicate()
+    assert 'you should enable  -s NO_EXIT_RUNTIME=1' in err
+    out, err = Popen([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-o', 'hello_world.bc', '-s', 'WASM=1', '-Oz'], stdout=PIPE, stderr=PIPE).communicate()
+    assert 'you should enable  -s NO_EXIT_RUNTIME=1' not in err
