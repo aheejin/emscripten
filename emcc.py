@@ -136,7 +136,7 @@ class EmccOptions(object):
     self.force_js_opts = False
     self.llvm_opts = None
     self.llvm_lto = None
-    self.default_cxx_std = '-std=c++03' # Enforce a consistent C++ standard when compiling .cpp files, if user does not specify one on the cmdline.
+    self.default_cxx_std = '-std=c++11' # Enforce a consistent C++ standard when compiling .cpp files, if user does not specify one on the cmdline.
     self.use_closure_compiler = None
     self.js_transform = None
     self.pre_js = '' # before all js
