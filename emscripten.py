@@ -121,7 +121,7 @@ def compile_js(infile, settings, temp_files, DEBUG):
       t = time.time()
     with ToolchainProfiler.profile_block('emscript_llvm_backend'):
       mylog.log_cmd(backend_args, stdout=subprocess.PIPE)
-      shared.jsrun.timeout_run(subprocess.Popen(backend_args, stdout=subprocess.PIPE))
+      shared.jsrun.timeout_run(subprocess.Popen(backend_args, stdout=subprocess.PIPE), note_args=backend_args)
     if DEBUG:
       logging.debug('  emscript: llvm backend took %s seconds' % (time.time() - t))
 

@@ -4478,6 +4478,10 @@ def process(filename):
     src = open(path_from_root('tests', 'unistd', 'ttyname.c'), 'r').read()
     self.do_run(src, 'success', force_c=True)
 
+  def test_unistd_pipe(self):
+    src = open(path_from_root('tests', 'unistd', 'pipe.c'), 'r').read()
+    self.do_run(src, 'success', force_c=True)
+
   def test_unistd_dup(self):
     src = open(path_from_root('tests', 'unistd', 'dup.c'), 'r').read()
     expected = open(path_from_root('tests', 'unistd', 'dup.out'), 'r').read()
@@ -6125,32 +6129,11 @@ def process(filename):
     '''
     self.do_run(src, 'func1\nfunc2\n')
 
-  @no_wasm_backend()
+  @no_wasm_backend('no implementation of emulated function pointer casts')
   def test_emulate_function_pointer_casts(self):
     Settings.EMULATE_FUNCTION_POINTER_CASTS = 1
 
-    src = r'''
-    #include <stdio.h>
-    #include <math.h>
-    
-    // We have to use a proxy function 'acos_test' here because the updated libc++ library provides a set of overloads to acos,
-    // this has the result that we can't take the function pointer to acos anymore due to failed overload resolution.
-    // This proxy function has no overloads so it's allowed to take the function pointer directly.
-    double acos_test(double x) {
-      return acos(x);
-    }
-
-    typedef double (*ddd)(double x, double unused);
-    typedef int    (*iii)(int x,    int unused);
-
-    int main() {
-      volatile ddd d = (ddd)acos_test;
-      volatile iii i = (iii)acos_test;
-      printf("|%.3f,%d|\n", d(0.3, 0.6), i(0, 0));
-      return 0;
-    }
-    '''
-    self.do_run(src, '|1.266,1|\n')
+    self.do_run_in_out_file_test('tests', 'core', 'test_emulate_function_pointer_casts')
 
   def test_demangle_stacks(self):
     Settings.DEMANGLE_SUPPORT = 1
@@ -6267,6 +6250,39 @@ def process(filename):
     print 'assertions too'
     Settings.ASSERTIONS = 1
     self.do_run(src, output)
+    Settings.ASSERTIONS = 0
+
+    print 'remove just some, leave others'
+    def test3():
+      self.do_run(r'''
+#include <iostream>
+#include <string>
+
+class std_string {
+public:
+  std_string() { std::cout << "std_string()\n"; }
+  std_string(const char* s): ptr(s) { std::cout << "std_string(const char* s) " << std::endl; }
+  std_string(const std_string& s): ptr(s.ptr) { std::cout << "std_string(const std_string& s) " << std::endl; }
+  const char* data() const { return ptr; }
+private:
+  const char* ptr = nullptr;
+};
+
+const std_string txtTestString("212121\0");
+const std::string s2text("someweirdtext");
+
+int main() {
+  std::cout << s2text << std::endl;
+  std::cout << txtTestString.data() << std::endl;
+  std::cout << txtTestString.data() << std::endl;
+  return 0;
+}
+      ''', '''std_string(const char* s) 
+someweirdtext
+212121
+212121
+''')
+    do_test(test3)
 
   def test_embind(self):
     Building.COMPILER_TEST_OPTS += ['--bind']
@@ -7431,6 +7447,8 @@ binaryen0 = make_run("binaryen0", compiler=CLANG, emcc_args=['-O0', '-s', 'BINAR
 binaryen1 = make_run("binaryen1", compiler=CLANG, emcc_args=['-O1', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 binaryen2 = make_run("binaryen2", compiler=CLANG, emcc_args=['-O2', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 binaryen3 = make_run("binaryen3", compiler=CLANG, emcc_args=['-O3', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"', '-s', 'ASSERTIONS=1', "-s", "PRECISE_F32=1"])
+binaryens = make_run("binaryens", compiler=CLANG, emcc_args=['-Os', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
+binaryenz = make_run("binaryenz", compiler=CLANG, emcc_args=['-Oz', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 
 binaryen2jo = make_run("binaryen2jo", compiler=CLANG, emcc_args=['-O2', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm,asmjs"'])
 binaryen3jo = make_run("binaryen3jo", compiler=CLANG, emcc_args=['-O3', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm,asmjs"'])
