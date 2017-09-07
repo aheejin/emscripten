@@ -37,7 +37,7 @@ var LibraryPThread = {
 
 #if PTHREADS_PROFILING
       PThread.createProfilerBlock(PThread.mainThreadBlock);
-      PThread.setThreadName(PThread.mainThreadBlock, "main thread");
+      PThread.setThreadName(PThread.mainThreadBlock, "Browser main thread");
       PThread.setThreadStatus(PThread.mainThreadBlock, {{{ cDefine('EM_THREAD_STATUS_RUNNING') }}});
 #endif
     },
@@ -1021,6 +1021,10 @@ var LibraryPThread = {
 
   __atomic_is_lock_free: function(size, ptr) {
     return size <= 4 && (size & (size-1)) == 0 && (ptr&(size-1)) == 0;
+  },
+
+  __call_main: function(argc, argv) {
+    return _main(argc, argv);
   },
 
   emscripten_conditional_set_current_thread_status_js: function(expectedStatus, newStatus) {

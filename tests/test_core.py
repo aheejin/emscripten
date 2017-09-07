@@ -1248,7 +1248,6 @@ int main() {
     if not self.is_wasm_backend(): return self.skip('no __builtin_fmin support in JSBackend')
     self.do_run_in_out_file_test('tests', 'core', 'test_float_builtins')
 
-  @no_wasm_backend("wasm backend doesn't add Runtime.setDynamicTop and crashes")
   def test_segfault(self):
     Settings.SAFE_HEAP = 1
 
@@ -1602,6 +1601,10 @@ int main(int argc, char **argv) {
   def test_em_asm(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm')
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm', force_c=True)
+
+  def test_em_asm_2(self):
+    self.do_run_in_out_file_test('tests', 'core', 'test_em_asm_2')
+    self.do_run_in_out_file_test('tests', 'core', 'test_em_asm_2', force_c=True)
 
   def test_em_asm_unicode(self):
     self.do_run(r'''
@@ -2281,10 +2284,6 @@ The current type of b is: 9
   def can_dlfcn(self):
     if Settings.ALLOW_MEMORY_GROWTH == 1: return self.skip('no dlfcn with memory growth yet')
     if self.is_wasm_backend(): return self.skip('no shared modules in wasm backend')
-    # V8 doesn't support mismatch between table import decl initial size and imported table runtime size.
-    # See https://bugs.chromium.org/p/v8/issues/detail?id=5795
-    if self.is_wasm():
-      self.banned_js_engines = [V8_ENGINE, NODE_JS]
     return True
 
   def prep_dlfcn_lib(self):
@@ -4127,6 +4126,18 @@ def process(filename):
   def test_getdents64(self):
     src = open(path_from_root('tests', 'fs', 'test_getdents64.cpp'), 'r').read()
     self.do_run(src, '..')
+
+  def test_getdents64_special_cases(self):
+    Building.COMPILER_TEST_OPTS += ['-std=c++11']
+    src = path_from_root('tests', 'fs', 'test_getdents64_special_cases.cpp')
+    out = path_from_root('tests', 'fs', 'test_getdents64_special_cases.out')
+    self.do_run_from_file(src, out, assert_identical=True)
+
+  def test_getcwd_with_non_ascii_name(self):
+    src = path_from_root('tests', 'fs', 'test_getcwd_with_non_ascii_name.cpp')
+    out = path_from_root('tests', 'fs', 'test_getcwd_with_non_ascii_name.out')
+    Building.COMPILER_TEST_OPTS += ['-std=c++11']
+    self.do_run_from_file(src, out, assert_identical=True)
 
   def test_fwrite_0(self):
     test_path = path_from_root('tests', 'core', 'test_fwrite_0')
@@ -6032,7 +6043,7 @@ def process(filename):
       }
 
       int main() {
-        int x = EM_ASM_INT_V({ return Module._other_function() });
+        int x = EM_ASM_INT({ return Module._other_function() });
         emscripten_run_script_string(""); // Add a reference to a symbol that exists in src/deps_info.json to uncover issue #2836 in the test suite.
         printf("waka %d!\n", x);
         return 0;
@@ -6065,7 +6076,7 @@ def process(filename):
       }
 
       int main() {
-        int x = EM_ASM_INT_V({ return Module._exported_func_from_response_file_4999() });
+        int x = EM_ASM_INT({ return Module._exported_func_from_response_file_4999() });
         emscripten_run_script_string(""); // Add a reference to a symbol that exists in src/deps_info.json to uncover issue #2836 in the test suite.
         printf("waka %d!\n", x);
         return 0;
@@ -6129,7 +6140,7 @@ def process(filename):
     }
 
     int main() {
-      EM_ASM_INT({
+      EM_ASM({
         Runtime.getFuncWrapper($0, 'vi')(0);
         Runtime.getFuncWrapper($1, 'vii')(0, 0);
       }, func1, func2);
@@ -6842,7 +6853,7 @@ Module.printErr = Module['printErr'] = function(){};
 
   @no_emterpreter
   def test_source_map(self):
-    if NODE_JS not in JS_ENGINES: return self.skip('sourcemapper requires Node to run')
+    if not jsrun.check_engine(NODE_JS): return self.skip('sourcemapper requires Node to run')
     if '-g' not in Building.COMPILER_TEST_OPTS: Building.COMPILER_TEST_OPTS.append('-g')
 
     src = '''
@@ -6946,7 +6957,7 @@ Module.printErr = Module['printErr'] = function(){};
   def test_exception_source_map(self):
     if self.is_wasm(): return self.skip('wasmifying destroys debug info and stack tracability')
     if '-g4' not in Building.COMPILER_TEST_OPTS: Building.COMPILER_TEST_OPTS.append('-g4')
-    if NODE_JS not in JS_ENGINES: return self.skip('sourcemapper requires Node to run')
+    if not jsrun.check_engine(NODE_JS): return self.skip('sourcemapper requires Node to run')
 
     src = '''
       #include <stdio.h>
@@ -7455,7 +7466,7 @@ def make_run(fullname, name=-1, compiler=-1, embetter=0, quantum_size=0,
 
   return TT
 
-# Main test modes
+# Main asm.js test modes
 default = make_run("default", compiler=CLANG, emcc_args=["-s", "ASM_JS=2"])
 asm1 = make_run("asm1", compiler=CLANG, emcc_args=["-O1"])
 asm2 = make_run("asm2", compiler=CLANG, emcc_args=["-O2"])
@@ -7465,6 +7476,7 @@ asm2g = make_run("asm2g", compiler=CLANG, emcc_args=["-O2", "-g", "-s", "ASSERTI
 asm2i = make_run("asm2i", compiler=CLANG, emcc_args=["-O2", '-s', 'EMTERPRETIFY=1'])
 #asm2m = make_run("asm2m", compiler=CLANG, emcc_args=["-O2", "--memory-init-file", "0", "-s", "MEM_INIT_METHOD=2", "-s", "ASSERTIONS=1"])
 
+# Main wasm test modes
 binaryen0 = make_run("binaryen0", compiler=CLANG, emcc_args=['-O0', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 binaryen1 = make_run("binaryen1", compiler=CLANG, emcc_args=['-O1', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 binaryen2 = make_run("binaryen2", compiler=CLANG, emcc_args=['-O2', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
@@ -7472,8 +7484,10 @@ binaryen3 = make_run("binaryen3", compiler=CLANG, emcc_args=['-O3', '-s', 'BINAR
 binaryens = make_run("binaryens", compiler=CLANG, emcc_args=['-Os', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 binaryenz = make_run("binaryenz", compiler=CLANG, emcc_args=['-Oz', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"'])
 
+# Secondary wasm test modes
 binaryen2jo = make_run("binaryen2jo", compiler=CLANG, emcc_args=['-O2', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm,asmjs"'])
 binaryen3jo = make_run("binaryen3jo", compiler=CLANG, emcc_args=['-O3', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm,asmjs"'])
+binaryen2s = make_run("binaryen2s", compiler=CLANG, emcc_args=['-O2', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="native-wasm"', '-s', 'SAFE_HEAP=1'])
 
 # This tests the binaryen interpreter and its polyfill integration in the emscripten JS glue
 binaryen2_interpret = make_run("binaryen2_interpret", compiler=CLANG, emcc_args=['-O2', '-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="interpret-binary"'])

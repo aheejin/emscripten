@@ -425,6 +425,11 @@ var LibraryGL = {
 #endif
         webGLContextAttributes['minorVersion'] = 0;
       }
+
+#if GL_TESTING
+      webGLContextAttributes['preserveDrawingBuffer'] = true;
+#endif
+
       var ctx;
       var errorInfo = '?';
       function onContextCreationError(event) {
@@ -1790,25 +1795,25 @@ var LibraryGL = {
     if (!emscriptenWebGLValidateMapBufferTarget(target)) {
       GL.recordError(0x0500/*GL_INVALID_ENUM*/);
       Module.printErr('GL_INVALID_ENUM in glFlushMappedBufferRange');
-      return 0;
+      return;
     }
 
     var mapping = GL.mappedBuffers[emscriptenWebGLGetBufferBinding(target)];
     if (!mapping) {
       GL.recordError(0x0502 /* GL_INVALID_OPERATION */);
       Module.printError('buffer was never mapped in glFlushMappedBufferRange');
-      return 0;
+      return;
     }
 
     if (!(mapping.access & 0x10)) {
       GL.recordError(0x0502 /* GL_INVALID_OPERATION */);
       Module.printError('buffer was not mapped with GL_MAP_FLUSH_EXPLICIT_BIT in glFlushMappedBufferRange');
-      return 0;
+      return;
     }
     if (offset < 0 || length < 0 || offset + length > mapping.length) {
       GL.recordError(0x0501 /* GL_INVALID_VALUE */);
       Module.printError('invalid range in glFlushMappedBufferRange');
-      return 0;
+      return;
     }
 
     GLctx.bufferSubData(
@@ -2467,8 +2472,8 @@ var LibraryGL = {
     // In JS, there's no 64-bit value types, so instead timeout is taken to be signed, and GL_TIMEOUT_IGNORED is given value -1.
     // Inherently the value accepted in the timeout is lossy, and can't take in arbitrary u64 bit pattern (but most likely doesn't matter)
     // See https://www.khronos.org/registry/webgl/specs/latest/2.0/#5.15
-    timeoutLo == timeoutLo >>> 0;
-    timeoutHi == timeoutHi >>> 0;
+    timeoutLo = timeoutLo >>> 0;
+    timeoutHi = timeoutHi >>> 0;
     var timeout = (timeoutLo == 0xFFFFFFFF && timeoutHi == 0xFFFFFFFF) ? -1 : Runtime.makeBigInt(timeoutLo, timeoutHi, true);
     return GLctx.clientWaitSync(GL.syncs[sync], flags, timeout);
   },
@@ -2476,8 +2481,8 @@ var LibraryGL = {
   glWaitSync__sig: 'viii',
   glWaitSync: function(sync, flags, timeoutLo, timeoutHi) {
     // See WebGL2 vs GLES3 difference on GL_TIMEOUT_IGNORED above (https://www.khronos.org/registry/webgl/specs/latest/2.0/#5.15)
-    timeoutLo == timeoutLo >>> 0;
-    timeoutHi == timeoutHi >>> 0;
+    timeoutLo = timeoutLo >>> 0;
+    timeoutHi = timeoutHi >>> 0;
     var timeout = (timeoutLo == 0xFFFFFFFF && timeoutHi == 0xFFFFFFFF) ? -1 : Runtime.makeBigInt(timeoutLo, timeoutHi, true);
     GLctx.waitSync(GL.syncs[sync], flags, timeout);
   },
@@ -3563,6 +3568,10 @@ var LibraryGL = {
     GL.validateGLObjectID(GL.shaders, shader, 'glCompileShader', 'shader');
 #endif
     GLctx.compileShader(GL.shaders[shader]);
+#if GL_DEBUG
+    var log = (GLctx.getShaderInfoLog(GL.shaders[shader]) || '').trim();
+    if (log) console.error('glCompileShader: ' + log);
+#endif
   },
 
   glGetShaderInfoLog__sig: 'viiii',
@@ -3735,6 +3744,10 @@ var LibraryGL = {
     GL.validateGLObjectID(GL.programs, program, 'glLinkProgram', 'program');
 #endif
     GLctx.linkProgram(GL.programs[program]);
+#if GL_DEBUG
+    var log = (GLctx.getProgramInfoLog(GL.programs[program]) || '').trim();
+    if (log) console.error('glLinkProgram: ' + log);
+#endif
     GL.programInfos[program] = null; // uniforms no longer keep the same names after linking
     GL.populateUniformTable(program);
   },

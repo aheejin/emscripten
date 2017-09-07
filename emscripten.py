@@ -665,6 +665,28 @@ function _emscripten_asm_const_%s(%s) {
   body_marker = '// === Body ==='
   return pre.replace(body_marker, body_marker + '\n' + asm_consts_text + asm_funcs_text)
 
+# Test if the parentheses at body[openIdx] and body[closeIdx] are a match to each other.
+def parentheses_match(body, openIdx, closeIdx):
+  if closeIdx < 0: closeIdx += len(body)
+  count = 1
+  for i in range(openIdx+1, closeIdx+1):
+    if body[i] == body[openIdx]:
+      count += 1
+    elif body[i] == body[closeIdx]:
+      count -= 1
+      if count <= 0:
+        return i == closeIdx
+  return False
+
+def trim_asm_const_body(body):
+  body = body.strip()
+  orig = None
+  while orig != body:
+    orig = body
+    if len(body) > 1 and body[0] == '"' and body[-1] == '"': body = body[1:-1].replace('\\"', '"').strip()
+    if len(body) > 1 and body[0] == '{' and body[-1] == '}' and parentheses_match(body, 0, -1): body = body[1:-1].strip()
+    if len(body) > 1 and body[0] == '(' and body[-1] == ')' and parentheses_match(body, 0, -1): body = body[1:-1].strip()
+  return body
 
 def all_asm_consts(metadata):
   asm_consts = [0]*len(metadata['asmConsts'])
@@ -672,8 +694,7 @@ def all_asm_consts(metadata):
   for k, v in metadata['asmConsts'].iteritems():
     const = v[0].encode('utf-8')
     sigs = v[1]
-    if len(const) > 1 and const[0] == '"' and const[-1] == '"':
-      const = const[1:-1]
+    const = trim_asm_const_body(const)
     const = '{ ' + const + ' }'
     args = []
     arity = max(map(len, sigs)) - 1
@@ -1773,6 +1794,7 @@ def build_wasm(temp_files, infile, outfile, settings, DEBUG):
     assert shared.Settings.BINARYEN_ROOT, 'need BINARYEN_ROOT config set so we can use Binaryen s2wasm on the backend output'
     basename = shared.unsuffixed(outfile.name)
     wast = basename + '.wast'
+    wasm = basename + '.wasm'
     s2wasm_args = create_s2wasm_args(temp_s)
     if DEBUG:
       logging.debug('emscript: binaryen s2wasm: ' + ' '.join(s2wasm_args))
@@ -1781,9 +1803,15 @@ def build_wasm(temp_files, infile, outfile, settings, DEBUG):
     shared.check_call(s2wasm_args, stdout=open(wast, 'w'))
     # Also convert wasm text to binary
     wasm_as_args = [os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 'wasm-as'),
-                    wast, '-o', basename + '.wasm']
+                    wast, '-o', wasm]
     if settings['DEBUG_LEVEL'] >= 2 or settings['PROFILING_FUNCS']:
       wasm_as_args += ['-g']
+      if settings['DEBUG_LEVEL'] >= 4:
+        wasm_as_args += ['--source-map=' + wasm + '.map']
+        if not settings['SOURCE_MAP_BASE']:
+          logging.warn("Wasm source map won't be usable in a browser without --source-map-base")
+        else:
+          wasm_as_args += ['--source-map-url=' + settings['SOURCE_MAP_BASE'] + os.path.basename(settings['WASM_BINARY_FILE']) + '.map']
     logging.debug('  emscript: binaryen wasm-as: ' + ' '.join(wasm_as_args))
     shared.check_call(wasm_as_args)
 
@@ -1834,8 +1862,7 @@ def create_asm_consts_wasm(forwarded_json, metadata):
   for k, v in metadata['asmConsts'].iteritems():
     const = v[0].encode('utf-8')
     sigs = v[1]
-    if len(const) > 1 and const[0] == '"' and const[-1] == '"':
-      const = const[1:-1]
+    const = trim_asm_const_body(const)
     const = '{ ' + const + ' }'
     args = []
     arity = max(map(len, sigs)) - 1
@@ -1873,6 +1900,8 @@ def create_sending_wasm(invoke_funcs, forwarded_json, metadata, settings):
   basic_funcs = ['abort', 'assert', 'enlargeMemory', 'getTotalMemory']
   if settings['ABORTING_MALLOC']:
     basic_funcs += ['abortOnCannotGrowMemory']
+  if settings['SAFE_HEAP']:
+    basic_funcs += ['segfault', 'alignfault']
 
   basic_vars = ['STACKTOP', 'STACK_MAX', 'DYNAMICTOP_PTR', 'ABORT']
 

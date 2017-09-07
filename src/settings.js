@@ -496,6 +496,11 @@ var PROXY_TO_WORKER_FILENAME = ''; // If set, the script file name the main thre
                                    // Useful if your project doesn't run the main emscripten-
                                    // generated script immediately but does some setup before
 
+var PROXY_TO_PTHREAD = 0; // If set to 1, compiles in a small stub main() in between the real main()
+                          // which calls pthread_create() to run the application main() in a pthread.
+                          // This is something that applications can do manually as well if they wish,
+                          // this option is provided as convenience.
+
 var LINKABLE = 0; // If set to 1, this file can be linked with others, either as a shared
                   // library or as the main file that calls a shared library. To enable that,
                   // we will not internalize all symbols and cull the unused ones, in other
@@ -860,3 +865,4 @@ var ASMFS = 0; // If set to 1, uses the multithreaded filesystem that is impleme
 var WASM_TEXT_FILE = ''; // name of the file containing wasm text, if relevant
 var WASM_BINARY_FILE = ''; // name of the file containing wasm binary, if relevant
 var ASMJS_CODE_FILE = ''; // name of the file containing asm.js, if relevant
+var SOURCE_MAP_BASE = ''; // Base URL the source mapfile, if relevant

@@ -470,7 +470,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       exit(subprocess.call(cmd))
     else:
       only_object = '-c' in cmd
-      for i in range(len(cmd)-1):
+      for i in reversed(range(len(cmd)-1)): # Last -o directive should take precedence, if multiple are specified
         if cmd[i] == '-o':
           if not only_object:
             cmd[i+1] += '.js'
@@ -535,10 +535,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
   # Check if a target is specified
   target = None
-  for i in range(len(sys.argv)-1):
+  for i in range(len(sys.argv)):
     if sys.argv[i].startswith('-o='):
       raise Exception('Invalid syntax: do not use -o=X, use -o X')
 
+  for i in reversed(range(len(sys.argv)-1)): # Last -o directive should take precedence, if multiple are specified
     if sys.argv[i] == '-o':
       target = sys.argv[i+1]
       sys.argv = sys.argv[:i] + sys.argv[i+2:]
@@ -921,12 +922,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       assert not shared.Settings.PGO, 'cannot run PGO in ASM_JS mode'
 
-      if shared.Settings.SAFE_HEAP:
-        if not options.js_opts:
-          logging.debug('enabling js opts for SAFE_HEAP')
-          options.js_opts = True
-        options.force_js_opts = True
-
       if options.debug_level > 1 and options.use_closure_compiler:
         logging.warning('disabling closure because debug info was requested')
         options.use_closure_compiler = False
@@ -1082,12 +1077,22 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if shared.Settings.EMTERPRETIFY:
           logging.error('-s EMTERPRETIFY=1 is not supported with -s USE_PTHREADS>0!')
           exit(1)
+        if shared.Settings.PROXY_TO_WORKER:
+          logging.error('--proxy-to-worker is not supported with -s USE_PTHREADS>0! Use the option -s PROXY_TO_PTHREAD=1 if you want to run the main thread of a multithreaded application in a web worker.')
+          exit(1)
+      else:
+        if shared.Settings.PROXY_TO_PTHREAD:
+          logging.error('-s PROXY_TO_PTHREAD=1 requires -s USE_PTHREADS to work!')
+          exit(1)
 
       if shared.Settings.OUTLINING_LIMIT:
         if not options.js_opts:
           logging.debug('enabling js opts as optional functionality implemented as a js opt was requested')
           options.js_opts = True
         options.force_js_opts = True
+
+      if shared.Settings.BINARYEN:
+        shared.Settings.WASM = 1 # these are synonyms
 
       if shared.Settings.WASM:
         shared.Settings.BINARYEN = 1 # these are synonyms
@@ -1108,7 +1113,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       if shared.Settings.WASM_BACKEND:
         options.js_opts = None
-        shared.Settings.BINARYEN = 1
+        shared.Settings.BINARYEN = shared.Settings.WASM = 1
 
         # to bootstrap struct_info, we need binaryen
         os.environ['EMCC_WASM_BACKEND_BINARYEN'] = '1'
@@ -1157,6 +1162,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             logging.warning('BINARYEN_ASYNC_COMPILATION requested, but disabled because of user options. ' + warning)
           elif 'BINARYEN_ASYNC_COMPILATION=0' not in settings_changes:
             logging.warning('BINARYEN_ASYNC_COMPILATION disabled due to user options. ' + warning)
+        # run safe-heap as a binaryen pass
+        if shared.Settings.SAFE_HEAP and shared.Building.is_wasm_only():
+          if shared.Settings.BINARYEN_PASSES:
+            shared.Settings.BINARYEN_PASSES += ','
+          shared.Settings.BINARYEN_PASSES += 'safe-heap'
 
       # wasm outputs are only possible with a side wasm
       if target.endswith(WASM_ENDINGS):
@@ -1183,6 +1193,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if not shared.Settings.WASM or 'asmjs' in shared.Settings.BINARYEN_METHOD:
           shared.WarningManager.warn('ALMOST_ASM')
           shared.Settings.ASM_JS = 2 # memory growth does not validate as asm.js http://discourse.wicg.io/t/request-for-comments-switching-resizing-heaps-in-asm-js/641/23
+
+      # safe heap in asm.js uses the js optimizer (in wasm-only mode we can use binaryen)
+      if shared.Settings.SAFE_HEAP and not shared.Building.is_wasm_only():
+        if not options.js_opts:
+          logging.debug('enabling js opts for SAFE_HEAP')
+          options.js_opts = True
+        options.force_js_opts = True
 
       if options.js_opts:
         shared.Settings.RUNNING_JS_OPTS = 1
@@ -1223,6 +1240,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.OPT_LEVEL = options.opt_level
       shared.Settings.DEBUG_LEVEL = options.debug_level
       shared.Settings.PROFILING_FUNCS = options.profiling_funcs
+      shared.Settings.SOURCE_MAP_BASE = options.source_map_base or ''
 
       ## Compile source code to bitcode
 
@@ -1267,6 +1285,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if options.debug_level == 4 or not (final_suffix in JS_CONTAINING_SUFFIXES and options.js_opts):
           newargs.append('-g') # preserve LLVM debug info
           options.debug_level = 4
+          shared.Settings.DEBUG_LEVEL = 4
 
       # Bitcode args generation code
       def get_bitcode_args(input_files):
@@ -1540,11 +1559,14 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         # we also received wast and wasm at this stage
         temp_basename = unsuffixed(final)
         wast_temp = temp_basename + '.wast'
+        wasm_temp = temp_basename + '.wasm'
         mylog.log_move(wast_temp, wasm_text_target)
         shutil.move(wast_temp, wasm_text_target)
-        mylog.log_move(temp_basename + '.wasm', wasm_binary_target)
-        shutil.move(temp_basename + '.wasm', wasm_binary_target)
+        mylog.log_move(wasm_temp, wasm_binary_target)
+        shutil.move(wasm_temp, wasm_binary_target)
         open(wasm_text_target + '.mappedGlobals', 'w').write('{}') # no need for mapped globals for now, but perhaps some day
+        if options.debug_level >= 4:
+          shutil.move(wasm_temp + '.map', wasm_binary_target + '.map')
 
       if shared.Settings.CYBERDWARF:
         cd_target = final + '.cd'
@@ -1736,7 +1758,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           if shared.Settings.PRECISE_F32: optimizer.queue += ['optimizeFrounds']
 
       if options.js_opts:
-        if shared.Settings.SAFE_HEAP: optimizer.queue += ['safeHeap']
+        if shared.Settings.SAFE_HEAP and not shared.Building.is_wasm_only():
+          optimizer.queue += ['safeHeap']
 
         if shared.Settings.OUTLINING_LIMIT > 0:
           optimizer.queue += ['outline']
@@ -1852,7 +1875,7 @@ def parse_args(newargs):
   should_exit = False
 
   for i in range(len(newargs)):
-    # On Windows Vista (and possibly others), excessive spaces in the command line 
+    # On Windows Vista (and possibly others), excessive spaces in the command line
     # leak into the items in this array, so trim e.g. 'foo.cpp ' -> 'foo.cpp'
     newargs[i] = newargs[i].strip()
     if newargs[i].startswith('-O'):
@@ -1868,7 +1891,7 @@ def parse_args(newargs):
         options.requested_level = 2
         options.shrink_level = 2
         settings_changes.append('INLINING_LIMIT=25')
-      options.opt_level = validate_arg_level(options.requested_level, 3, 'Invalid optimization level: ' + newargs[i])
+      options.opt_level = validate_arg_level(options.requested_level, 3, 'Invalid optimization level: ' + newargs[i], clamp=True)
     elif newargs[i].startswith('--js-opts'):
       check_bad_eq(newargs[i])
       options.js_opts = eval(newargs[i+1])
@@ -2248,7 +2271,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
     if shared.Settings.BINARYEN_IGNORE_IMPLICIT_TRAPS:
       cmd += ['--ignore-implicit-traps']
     # pass optimization level to asm2wasm (if not optimizing, or which passes we should run was overridden, do not optimize)
-    if options.opt_level > 0 and not shared.Settings.BINARYEN_PASSES:
+    if options.opt_level > 0:
       cmd.append(shared.Building.opt_level_to_str(options.opt_level, options.shrink_level))
     # import mem init file if it exists, and if we will not be using asm.js as a binaryen method (as it needs the mem init file, of course)
     mem_file_exists = options.memory_init_file and os.path.exists(memfile)
@@ -2294,7 +2317,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
         if options.debug_level >= 4:
           cmd += ['--source-map=' + wasm_binary_target + '.map']
           if options.source_map_base:
-            cmd += ['--source-map-url=' + options.source_map_base + wasm_binary_target + '.map']
+            cmd += ['--source-map-url=' + options.source_map_base + os.path.basename(wasm_binary_target) + '.map']
       logging.debug('wasm-as (text => binary): ' + ' '.join(cmd))
       mylog.log_cmd(cmd)
       subprocess.check_call(cmd)
@@ -2312,6 +2335,8 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
     # BINARYEN_PASSES is comma-separated, and we support both '-'-prefixed and unprefixed pass names
     passes = map(lambda p: ('--' + p) if p[0] != '-' else p, shared.Settings.BINARYEN_PASSES.split(','))
     cmd = [os.path.join(binaryen_bin, 'wasm-opt'), wasm_binary_target + '.pre', '-o', wasm_binary_target] + passes
+    if debug_info:
+      cmd += ['-g'] # preserve the debug info
     logging.debug('wasm-opt on BINARYEN_PASSES: ' + ' '.join(cmd))
     mylog.log_cmd(cmd)
     subprocess.check_call(cmd)
@@ -2608,9 +2633,13 @@ def check_bad_eq(arg):
   assert '=' not in arg, 'Invalid parameter (do not use "=" with "--" options)'
 
 
-def validate_arg_level(level_string, max_level, err_msg):
+def validate_arg_level(level_string, max_level, err_msg, clamp=False):
   try:
     level = int(level_string)
+    if clamp:
+      if level > max_level:
+        logging.warning("optimization level '-O" + level_string + "' is not supported; using '-O" + str(max_level) + "' instead")
+        level = max_level
     assert 0 <= level <= max_level
   except:
     raise Exception(err_msg)
