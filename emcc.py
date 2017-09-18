@@ -1322,7 +1322,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if not os.path.exists(output_file):
           logging.error('compiler frontend failed to generate LLVM bitcode, halting')
           sys.exit(1)
-        # for easy debugging
+        # HACK (aheejin): for easy debugging
         shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
                                  output_file)
 

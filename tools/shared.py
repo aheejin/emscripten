@@ -1036,6 +1036,9 @@ else:
   EMSDK_OPTS = []
   EMSDK_CXX_OPTS = []
 
+# HACK (aheejin): Disable optnone
+COMPILER_OPTS += ['-Xclang', '-disable-O0-optnone']
+
 # Engine tweaks
 
 try:
