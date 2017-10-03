@@ -2274,14 +2274,18 @@ int f() {
   def test_embind(self):
     environ = os.environ.copy()
     environ['EMCC_CLOSURE_ARGS'] = environ.get('EMCC_CLOSURE_ARGS', '') + " --externs " + pipes.quote(path_from_root('tests', 'embind', 'underscore-externs.js'))
-    for args, fail in [
-      ([], True), # without --bind, we fail
-      (['--bind'], False),
-      (['--bind', '-O1'], False),
-      (['--bind', '-O2'], False),
-      (['--bind', '-O2', '--closure', '1'], False),
-      (['--bind', '-O2', '-s', 'ALLOW_MEMORY_GROWTH=1', path_from_root('tests', 'embind', 'isMemoryGrowthEnabled=true.cpp')], False),
-    ]:
+    test_cases = [
+        ([], True), # without --bind, we fail
+        (['--bind'], False),
+        (['--bind', '-O1'], False),
+        (['--bind', '-O2'], False),
+        (['--bind', '-O2', '-s', 'ALLOW_MEMORY_GROWTH=1', path_from_root('tests', 'embind', 'isMemoryGrowthEnabled=true.cpp')], False),
+    ]
+    test_cases.extend([ (args[:] + ['-s', 'NO_DYNAMIC_EXECUTION=1'], status) for args, status in test_cases])
+    test_cases.append((['--bind', '-O2', '--closure', '1'], False)) # closure compiler doesn't work with NO_DYNAMIC_EXECUTION=1
+    test_cases = [(args + ['-s', 'IN_TEST_HARNESS=1'], status) for args, status in test_cases]
+
+    for args, fail in test_cases:
       print args, fail
       self.clear()
       try_delete(self.in_dir('a.out.js'))
@@ -2686,6 +2690,37 @@ void wakaw::Cm::RasterBase<wakaw::watwat::Polocator>::merbine1<wakaw::Cm::Raster
     self.assertContained(reference_error_text,
                          run_js ('index.js', engine=NODE_JS, stderr=STDOUT, assert_returncode=None))
 
+  def test_extra_exported_methods(self):
+    # Test with node.js that the EXTRA_EXPORTED_RUNTIME_METHODS setting is considered by libraries
+    if NODE_JS not in JS_ENGINES:
+      return self.skip("node engine required for this test")
+
+    open(os.path.join(self.get_dir(), 'count.c'), 'w').write('''
+      #include <string.h>
+      int count(const char *str) {
+          return (int)strlen(str);
+      }
+    ''')
+
+    open(os.path.join(self.get_dir(), 'index.js'), 'w').write('''
+      const count = require('./count.js');
+
+      console.log(count.FS_writeFile);
+    ''')
+
+    reference_error_text = 'undefined';
+
+    subprocess.check_call([PYTHON, EMCC, os.path.join(self.get_dir(), 'count.c'), '-s', 'FORCE_FILESYSTEM=1', '-s', 'EXTRA_EXPORTED_RUNTIME_METHODS=["FS_writeFile"]','-o', 'count.js'])
+
+    # Check that the Module.FS_writeFile exists
+    self.assertNotContained(reference_error_text,
+                            run_js ('index.js', engine=NODE_JS, stderr=STDOUT, assert_returncode=None))
+
+    subprocess.check_call([PYTHON, EMCC, os.path.join(self.get_dir(), 'count.c'), '-s', 'FORCE_FILESYSTEM=1', '-o', 'count.js'])
+
+    # Check that the Module.FS_writeFile is not exported
+    self.assertContained(reference_error_text,
+                         run_js ('index.js', engine=NODE_JS, stderr=STDOUT, assert_returncode=None))
 
   def test_fs_stream_proto(self):
     open('src.cpp', 'wb').write(r'''
@@ -6667,7 +6702,7 @@ int main() {
 #include <unistd.h>
 #include <assert.h>
 int main() {
-  EM_ASM({
+  EM_ASM((
     var x = Module._malloc(1024);
     // set
     HEAPU8.set([1,2,3,4], x);
@@ -6751,7 +6786,7 @@ int main() {
     Module.printErr = e;
     if (fail) Module.print('FAIL. ' + fail);
     else Module.print('success.');
-  });
+  ));
 }
 ''')
     for opts in [0, 1, 2]:

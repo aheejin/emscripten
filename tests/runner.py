@@ -746,6 +746,8 @@ def server_func(dir, q):
     def log_request(code=0, size=0):
       # don't log; too noisy
       pass
+
+  SimpleHTTPServer.SimpleHTTPRequestHandler.extensions_map['.wasm'] = 'application/wasm'
   os.chdir(dir)
   httpd = BaseHTTPServer.HTTPServer(('localhost', 8888), TestServerHandler)
   httpd.serve_forever() # test runner will kill us
@@ -824,7 +826,7 @@ class BrowserCore(RunnerCore):
   #define __REPORT_RESULT_DEFINED__
   #include <emscripten.h>
 
-  static void _ReportResult(int result, int sync)
+  static void EMSCRIPTEN_KEEPALIVE _ReportResult(int result, int sync)
   {
     EM_ASM({
       var xhr = new XMLHttpRequest();
