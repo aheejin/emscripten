@@ -2083,7 +2083,21 @@ The current type of b is: 9
   def test_time(self):
     src = open(path_from_root('tests', 'time', 'src.cpp'), 'r').read()
     expected = open(path_from_root('tests', 'time', 'output.txt'), 'r').read()
-    self.do_run(src, expected);
+    self.do_run(src, expected)
+    if 'TZ' in os.environ:
+      print 'TZ set in environment, skipping extra time zone checks'
+    else:
+      try:
+        for tz in ['EST+05EDT', 'UTC+0']:
+          print 'extra tz test:', tz
+          # Run the test with different time zone settings if
+          # possible. It seems that the TZ environment variable does not
+          # work all the time (at least it's not well respected by
+          # Node.js on Windows), but it does no harm either.
+          os.environ['TZ'] = tz
+          self.do_run(src, expected)
+      finally:
+        del os.environ['TZ']
 
   def test_timeb(self):
     # Confirms they are called in reverse order
@@ -7377,13 +7391,15 @@ int main(int argc, char **argv) {
     self.emcc_args += ['-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="interpret-binary"']
     self.do_run(open(path_from_root('tests', 'hello_world.c')).read(), 'hello, world!')
 
-  @no_wasm_backend("trap mode support")
   def test_binaryen_trap_mode(self):
     if not self.is_wasm(): return self.skip('wasm test')
     TRAP_OUTPUTS = ('trap', 'RuntimeError')
     default = Settings.BINARYEN_TRAP_MODE
     print 'default is', default
     for mode in ['js', 'clamp', 'allow', '']:
+      if mode == 'js' and self.is_wasm_backend():
+        # wasm backend does not use asm2wasm imports, which js trap mode requires
+        continue
       print 'mode:', mode
       Settings.BINARYEN_TRAP_MODE = mode or default
       if not mode: mode = default
