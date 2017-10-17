@@ -1,3 +1,4 @@
+from __future__ import print_function
 import os, sys
 from subprocess import Popen, PIPE, STDOUT
 import mylog
@@ -12,7 +13,7 @@ for line in open(sys.argv[1]).readlines():
     output = Popen(['c++filt', x], stdout=PIPE).communicate()[0]
     if output not in shown:
       shown.add(output)
-      print output,
+      print(output, end=' ')
   except:
     pass
 

@@ -1,5 +1,6 @@
+from __future__ import print_function
 from toolchain_profiler import ToolchainProfiler
-import shutil, time, os, sys, json, tempfile, copy, shlex, atexit, subprocess, hashlib, cPickle, re, errno
+import shutil, time, os, sys, base64, json, tempfile, copy, shlex, atexit, subprocess, hashlib, cPickle, re, errno
 from subprocess import Popen, PIPE, STDOUT
 from tempfile import mkstemp
 from distutils.spawn import find_executable
@@ -57,9 +58,9 @@ class WindowsPopen(object):
 
     # If caller never wanted to PIPE stdout or stderr, route the output back to screen to avoid swallowing output.
     if self.stdout == None and self.stdout_ == PIPE and len(output[0].strip()) > 0:
-      print >> sys.stdout, output[0]
+      print(output[0], file=sys.stdout)
     if self.stderr == None and self.stderr_ == PIPE and len(output[1].strip()) > 0:
-      print >> sys.stderr, output[1]
+      print(output[1], file=sys.stderr)
 
     # Return a mock object to the caller. This works as long as all emscripten code immediately .communicate()s the result, and doesn't
     # leave the process object around for longer/more exotic uses.
@@ -239,7 +240,7 @@ else:
 
     # write
     open(CONFIG_FILE, 'w').write(config_file)
-    print >> sys.stderr, '''
+    print('''
 ==============================================================================
 Welcome to Emscripten!
 
@@ -257,7 +258,7 @@ Please edit the file if any of those are incorrect.
 
 This command will now exit. When you are done editing those paths, re-run it.
 ==============================================================================
-''' % (EM_CONFIG, CONFIG_FILE, llvm_root, node, __rootpath__)
+''' % (EM_CONFIG, CONFIG_FILE, llvm_root, node, __rootpath__), file=sys.stderr)
     sys.exit(0)
 
 try:
@@ -389,17 +390,17 @@ def check_fastcomp():
     if not Settings.WASM_BACKEND:
       if not has_asm_js_target(targets):
         logging.critical('fastcomp in use, but LLVM has not been built with the JavaScript backend as a target, llc reports:')
-        print >> sys.stderr, '==========================================================================='
-        print >> sys.stderr, targets
-        print >> sys.stderr, '==========================================================================='
+        print('===========================================================================', file=sys.stderr)
+        print(targets, file=sys.stderr)
+        print('===========================================================================', file=sys.stderr)
         logging.critical('you can fall back to the older (pre-fastcomp) compiler core, although that is not recommended, see http://kripken.github.io/emscripten-site/docs/building_from_source/LLVM-Backend.html')
         return False
     else:
       if not has_wasm_target(targets):
         logging.critical('WebAssembly set as target, but LLVM has not been built with the WebAssembly backend, llc reports:')
-        print >> sys.stderr, '==========================================================================='
-        print >> sys.stderr, targets
-        print >> sys.stderr, '==========================================================================='
+        print('===========================================================================', file=sys.stderr)
+        print(targets, file=sys.stderr)
+        print('===========================================================================', file=sys.stderr)
         return False
 
     if not Settings.WASM_BACKEND:
@@ -588,7 +589,7 @@ def check_sanity(force=False):
 
   except Exception, e:
     # Any error here is not worth failing on
-    print 'WARNING: sanity check failed to run', e
+    print('WARNING: sanity check failed to run', e)
   finally:
     ToolchainProfiler.exit_block('sanity')
 
@@ -889,7 +890,7 @@ except:
   try:
     JS_ENGINES = [JS_ENGINE]
   except Exception, e:
-    print 'ERROR: %s does not seem to have JS_ENGINES or JS_ENGINE set up' % EM_CONFIG
+    print('ERROR: %s does not seem to have JS_ENGINES or JS_ENGINE set up' % EM_CONFIG)
     raise
 
 try:
@@ -1159,7 +1160,7 @@ class Settings2(type):
       # Load the JS defaults into python
       settings = open(path_from_root('src', 'settings.js')).read().replace('//', '#')
       settings = re.sub(r'var ([\w\d]+)', r'self.attrs["\1"]', settings)
-      exec settings
+      exec(settings)
 
       # Apply additional settings. First -O, then -s
       for i in range(len(args)):
@@ -1174,7 +1175,7 @@ class Settings2(type):
       for i in range(len(args)):
         if args[i] == '-s':
           declare = re.sub(r'([\w\d]+)\s*=\s*(.+)', r'self.attrs["\1"]=\2;', args[i+1])
-          exec declare
+          exec(declare)
 
       if get_llvm_target() == WASM_TARGET:
         self.attrs['WASM_BACKEND'] = 1
@@ -1288,7 +1289,7 @@ def extract_archive_contents(f):
       'files': contents
     }
   except Exception, e:
-    print >> sys.stderr, 'extract archive contents('+str(f)+') failed with error: ' + str(e)
+    print('extract archive contents('+str(f)+') failed with error: ' + str(e), file=sys.stderr)
   finally:
     os.chdir(cwd)
 
@@ -1538,7 +1539,7 @@ class Building(object):
       # do builds natively with Clang. This is a heuristic emulation that may or may not work.
       env['EMMAKEN_JUST_CONFIGURE'] = '1'
     try:
-      if EM_BUILD_VERBOSE_LEVEL >= 3: print >> sys.stderr, 'configure: ' + str(args)
+      if EM_BUILD_VERBOSE_LEVEL >= 3: print('configure: ' + str(args), file=sys.stderr)
       process = Popen(args, stdout=None if EM_BUILD_VERBOSE_LEVEL >= 2 else stdout, stderr=None if EM_BUILD_VERBOSE_LEVEL >= 1 else stderr, env=env)
       process.communicate()
     except Exception, e:
@@ -1570,7 +1571,7 @@ class Building(object):
 
     try:
       # On Windows, run the execution through shell to get PATH expansion and executable extension lookup, e.g. 'sdl2-config' will match with 'sdl2-config.bat' in PATH.
-      if EM_BUILD_VERBOSE_LEVEL >= 3: print >> sys.stderr, 'make: ' + str(args)
+      if EM_BUILD_VERBOSE_LEVEL >= 3: print('make: ' + str(args), file=sys.stderr)
       process = Popen(args, stdout=None if EM_BUILD_VERBOSE_LEVEL >= 2 else stdout, stderr=None if EM_BUILD_VERBOSE_LEVEL >= 1 else stderr, env=env, shell=WINDOWS)
       process.communicate()
     except Exception, e:
@@ -2342,6 +2343,12 @@ def reconfigure_cache():
   global Cache
   Cache = cache.Cache(debug=DEBUG_CACHE)
 
+# Placeholder strings used for SINGLE_FILE
+class FilenameReplacementStrings:
+  WASM_TEXT_FILE = '{{{ FILENAME_REPLACEMENT_STRINGS_WASM_TEXT_FILE }}}'
+  WASM_BINARY_FILE = '{{{ FILENAME_REPLACEMENT_STRINGS_WASM_BINARY_FILE }}}'
+  ASMJS_CODE_FILE = '{{{ FILENAME_REPLACEMENT_STRINGS_ASMJS_CODE_FILE }}}'
+
 class JS(object):
   memory_initializer_pattern = '/\* memory initializer \*/ allocate\(\[([\d, ]*)\], "i8", ALLOC_NONE, ([\d+Runtime\.GLOBAL_BASEHgb]+)\);'
   no_memory_initializer_pattern = '/\* no memory initializer \*/'
@@ -2353,6 +2360,19 @@ class JS(object):
   @staticmethod
   def to_nice_ident(ident): # limited version of the JS function toNiceIdent
     return ident.replace('%', '$').replace('@', '_').replace('.', '_')
+
+  # Returns the subresource location for run-time access
+  @staticmethod
+  def get_subresource_location(path, data_uri=None):
+    if data_uri is None:
+      data_uri = Settings.SINGLE_FILE
+    if data_uri:
+      f = open(path, 'rb')
+      data = base64.b64encode(f.read())
+      f.close()
+      return 'data:application/octet-stream;base64,' + data
+    else:
+      return os.path.basename(path)
 
   @staticmethod
   def make_initializer(sig, settings=None):
@@ -2465,75 +2485,6 @@ class JS(object):
   def align(x, by):
     while x % by != 0: x += 1
     return x
-
-  INITIALIZER_CHUNK_SIZE = 10240
-
-  @staticmethod
-  def collect_initializers(src):
-    ret = []
-    max_offset = -1
-    for init in re.finditer(JS.memory_initializer_pattern, src):
-      contents = init.group(1).split(',')
-      offset = sum([int(x) if x[0] != 'R' else 0 for x in init.group(2).split('+')])
-      ret.append((offset, contents))
-      assert offset > max_offset
-      max_offset = offset
-    return ret
-
-  @staticmethod
-  def split_initializer(contents):
-    # given a memory initializer (see memory_initializer_pattern), split it up into multiple initializers to avoid long runs of zeros or a single overly-large allocator
-    ret = []
-    l = len(contents)
-    maxx = JS.INITIALIZER_CHUNK_SIZE
-    i = 0
-    start = 0
-    while 1:
-      if i - start >= maxx or (i > start and i == l):
-        #print >> sys.stderr, 'new', start, i-start
-        ret.append((start, contents[start:i]))
-        start = i
-      if i == l: break
-      if contents[i] != '0':
-        i += 1
-      else:
-        # look for a sequence of zeros
-        j = i + 1
-        while j < l and contents[j] == '0': j += 1
-        if j-i > maxx/10 or j-start >= maxx:
-          #print >> sys.stderr, 'skip', start, i-start, j-start
-          ret.append((start, contents[start:i])) # skip over the zeros starting at i and ending at j
-          start = j
-        i = j
-    return ret
-
-  @staticmethod
-  def replace_initializers(src, inits):
-    class State(object):
-      first = True
-    def rep(m):
-      if not State.first: return ''
-      # write out all the new initializers in place of the first old one
-      State.first = False
-      def gen_init(init):
-        offset, contents = init
-        return '/* memory initializer */ allocate([%s], "i8", ALLOC_NONE, Runtime.GLOBAL_BASE%s);' % (
-          ','.join(contents),
-          '' if offset == 0 else ('+%d' % offset)
-        )
-      return '\n'.join(map(gen_init, inits))
-    return re.sub(JS.memory_initializer_pattern, rep, src)
-
-  @staticmethod
-  def optimize_initializer(src):
-    inits = JS.collect_initializers(src)
-    if len(inits) == 0: return None
-    assert len(inits) == 1
-    init = inits[0]
-    offset, contents = init
-    assert offset == 0 # offset 0, singleton
-    if len(contents) <= JS.INITIALIZER_CHUNK_SIZE: return None
-    return JS.replace_initializers(src, JS.split_initializer(contents))
 
   @staticmethod
   def generate_string_initializer(s):
