@@ -41,7 +41,7 @@ def run_on_chunk(command):
     if os.environ.get('EMCC_SAVE_OPT_TEMP') and os.environ.get('EMCC_SAVE_OPT_TEMP') != '0':
       saved = 'save_' + os.path.basename(filename)
       while os.path.exists(saved): saved = 'input' + str(int(saved.replace('input', '').replace('.txt', ''))+1) + '.txt'
-      print('running DFE command', ' '.join(map(lambda c: c if c != filename else saved, command)), file=sys.stderr)
+      print('running DFE command', ' '.join([c if c != filename else saved for c in command]), file=sys.stderr)
       mylog.log_copy(filename, os.path.join(shared.get_emscripten_temp_dir(), saved))
       shutil.copyfile(filename, os.path.join(shared.get_emscripten_temp_dir(), saved))
 
@@ -90,7 +90,7 @@ def dump_equivalent_functions(passed_in_filename, global_data):
 
   # Merge the global data's fn_hash_to_fn_name structure into
   # the equivalent function info hash.
-  for fn_hash, fn_names in global_data['fn_hash_to_fn_name'].iteritems():
+  for fn_hash, fn_names in global_data['fn_hash_to_fn_name'].items():
     if fn_hash not in equivalent_fn_info:
       # Exclude single item arrays as they are of no use to us.
       if len(fn_names) > 1:
@@ -117,7 +117,7 @@ def write_equivalent_fn_hash_to_file(f, json_files, passed_in_filename):
 
       # Merge the data's fn_hash_to_fn_name structure into
       # the global data hash.
-      for fn_hash, fn_names in data['fn_hash_to_fn_name'].iteritems():
+      for fn_hash, fn_names in data['fn_hash_to_fn_name'].items():
         if fn_hash not in global_data['fn_hash_to_fn_name']:
             global_data['fn_hash_to_fn_name'][fn_hash] = fn_names[:]
             global_data['fn_hash_to_fn_body'][fn_hash] = data['fn_hash_to_fn_body'][fn_hash]
@@ -130,7 +130,7 @@ def write_equivalent_fn_hash_to_file(f, json_files, passed_in_filename):
 
       # Merge the data's variable_names structure into
       # the global data hash.
-      for variable, value in data['variable_names'].iteritems():
+      for variable, value in data['variable_names'].items():
         if variable not in global_data['variable_names']:
             global_data['variable_names'][variable] = value
 
@@ -138,7 +138,7 @@ def write_equivalent_fn_hash_to_file(f, json_files, passed_in_filename):
 
   # Lets generate the equivalent function hash from the global data set
   equivalent_fn_hash = {}
-  for fn_hash, fn_names in global_data['fn_hash_to_fn_name'].iteritems():
+  for fn_hash, fn_names in global_data['fn_hash_to_fn_name'].items():
     shortest_fn = None
     for fn_name in fn_names:
       if (fn_name not in variable_names) and (shortest_fn is None or (len(fn_name) < len(shortest_fn))):
@@ -228,8 +228,8 @@ def run_on_js(filename, gen_hash_info=False):
   chunk_size = min(MAX_CHUNK_SIZE, max(MIN_CHUNK_SIZE, total_size / intended_num_chunks))
   chunks = shared.chunkify(funcs, chunk_size)
 
-  chunks = filter(lambda chunk: len(chunk) > 0, chunks)
-  if DEBUG and len(chunks) > 0: print('chunkification: num funcs:', len(funcs), 'actual num chunks:', len(chunks), 'chunk size range:', max(map(len, chunks)), '-', min(map(len, chunks)), file=sys.stderr)
+  chunks = [chunk for chunk in chunks if len(chunk) > 0]
+  if DEBUG and len(chunks) > 0: print('chunkification: num funcs:', len(funcs), 'actual num chunks:', len(chunks), 'chunk size range:', max(list(map(len, chunks))), '-', min(list(map(len, chunks))), file=sys.stderr)
   funcs = None
 
   if len(chunks) > 0:
@@ -249,7 +249,7 @@ def run_on_js(filename, gen_hash_info=False):
 
   old_filenames = filenames[:]
   if len(filenames) > 0:
-    commands = map(lambda filename: js_engine + [DUPLICATE_FUNCTION_ELIMINATOR, filename, '--gen-hash-info' if gen_hash_info else '--use-hash-info', '--no-minimize-whitespace'], filenames)
+    commands = [js_engine + [DUPLICATE_FUNCTION_ELIMINATOR, filename, '--gen-hash-info' if gen_hash_info else '--use-hash-info', '--no-minimize-whitespace'] for filename in filenames]
 
     if DEBUG and commands is not None:
       print([' '.join(command if command is not None else '(null)') for command in commands], file=sys.stderr)

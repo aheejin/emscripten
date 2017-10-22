@@ -155,7 +155,7 @@ for arg in sys.argv[2:]:
   elif arg.startswith('--crunch'):
     try:
       from shared import CRUNCH
-    except Exception, e:
+    except Exception as e:
       print('could not import CRUNCH (make sure it is defined properly in ' + shared.hint_config_file_location() + ')', file=sys.stderr)
       raise e
     crunch = arg.split('=', 1)[1] if '=' in arg else '128'
@@ -272,7 +272,7 @@ for file_ in data_files:
       os.path.walk(file_['srcpath'], add, [file_['mode'], file_['srcpath'], file_['dstpath']])
     else:
       new_data_files.append(file_)
-data_files = filter(lambda file_: not os.path.isdir(file_['srcpath']), new_data_files)
+data_files = [file_ for file_ in new_data_files if not os.path.isdir(file_['srcpath'])]
 if len(data_files) == 0:
   print('Nothing to do!', file=sys.stderr) 
   sys.exit(1)
@@ -309,7 +309,7 @@ def was_seen(name):
   if seen.get(name): return True
   seen[name] = 1
   return False
-data_files = filter(lambda file_: not was_seen(file_['dstpath']), data_files)
+data_files = [file_ for file_ in data_files if not was_seen(file_['dstpath'])]
 
 if AV_WORKAROUND:
   random.shuffle(data_files)
@@ -486,7 +486,7 @@ for file_ in data_files:
   basename = os.path.basename(filename)
   if file_['mode'] == 'embed':
     # Embed
-    data = map(ord, open(file_['srcpath'], 'rb').read())
+    data = list(map(ord, open(file_['srcpath'], 'rb').read()))
     code += '''var fileData%d = [];\n''' % counter
     if data:
       parts = []

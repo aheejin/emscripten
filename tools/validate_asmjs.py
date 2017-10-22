@@ -25,7 +25,7 @@ def validate_asmjs_jsfile(filename, muteOutput):
   try:
     mylog.log_cmd(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
-  except Exception, e:
+  except Exception as e:
     print('Executing command ' + str(cmd) + ' failed due to an exception: ' + str(e) + '!', file=sys.stderr)
     return False
   (stdout, stderr) = process.communicate()

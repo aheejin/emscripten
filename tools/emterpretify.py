@@ -54,7 +54,7 @@ if DEBUG:
 if FROUND:
   shared.Settings.PRECISE_F32 = 1
 
-sys.argv = filter(handle_arg, sys.argv)
+sys.argv = list(filter(handle_arg, sys.argv))
 
 # consts
 
@@ -781,7 +781,7 @@ if __name__ == '__main__':
       curr = json.loads(line[len('// REACHABLE '):])
       reachable_funcs = set(list(reachable_funcs) + curr)
 
-  external_emterpreted_funcs = filter(lambda func: func in tabled_funcs or func in exported_funcs or func in reachable_funcs, emterpreted_funcs)
+  external_emterpreted_funcs = [func for func in emterpreted_funcs if func in tabled_funcs or func in exported_funcs or func in reachable_funcs]
 
   # process functions, generating bytecode
   with temp_files.get_file('.js') as temp:
@@ -890,7 +890,7 @@ if __name__ == '__main__':
     elif line.startswith('// EMTERPRET_INFO '):
       try:
         func, curr, absolute_targets = json.loads(line[len('// EMTERPRET_INFO '):])
-      except Exception, e:
+      except Exception as e:
         print('failed to parse code from', line, file=sys.stderr)
         raise e
       assert len(curr) % 4 == 0, len(curr)
@@ -961,7 +961,7 @@ if __name__ == '__main__':
         lines[i] = lines[i].replace(call, '(eb + %s | 0)' % (funcs[func]))
 
   # finalize funcs JS (first line has the marker, add emterpreters right after that)
-  asm.funcs_js = '\n'.join([lines[0], make_emterpreter(), make_emterpreter(zero=True) if ZERO else '', '\n'.join(filter(lambda line: len(line) > 0, lines[1:]))]) + '\n'
+  asm.funcs_js = '\n'.join([lines[0], make_emterpreter(), make_emterpreter(zero=True) if ZERO else '', '\n'.join([line for line in lines[1:] if len(line) > 0])]) + '\n'
   lines = None
 
   # set up emterpreter stack top (note we must use malloc if in a shared lib, or other enviroment where static memory is sealed)

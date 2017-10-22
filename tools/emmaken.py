@@ -229,7 +229,7 @@ try:
 
   mylog.log_cmd([call] + newargs)
   subprocess.call([call] + newargs)
-except Exception, e:
+except Exception as e:
   print('Error in emmaken.py. (Is the config file %s set up properly?) Error:' % EM_CONFIG, e)
   raise
 
