@@ -1,16 +1,16 @@
 from __future__ import print_function
-from toolchain_profiler import ToolchainProfiler
-import shutil, time, os, sys, base64, json, tempfile, copy, shlex, atexit, subprocess, hashlib, cPickle, re, errno
+from .toolchain_profiler import ToolchainProfiler
+import shutil, time, os, sys, base64, json, tempfile, copy, shlex, atexit, subprocess, hashlib, pickle, re, errno
 from subprocess import Popen, PIPE, STDOUT
 from tempfile import mkstemp
 from distutils.spawn import find_executable
-import jsrun, cache, tempfiles
-import response_file
+from . import jsrun, cache, tempfiles
+from . import response_file
 import logging, platform, multiprocessing
 import mylog
 
 # Temp file utilities
-from tempfiles import try_delete
+from .tempfiles import try_delete
 
 # On Windows python suffers from a particularly nasty bug if python is spawning new processes while python itself is spawned from some other non-console process.
 # Use a custom replacement for Popen on Windows to avoid the "WindowsError: [Error 6] The handle is invalid" errors when emcc is driven through cmake or mingw32-make.
@@ -1142,7 +1142,7 @@ def expand_byte_size_suffixes(value):
 
 # Settings. A global singleton. Not pretty, but nicer than passing |, settings| everywhere
 
-class Settings2(type):
+class SettingsManager(object):
   class __impl(object):
     attrs = {}
 
@@ -1163,9 +1163,9 @@ class Settings2(type):
       exec(settings)
 
       # Apply additional settings. First -O, then -s
-      for i in range(len(args)):
-        if args[i].startswith('-O'):
-          v = args[i][2]
+      for arg in args:
+        if arg.startswith('-O'):
+          v = arg[2]
           shrink = 0
           if v in ['s', 'z']:
             shrink = 1 if v == 's' else 2
@@ -1226,9 +1226,9 @@ class Settings2(type):
 
   @staticmethod
   def instance():
-    if Settings2.__instance is None:
-      Settings2.__instance = Settings2.__impl()
-    return Settings2.__instance
+    if SettingsManager.__instance is None:
+      SettingsManager.__instance = SettingsManager.__impl()
+    return SettingsManager.__instance
 
   def __getattr__(self, attr):
     return getattr(self.instance(), attr)
@@ -1236,8 +1236,7 @@ class Settings2(type):
   def __setattr__(self, attr, value):
     return setattr(self.instance(), attr, value)
 
-class Settings(object):
-  __metaclass__ = Settings2
+Settings = SettingsManager()
 
 # llvm-ar appears to just use basenames inside archives. as a result, files with the same basename
 # will trample each other when we extract them. to help warn of such situations, we warn if there
@@ -2140,13 +2139,13 @@ class Building(object):
 
   @staticmethod
   def eliminate_duplicate_funcs(filename):
-    import duplicate_function_eliminator
+    from . import duplicate_function_eliminator
     duplicate_function_eliminator.eliminate_duplicate_funcs(filename)
 
   @staticmethod
   def calculate_reachable_functions(infile, initial_list, can_reach=True):
     with ToolchainProfiler.profile_block('calculate_reachable_functions'):
-      import asm_module
+      from . import asm_module
       temp = configuration.get_temp_files().get('.js').name
       Building.js_optimizer(infile, ['dumpCallGraph'], output_filename=temp, just_concat=True)
       asm = asm_module.AsmModule(temp)
@@ -2243,11 +2242,11 @@ class Building(object):
     try:
       if Building._is_ar_cache.get(filename):
         return Building._is_ar_cache[filename]
-      b = open(filename, 'rb').read(8)
-      sigcheck = b[0] == '!' and b[1] == '<' and \
-                 b[2] == 'a' and b[3] == 'r' and \
-                 b[4] == 'c' and b[5] == 'h' and \
-                 b[6] == '>' and ord(b[7]) == 10
+      b = bytearray(open(filename, 'rb').read(8))
+      sigcheck = b[0] == ord('!') and b[1] == ord('<') and \
+                 b[2] == ord('a') and b[3] == ord('r') and \
+                 b[4] == ord('c') and b[5] == ord('h') and \
+                 b[6] == ord('>') and b[7] == 10
       Building._is_ar_cache[filename] = sigcheck
       return sigcheck
     except Exception as e:
@@ -2257,17 +2256,17 @@ class Building(object):
   @staticmethod
   def is_bitcode(filename):
     # look for magic signature
-    b = open(filename, 'rb').read(4)
+    b = bytearray(open(filename, 'rb').read(4))
     if len(b) < 4: return False
-    if b[0] == 'B' and b[1] == 'C':
+    if b[0] == ord('B') and b[1] == ord('C'):
       return True
     # look for ar signature
     elif Building.is_ar(filename):
       return True
     # on OS X, there is a 20-byte prefix
-    elif ord(b[0]) == 222 and ord(b[1]) == 192 and ord(b[2]) == 23 and ord(b[3]) == 11:
-      b = open(filename, 'rb').read(24)
-      return b[20] == 'B' and b[21] == 'C'
+    elif b[0] == 222 and b[1] == 192 and b[2] == 23 and b[3] == 11:
+      b = bytearray(open(filename, 'rb').read(24))
+      return b[20] == ord('B') and b[21] == ord('C')
 
     return False
 
@@ -2277,7 +2276,7 @@ class Building(object):
     with ToolchainProfiler.profile_block('gen_struct_info'):
       Cache.ensure()
 
-      import gen_struct_info
+      from . import gen_struct_info
       gen_struct_info.main(['-qo', info_path, path_from_root('src/struct_info.json')])
 
   @staticmethod
@@ -2298,6 +2297,7 @@ class Building(object):
       'glut': 'library_glut.js',
       'm': '',
       'openal': 'library_openal.js',
+      'rt': '',
       'pthread': '',
       'X11': 'library_xlib.js',
       'SDL': 'library_sdl.js',
@@ -2678,4 +2678,4 @@ def make_fetch_worker(source_file, output_file):
   open(output_file, 'w').write(fetch_worker_src)
 
 
-import js_optimizer
+from . import js_optimizer

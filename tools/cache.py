@@ -1,8 +1,8 @@
 from __future__ import print_function
-from toolchain_profiler import ToolchainProfiler
+from .toolchain_profiler import ToolchainProfiler
 import os.path, sys, shutil, time, logging
-import tempfiles, filelock
-import mylog
+from . import tempfiles, filelock
+from . import mylog
 
 # Permanent cache for dlmalloc and stdlibc++
 class Cache(object):
@@ -132,4 +132,8 @@ def chunkify(funcs, chunk_size, DEBUG=False):
       curr = None
     return [''.join([func[1] for func in chunk]) for chunk in chunks] # remove function names
 
-import shared
+try:
+  from . import shared
+except ImportError:
+  # Python 2 circular import compatibility
+  import shared
