@@ -67,10 +67,10 @@ DEFERRED_REPONSE_FILES = ('EMTERPRETIFY_BLACKLIST', 'EMTERPRETIFY_WHITELIST')
 # llvm opt level 3, and speed-wise emcc level 2 is already the slowest/most optimizing
 # level)
 LLVM_OPT_LEVEL = {
-  0: 0,
-  1: 1,
-  2: 3,
-  3: 3,
+  0: ['-O0'],
+  1: ['-O1'],
+  2: ['-O3'],
+  3: ['-O3'],
 }
 
 DEBUG = os.environ.get('EMCC_DEBUG')
@@ -141,7 +141,6 @@ class EmccOptions(object):
     self.use_closure_compiler = None
     self.js_transform = None
     self.pre_js = '' # before all js
-    self.post_module = '' # in js, after Module exists
     self.post_js = '' # after all js
     self.preload_files = []
     self.embed_files = []
@@ -475,7 +474,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       exit(subprocess.call(cmd))
     else:
       only_object = '-c' in cmd
-      for i in reversed(list(range(len(cmd)-1))): # Last -o directive should take precedence, if multiple are specified
+      for i in reversed(range(len(cmd)-1)): # Last -o directive should take precedence, if multiple are specified
         if cmd[i] == '-o':
           if not only_object:
             cmd[i+1] += '.js'
@@ -544,7 +543,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if sys.argv[i].startswith('-o='):
       raise Exception('Invalid syntax: do not use -o=X, use -o X')
 
-  for i in reversed(list(range(len(sys.argv)-1))): # Last -o directive should take precedence, if multiple are specified
+  for i in reversed(range(len(sys.argv)-1)): # Last -o directive should take precedence, if multiple are specified
     if sys.argv[i] == '-o':
       target = sys.argv[i+1]
       sys.argv = sys.argv[:i] + sys.argv[i+2:]
@@ -596,6 +595,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       return filename
     suffix = filename_type_suffix(filename)
     return '' if not suffix else ('.' + suffix)
+
+  def optimizing(opts):
+    return '-O0' not in opts
 
   use_cxx = True
 
@@ -674,6 +676,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         options.js_opts = options.opt_level >= 2
       if options.llvm_opts is None:
         options.llvm_opts = LLVM_OPT_LEVEL[options.opt_level]
+      if type(options.llvm_opts) == int:
+        options.llvm_opts = ['-O%d' % options.llvm_opts]
       if options.memory_init_file is None:
         options.memory_init_file = options.opt_level >= 2
 
@@ -1372,7 +1376,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         assert len(temp_files) == len(input_files)
 
         # Optimize source files
-        if options.llvm_opts > 0:
+        if optimizing(options.llvm_opts):
           for pos, (_, input_file) in enumerate(input_files):
             file_ending = filename_type_ending(input_file)
             if file_ending.endswith(SOURCE_ENDINGS):
@@ -1505,7 +1509,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           # something similar, which we can do with a param to opt
           link_opts += ['-disable-debug-info-type-map']
 
-        if options.llvm_lto >= 2 and options.llvm_opts > 0:
+        if options.llvm_lto is not None and options.llvm_lto >= 2 and optimizing(options.llvm_opts):
           logging.debug('running LLVM opts as pre-LTO')
           final = shared.Building.llvm_opt(final, options.llvm_opts, DEFAULT_FINAL)
           if DEBUG: save_intermediate('opt', 'bc')
@@ -1627,11 +1631,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         options.pre_js = file_code + options.pre_js
 
       # Apply pre and postjs files
-      if options.pre_js or options.post_module or options.post_js:
+      if options.pre_js or options.post_js:
         logging.debug('applying pre/postjses')
         src = open(final).read()
-        if options.post_module:
-          src = src.replace('// {{PREAMBLE_ADDITIONS}}', options.post_module + '\n// {{PREAMBLE_ADDITIONS}}')
         final += '.pp.js'
         if WINDOWS: # Avoid duplicating \r\n to \r\r\n when writing out.
           if options.pre_js:
@@ -2423,18 +2425,19 @@ def modularize(final):
   src = open(final).read()
   final = final + '.modular.js'
   f = open(final, 'w')
-  f.write('var ' + shared.Settings.EXPORT_NAME + ' = function(' + shared.Settings.EXPORT_NAME + ') {\n')
-  f.write('  ' + shared.Settings.EXPORT_NAME + ' = ' + shared.Settings.EXPORT_NAME + ' || {};\n')
-  f.write('  var Module = ' + shared.Settings.EXPORT_NAME + ';\n') # included code may refer to Module (e.g. from file packager), so alias it
-  f.write('\n')
-  f.write(src)
-  f.write('\n')
-  f.write('  return ' + shared.Settings.EXPORT_NAME + ';\n')
-  f.write('};\n')
-  # Export the function if this is for Node (or similar UMD-style exporting), otherwise it is lost.
-  f.write('if (typeof module === "object" && module.exports) {\n')
-  f.write("  module['exports'] = " + shared.Settings.EXPORT_NAME + ';\n')
-  f.write('};\n')
+  f.write('''var %(EXPORT_NAME)s = function(%(EXPORT_NAME)s) {
+  %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
+  var Module = %(EXPORT_NAME)s; // included code may refer to Module (e.g. from file packager), so alias it
+
+%(src)s
+
+  return %(EXPORT_NAME)s;
+};
+// Export the function if this is for Node (or similar UMD-style exporting), otherwise it is lost.
+if (typeof module === "object" && module.exports) {
+  module['exports'] = %(EXPORT_NAME)s;
+};
+''' % {"EXPORT_NAME": shared.Settings.EXPORT_NAME, "src": src})
   f.close()
   if DEBUG: save_intermediate('modularized', 'js')
   return final
@@ -2453,16 +2456,16 @@ def generate_html(target, options, js_target, target_basename,
   asm_mods = []
 
   if options.proxy_to_worker:
-    proxy_worker_filename = shared.Settings.PROXY_TO_WORKER_FILENAME or target_basename
+    proxy_worker_filename = (shared.Settings.PROXY_TO_WORKER_FILENAME or target_basename) + '.js'
     worker_js = worker_js_script(proxy_worker_filename)
-    script.inline = '''
+    script.inline = ('''
+  var filename = '%s';
   if ((',' + window.location.search.substr(1) + ',').indexOf(',noProxy,') < 0) {
     console.log('running code in a web worker');
-''' + worker_js + '''
+''' % shared.JS.get_subresource_location(proxy_worker_filename)) + worker_js + '''
   } else {
     // note: no support for code mods (PRECISE_F32==2)
     console.log('running code on the main thread');
-    var filename = '%s';
     var fileBytes = tryParseAsDataURI(filename);
     var script = document.createElement('script');
     if (fileBytes) {
@@ -2472,7 +2475,7 @@ def generate_html(target, options, js_target, target_basename,
     }
     document.body.appendChild(script);
   }
-''' % shared.JS.get_subresource_location(proxy_worker_filename + '.js')
+'''
   else:
     # Normal code generation path
     script.src = base_js_target
@@ -2482,10 +2485,11 @@ def generate_html(target, options, js_target, target_basename,
                                     minified = 'minifyNames' in optimizer.queue_history,
                                     separate_asm = options.separate_asm)
 
-  if shared.Settings.EMTERPRETIFY_FILE:
-    # We need to load the emterpreter file before anything else, it has to be synchronously ready
-    script.un_src()
-    script.inline = '''
+  if not shared.Settings.SINGLE_FILE:
+    if shared.Settings.EMTERPRETIFY_FILE:
+      # We need to load the emterpreter file before anything else, it has to be synchronously ready
+      script.un_src()
+      script.inline = '''
           var emterpretURL = '%s';
           var emterpretXHR = new XMLHttpRequest();
           emterpretXHR.open('GET', emterpretURL, true);
@@ -2504,10 +2508,10 @@ def generate_html(target, options, js_target, target_basename,
           emterpretXHR.send(null);
 ''' % (shared.JS.get_subresource_location(shared.Settings.EMTERPRETIFY_FILE), script.inline)
 
-  if options.memory_init_file:
-    # start to load the memory init file in the HTML, in parallel with the JS
-    script.un_src()
-    script.inline = ('''
+    if options.memory_init_file:
+      # start to load the memory init file in the HTML, in parallel with the JS
+      script.un_src()
+      script.inline = ('''
           var memoryInitializer = '%s';
           if (typeof Module['locateFile'] === 'function') {
             memoryInitializer = Module['locateFile'](memoryInitializer);
@@ -2521,15 +2525,15 @@ def generate_html(target, options, js_target, target_basename,
           meminitXHR.send(null);
 ''' % shared.JS.get_subresource_location(memfile)) + script.inline
 
-  # Download .asm.js if --separate-asm was passed in an asm.js build, or if 'asmjs' is one
-  # of the wasm run methods.
-  if not options.separate_asm or (shared.Settings.BINARYEN and 'asmjs' not in shared.Settings.BINARYEN_METHOD):
-    assert len(asm_mods) == 0, 'no --separate-asm means no client code mods are possible'
-  else:
-    script.un_src()
-    if len(asm_mods) == 0:
-      # just load the asm, then load the rest
-      script.inline = '''
+    # Download .asm.js if --separate-asm was passed in an asm.js build, or if 'asmjs' is one
+    # of the wasm run methods.
+    if not options.separate_asm or (shared.Settings.BINARYEN and 'asmjs' not in shared.Settings.BINARYEN_METHOD):
+      assert len(asm_mods) == 0, 'no --separate-asm means no client code mods are possible'
+    else:
+      script.un_src()
+      if len(asm_mods) == 0:
+        # just load the asm, then load the rest
+        script.inline = '''
     var filename = '%s';
     var fileBytes = tryParseAsDataURI(filename);
     var script = document.createElement('script');
@@ -2545,9 +2549,9 @@ def generate_html(target, options, js_target, target_basename,
     };
     document.body.appendChild(script);
 ''' % (shared.JS.get_subresource_location(asm_target), script.inline)
-    else:
-      # may need to modify the asm code, load it as text, modify, and load asynchronously
-      script.inline = '''
+      else:
+        # may need to modify the asm code, load it as text, modify, and load asynchronously
+        script.inline = '''
     var codeURL = '%s';
     var codeXHR = new XMLHttpRequest();
     codeXHR.open('GET', codeURL, true);
@@ -2578,10 +2582,10 @@ def generate_html(target, options, js_target, target_basename,
     codeXHR.send(null);
 ''' % (shared.JS.get_subresource_location(asm_target), '\n'.join(asm_mods), script.inline)
 
-  if shared.Settings.BINARYEN and not shared.Settings.BINARYEN_ASYNC_COMPILATION:
-    # We need to load the wasm file before anything else, it has to be synchronously ready TODO: optimize
-    script.un_src()
-    script.inline = '''
+    if shared.Settings.BINARYEN and not shared.Settings.BINARYEN_ASYNC_COMPILATION:
+      # We need to load the wasm file before anything else, it has to be synchronously ready TODO: optimize
+      script.un_src()
+      script.inline = '''
           var wasmURL = '%s';
           var wasmXHR = new XMLHttpRequest();
           wasmXHR.open('GET', wasmURL, true);
@@ -2607,6 +2611,19 @@ def generate_html(target, options, js_target, target_basename,
       script.inline = f.read() + script.inline
       f.close()
 
+    script.inline = 'var ASSERTIONS = %s;\n%s' % (shared.Settings.ASSERTIONS, script.inline)
+
+  # inline script for SINGLE_FILE output
+  if shared.Settings.SINGLE_FILE:
+    js_contents = script.inline or ''
+    if script.src:
+      js = open(js_target, 'r')
+      js_contents += js.read()
+      js.close()
+    shared.try_delete(js_target)
+    script.src = None
+    script.inline = js_contents
+
   html = open(target, 'wb')
   html_contents = shell.replace('{{{ SCRIPT }}}', script.replacement())
   html_contents = tools.line_endings.convert_line_endings(html_contents, '\n', options.output_eol)
@@ -2615,10 +2632,17 @@ def generate_html(target, options, js_target, target_basename,
 
 
 def generate_worker_js(target, js_target, target_basename):
-  mylog.log_move(js_target, unsuffixed(js_target) + '.worker.js') # compiler output goes in .worker.js file
-  shutil.move(js_target, unsuffixed(js_target) + '.worker.js') # compiler output goes in .worker.js file
-  worker_target_basename = target_basename + '.worker'
-  proxy_worker_filename = shared.Settings.PROXY_TO_WORKER_FILENAME or worker_target_basename
+  # compiler output is embedded as base64
+  if shared.Settings.SINGLE_FILE:
+    proxy_worker_filename = shared.JS.get_subresource_location(js_target)
+
+  # compiler output goes in .worker.js file
+  else:
+    mylog.log_move(js_target, unsuffixed(js_target) + '.worker.js')
+    shutil.move(js_target, unsuffixed(js_target) + '.worker.js')
+    worker_target_basename = target_basename + '.worker'
+    proxy_worker_filename = (shared.Settings.PROXY_TO_WORKER_FILENAME or worker_target_basename) + '.js'
+
   target_contents = worker_js_script(proxy_worker_filename)
   open(target, 'w').write(target_contents)
 
