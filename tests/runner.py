@@ -16,7 +16,6 @@ import multiprocessing, functools, stat, string, random, fnmatch
 import atexit
 import operator
 import parallel_runner
-import mylog
 
 if sys.version_info.major == 2:
   from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
