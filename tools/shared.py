@@ -424,6 +424,7 @@ def check_fastcomp():
 
       # check build versions. don't show it if the repos are wrong, user should fix that first
       if not shown_repo_version_error:
+        mylog.log_cmd([clang, '--version'])
         clang_v = Popen([CLANG, '--version'], stdout=PIPE).communicate()[0]
         llvm_build_version, clang_build_version = clang_v.split('(emscripten ')[1].split(')')[0].split(' : ')
         if EMSCRIPTEN_VERSION != llvm_build_version or EMSCRIPTEN_VERSION != clang_build_version:
@@ -440,6 +441,7 @@ EXPECTED_NODE_VERSION = (0,8,0)
 def check_node_version():
   jsrun.check_engine(NODE_JS)
   try:
+    mylog.log_cmd(NODE_JS + ['--version'])
     actual = Popen(NODE_JS + ['--version'], stdout=PIPE).communicate()[0].strip()
     version = tuple(map(int, actual.replace('v', '').replace('-pre', '').split('.')))
     if version >= EXPECTED_NODE_VERSION:
@@ -1271,6 +1273,7 @@ def extract_archive_contents(f):
       dirname = os.path.dirname(content)
       if dirname:
         safe_ensure_dirs(dirname)
+    mylog.log_cmd([LLVM_AR, 'xo', f])
     proc = Popen([LLVM_AR, 'xo', f], stdout=PIPE, stderr=PIPE)
     stdout, stderr = proc.communicate() # if absolute paths, files will appear there. otherwise, in this directory
     contents = list(map(os.path.abspath, contents))
@@ -1538,6 +1541,7 @@ class Building(object):
       env['EMMAKEN_JUST_CONFIGURE'] = '1'
     try:
       if EM_BUILD_VERBOSE_LEVEL >= 3: print('configure: ' + str(args), file=sys.stderr)
+      mylog.log_cmd(args)
       process = Popen(args, stdout=None if EM_BUILD_VERBOSE_LEVEL >= 2 else stdout, stderr=None if EM_BUILD_VERBOSE_LEVEL >= 1 else stderr, env=env)
       process.communicate()
     except Exception as e:
@@ -1570,6 +1574,7 @@ class Building(object):
     try:
       # On Windows, run the execution through shell to get PATH expansion and executable extension lookup, e.g. 'sdl2-config' will match with 'sdl2-config.bat' in PATH.
       if EM_BUILD_VERBOSE_LEVEL >= 3: print('make: ' + str(args), file=sys.stderr)
+      mylog.log_cmd(args)
       process = Popen(args, stdout=None if EM_BUILD_VERBOSE_LEVEL >= 2 else stdout, stderr=None if EM_BUILD_VERBOSE_LEVEL >= 1 else stderr, env=env, shell=WINDOWS)
       process.communicate()
     except Exception as e:
@@ -1908,6 +1913,8 @@ class Building(object):
     if Building.LLVM_OPTS:
       mylog.log_move(filename + '.o', filename + '.o.pre')
       shutil.move(filename + '.o', filename + '.o.pre')
+      mylog.log_cmd([LLVM_OPT, filename + '.o.pre'] + Building.LLVM_OPT_OPTS +
+                    ['-o', filename + '.o'])
       output = Popen([LLVM_OPT, filename + '.o.pre'] + Building.LLVM_OPT_OPTS + ['-o', filename + '.o'], stdout=PIPE).communicate()[0]
       assert os.path.exists(filename + '.o'), 'Failed to run llvm optimizations: ' + output
 
@@ -1919,6 +1926,7 @@ class Building(object):
       output_filename = input_filename + '.o.ll'
       input_filename = input_filename + '.o'
     try_delete(output_filename)
+    mylog.log_cmd([LLVM_DIS, input_filename, '-o', output_filename])
     output = Popen([LLVM_DIS, input_filename, '-o', output_filename], stdout=PIPE).communicate()[0]
     assert os.path.exists(output_filename), 'Could not create .ll file: ' + output
     return output_filename
@@ -1931,6 +1939,7 @@ class Building(object):
       output_filename = input_filename + '.o'
       input_filename = input_filename + '.o.ll'
     try_delete(output_filename)
+    mylog.log_cmd([LLVM_AS, input_filename, '-o', output_filename])
     output = Popen([LLVM_AS, input_filename, '-o', output_filename], stdout=PIPE).communicate()[0]
     assert os.path.exists(output_filename), 'Could not create bc file: ' + output
     return output_filename
@@ -1966,6 +1975,7 @@ class Building(object):
   @staticmethod
   def llvm_nm_uncached(filename, stdout=PIPE, stderr=PIPE, include_internal=False):
     # LLVM binary ==> list of symbols
+    mylog.log_cmd([LLVM_NM, filename])
     proc = Popen([LLVM_NM, filename], stdout=stdout, stderr=stderr)
     stdout, stderr = proc.communicate()
     if proc.returncode == 0:
@@ -1999,12 +2009,14 @@ class Building(object):
     if output_filename is None:
       output_filename = filename + '.o'
     try_delete(output_filename)
+    mylog.log_cmd([PYTHON, EMCC, filename] + args + ['-o', output_filename])
     Popen([PYTHON, EMCC, filename] + args + ['-o', output_filename], stdout=stdout, stderr=stderr, env=env).communicate()
     assert os.path.exists(output_filename), 'emcc could not create output file: ' + output_filename
 
   @staticmethod
   def emar(action, output_filename, filenames, stdout=None, stderr=None, env=None):
     try_delete(output_filename)
+    mylog.log_cmd([PYTHON, EMAR, action, output_filename] + filenames)
     Popen([PYTHON, EMAR, action, output_filename] + filenames, stdout=stdout, stderr=stderr, env=env).communicate()
     if 'c' in action:
       assert os.path.exists(output_filename), 'emar could not create output file: ' + output_filename
@@ -2207,6 +2219,7 @@ class Building(object):
       if os.environ.get('EMCC_CLOSURE_ARGS'):
         args += shlex.split(os.environ.get('EMCC_CLOSURE_ARGS'))
       logging.debug('closure compiler: ' + ' '.join(args))
+      mylog.log_cmd(args)
       process = Popen(args, stdout=PIPE, stderr=STDOUT)
       cc_output = process.communicate()[0]
       if process.returncode != 0 or not os.path.exists(filename + '.cc.js'):

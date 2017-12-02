@@ -16,6 +16,7 @@ import multiprocessing, functools, stat, string, random, fnmatch
 import atexit
 import operator
 import parallel_runner
+import mylog
 
 if sys.version_info.major == 2:
   from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
@@ -44,6 +45,7 @@ emscripten_browser = os.environ.get('EMSCRIPTEN_BROWSER')
 if emscripten_browser:
   cmd = shlex.split(emscripten_browser)
   def run_in_other_browser(url):
+    mylog.log_cmd(cmd + [url])
     Popen(cmd + [url])
   if EM_BUILD_VERBOSE_LEVEL >= 3:
     print("using Emscripten browser: " + str(cmd), file=sys.stderr)
@@ -478,6 +480,8 @@ class RunnerCore(unittest.TestCase):
 
   def build_native(self, filename, args=[]):
     compiler = CLANG if filename.endswith('cpp') else CLANG_CC
+    mylog.log_cmd([compiler, '-O2', '-fno-math-errno', filename, '-o',
+                   filename+'.native'] + args)
     process = Popen([compiler, '-O2', '-fno-math-errno', filename, '-o', filename+'.native'] + args, stdout=PIPE, stderr=self.stderr_redirect)
     output = process.communicate()
     if process.returncode is not 0:
@@ -485,6 +489,7 @@ class RunnerCore(unittest.TestCase):
       print("Output: " + output[0])
 
   def run_native(self, filename, args):
+    mylog.log_cmd([filename+'.native'] + args)
     process = Popen([filename+'.native'] + args, stdout=PIPE);
     output = process.communicate()
     if process.returncode is not 0:
@@ -997,6 +1002,7 @@ class BrowserCore(RunnerCore):
     all_args = [PYTHON, EMCC, '-s', 'IN_TEST_HARNESS=1', temp_filepath, '-o', outfile] + args
     #print 'all args:', all_args
     try_delete(outfile)
+    mylog.log_cmd(all_args)
     Popen(all_args).communicate()
     assert os.path.exists(outfile)
     if post_build: post_build()
