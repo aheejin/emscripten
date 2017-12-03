@@ -424,7 +424,7 @@ def check_fastcomp():
 
       # check build versions. don't show it if the repos are wrong, user should fix that first
       if not shown_repo_version_error:
-        mylog.log_cmd([clang, '--version'])
+        mylog.log_cmd([CLANG, '--version'])
         clang_v = Popen([CLANG, '--version'], stdout=PIPE).communicate()[0]
         llvm_build_version, clang_build_version = clang_v.split('(emscripten ')[1].split(')')[0].split(' : ')
         if EMSCRIPTEN_VERSION != llvm_build_version or EMSCRIPTEN_VERSION != clang_build_version:
