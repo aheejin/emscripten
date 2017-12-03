@@ -147,7 +147,9 @@ class EmccOptions(object):
     self.force_js_opts = False
     self.llvm_opts = None
     self.llvm_lto = None
-    self.default_cxx_std = '-std=c++11' # Enforce a consistent C++ standard when compiling .cpp files, if user does not specify one on the cmdline.
+    self.default_cxx_std = '-std=c++03' # Enforce a consistent C++ standard when compiling .cpp files, if user does not specify one on the cmdline.
+    # HACK (aheejin) c++11
+    #self.default_cxx_std = '-std=c++11'
     self.use_closure_compiler = None
     self.js_transform = None
     self.pre_js = '' # before all js
@@ -1348,8 +1350,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           exit_with_error('compiler frontend failed to generate LLVM bitcode, halting')
 
         # HACK (aheejin): for easy debugging
-        shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
-                                 output_file)
+        #shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
+        #                         output_file)
 
       # First, generate LLVM bitcode. For each input file, we get base.o with bitcode
       for i, input_file in input_files:
