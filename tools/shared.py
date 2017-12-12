@@ -217,6 +217,7 @@ def run_base(cmd, check=False, *args, **kw):
   return result
 
 def run_process(cmd, universal_newlines=True, check=True, *args, **kw):
+  mylog.log_cmd(cmd)
   return run_base(cmd, universal_newlines=universal_newlines, check=check, *args, **kw)
 
 def execute(cmd, *args, **kw):
