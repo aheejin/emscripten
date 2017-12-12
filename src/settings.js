@@ -355,34 +355,12 @@ var EXPORTED_RUNTIME_METHODS = [ // Runtime elements that are exported on Module
   'FS_createDevice',
   'FS_unlink',
   'Runtime',
-  'ccall',
-  'cwrap',
   'ALLOC_NORMAL',
   'ALLOC_STACK',
   'ALLOC_STATIC',
   'ALLOC_DYNAMIC',
   'ALLOC_NONE',
-  'allocate',
   'getMemory',
-  'Pointer_stringify',
-  'AsciiToString',
-  'stringToAscii',
-  'UTF8ArrayToString',
-  'UTF8ToString',
-  'stringToUTF8Array',
-  'stringToUTF8',
-  'lengthBytesUTF8',
-  'stackTrace',
-  'addOnPreRun',
-  'addOnInit',
-  'addOnPreMain',
-  'addOnExit',
-  'addOnPostRun',
-  'intArrayFromString',
-  'intArrayToString',
-  'writeStringToMemory',
-  'writeArrayToMemory',
-  'writeAsciiToMemory',
   'addRunDependency',
   'removeRunDependency',
 ];
@@ -882,6 +860,8 @@ var WASM_TEXT_FILE = ''; // name of the file containing wasm text, if relevant
 var WASM_BINARY_FILE = ''; // name of the file containing wasm binary, if relevant
 var ASMJS_CODE_FILE = ''; // name of the file containing asm.js, if relevant
 var SOURCE_MAP_BASE = ''; // Base URL the source mapfile, if relevant
+
+var MEM_INIT_IN_WASM = 0; // for internal use only
 
 var SUPPORT_BASE64_EMBEDDING = 0; // If set to 1, src/base64Utils.js will be included in the bundle.
                                   // This is set internally when needed (SINGLE_FILE)

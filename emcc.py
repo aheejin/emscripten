@@ -31,8 +31,8 @@ if __name__ == '__main__':
 import os, sys, shutil, tempfile, subprocess, shlex, time, re, logging
 from subprocess import PIPE
 from tools import shared, jsrun, system_libs
+from tools.shared import execute, suffix, unsuffixed, unsuffixed_basename, WINDOWS, safe_move, run_process, asbytes
 from tools import mylog
-from tools.shared import execute, suffix, unsuffixed, unsuffixed_basename, WINDOWS, safe_move
 from tools.response_file import read_response_file
 import tools.line_endings
 
@@ -391,9 +391,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     args = [x for x in sys.argv if x != '--cflags']
     with misc_temp_files.get_file(suffix='.o') as temp_target:
       input_file = 'hello_world.c'
-      mylog.log_cmd([shared.PYTHON] + args + [shared.path_from_root('tests', input_file), '-c', '-o', temp_target], stderr=subprocess.PIPE, env=debug_env)
-      out, err = subprocess.Popen([shared.PYTHON] + args + [shared.path_from_root('tests', input_file), '-c', '-o', temp_target], stderr=subprocess.PIPE, env=debug_env).communicate()
-      lines = [x for x in err.split(os.linesep) if shared.CLANG_CC in x and input_file in x]
+      err = run_process([shared.PYTHON] + args + [shared.path_from_root('tests', input_file), '-c', '-o', temp_target], stderr=subprocess.PIPE, env=debug_env).stderr
+      lines = [x for x in err.split('\n') if shared.CLANG_CC in x and input_file in x]
       line = re.search('running: (.*)', lines[0]).group(1)
       parts = shlex.split(line.replace('\\', '\\\\'))
       parts = [x for x in parts if x != '-c' and x != '-o' and input_file not in x and temp_target not in x and '-emit-llvm' not in x]
@@ -585,15 +584,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
   def in_temp(name):
     return os.path.join(temp_dir, os.path.basename(name))
-
-  def in_directory(root, child):
-    # make both path absolute
-    root = os.path.realpath(root)
-    child = os.path.realpath(child)
-
-    # return true, if the common prefix of both is equal to directory
-    # e.g. /a/b/c/d.rst and directory is /a/b, the common prefix is /a/b
-    return os.path.commonprefix([root, child]) == root
 
   # Parses the essential suffix of a filename, discarding Unix-style version numbers in the name. For example for 'libz.so.1.2.8' returns '.so'
   def filename_type_suffix(filename):
@@ -957,6 +947,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       assert not (shared.Settings.NO_DYNAMIC_EXECUTION and options.use_closure_compiler), 'cannot have both NO_DYNAMIC_EXECUTION and closure compiler enabled at the same time'
 
+      if options.emrun:
+        shared.Settings.EXPORTED_RUNTIME_METHODS.append('addOnExit')
+
       if options.use_closure_compiler:
         shared.Settings.USE_CLOSURE_COMPILER = options.use_closure_compiler
         if not shared.check_closure_compiler():
@@ -1193,6 +1186,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           if shared.Settings.BINARYEN_PASSES:
             shared.Settings.BINARYEN_PASSES += ','
           shared.Settings.BINARYEN_PASSES += 'safe-heap'
+        # we will include the mem init data in the wasm, when we don't need the
+        # mem init file to be loadable by itself
+        shared.Settings.MEM_INIT_IN_WASM = 'asmjs' not in shared.Settings.BINARYEN_METHOD and \
+                                           'interpret-asm2wasm' not in shared.Settings.BINARYEN_METHOD and \
+                                           not shared.Settings.USE_PTHREADS
 
       # wasm outputs are only possible with a side wasm
       if target.endswith(WASM_ENDINGS):
@@ -1626,7 +1624,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           options.no_heap_copy = True
 
         logging.debug('setting up files')
-        file_args = []
+        file_args = ['--from-emcc', '--export-name=' + shared.Settings.EXPORT_NAME]
         if len(options.preload_files) > 0:
           file_args.append('--preload')
           file_args += options.preload_files
@@ -1640,8 +1638,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           file_args.append('--use-preload-cache')
         if options.no_heap_copy:
           file_args.append('--no-heap-copy')
-        if not options.use_closure_compiler:
-          file_args.append('--no-closure')
         if shared.Settings.LZ4:
           file_args.append('--lz4')
         if options.use_preload_plugins:
@@ -1666,6 +1662,42 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         outfile.close()
         options.pre_js = src = options.post_js = None
         if DEBUG: save_intermediate('pre-post')
+
+      if not shared.Settings.SIDE_MODULE:
+        # The Module object: Our interface to the outside world. We import
+        # and export values on it. There are various ways Module can be used:
+        # 1. Not defined. We create it here
+        # 2. A function parameter, function(Module) { ..generated code.. }
+        # 3. pre-run appended it, var Module = {}; ..generated code..
+        # 4. External script tag defines var Module.
+        # We need to check if Module already exists (e.g. case 3 above).
+        # Substitution will be replaced with actual code on later stage of the build,
+        # this way Closure Compiler will not mangle it (e.g. case 4. above).
+        # Note that if you want to run closure, and also to use Module
+        # after the generated code, you will need to define   var Module = {};
+        # before the code. Then that object will be used in the code, and you
+        # can continue to use Module afterwards as well.
+        if options.use_closure_compiler:
+          # `if (!Module)` is crucial for Closure Compiler here as it will otherwise replace every `Module` occurrence with a string
+          module_header = '''
+var Module;
+if (!Module) Module = %s;
+''' % shared.JS.module_export_name_substitution_pattern
+        else:
+          module_header = '''
+var Module = typeof %(EXPORT_NAME)s !== 'undefined' ? %(EXPORT_NAME)s : {};
+''' % {"EXPORT_NAME": shared.Settings.EXPORT_NAME}
+
+        # Append module header now as --pre-js is already added
+        logging.debug('Appending module header')
+        src = open(final).read()
+        final += '.wh.js'
+        outfile = open(final, 'w')
+        outfile.write(module_header)
+        outfile.write(src)
+        outfile.close()
+        src = None
+        if DEBUG: save_intermediate('with-header')
 
       # Apply a source code transformation, if requested
       if options.js_transform:
@@ -1707,7 +1739,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           if not shared.Settings.BINARYEN or 'asmjs' in shared.Settings.BINARYEN_METHOD or 'interpret-asm2wasm' in shared.Settings.BINARYEN_METHOD:
             return 'memoryInitializer = "%s";' % shared.JS.get_subresource_location(memfile, embed_memfile(options))
           else:
-            return 'memoryInitializer = null;'
+            return ''
         src = re.sub(shared.JS.memory_initializer_pattern, repl, open(final).read(), count=1)
         open(final + '.mem.js', 'w').write(src)
         final += '.mem.js'
@@ -1860,11 +1892,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       binaryen_method_sanity_check()
       if shared.Settings.BINARYEN:
-        final = do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
-                            wasm_text_target, misc_temp_files, optimizer)
+        do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
+                    wasm_text_target, misc_temp_files, optimizer)
 
       if shared.Settings.MODULARIZE:
         final = modularize(final)
+
+      final = module_export_name_substitution(final)
 
       # The JS is now final. Move it to its final location
       mylog.log_move(final, js_target)
@@ -2261,8 +2295,9 @@ def binaryen_method_sanity_check():
         exit_with_error('Unrecognized BINARYEN_METHOD "' + m.strip() + '" specified! Please pass a comma-delimited list containing one or more of: ' + ','.join(valid_methods))
 
 
-def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
+def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
                 wasm_text_target, misc_temp_files, optimizer):
+  global final
   logging.debug('using binaryen, with method: ' + shared.Settings.BINARYEN_METHOD)
   binaryen_bin = shared.Building.get_binaryen_bin()
   # Emit wasm.js at the top of the js. This is *not* optimized with the rest of the code, since
@@ -2301,8 +2336,7 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
       cmd.append(shared.Building.opt_level_to_str(options.opt_level, options.shrink_level))
     # import mem init file if it exists, and if we will not be using asm.js as a binaryen method (as it needs the mem init file, of course)
     mem_file_exists = options.memory_init_file and os.path.exists(memfile)
-    ok_binaryen_method = 'asmjs' not in shared.Settings.BINARYEN_METHOD and 'interpret-asm2wasm' not in shared.Settings.BINARYEN_METHOD
-    import_mem_init = mem_file_exists and ok_binaryen_method
+    import_mem_init = mem_file_exists and shared.Settings.MEM_INIT_IN_WASM
     if import_mem_init:
       cmd += ['--mem-init=' + memfile]
       if not shared.Settings.RELOCATABLE:
@@ -2403,20 +2437,21 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
   if options.opt_level >= 2:
     # minify the JS
     optimizer.do_minify() # calculate how to minify
-    if optimizer.cleanup_shell or optimizer.minify_whitespace or options.use_closure_compiler:
-      misc_temp_files.note(final)
+    if optimizer.cleanup_shell or options.use_closure_compiler:
       if DEBUG: save_intermediate('preclean', 'js')
+      # in -Os and -Oz, run AJSDCE (aggressive JS DCE, performs multiple iterations)
+      passes = ['noPrintMetadata', 'JSDCE' if options.shrink_level == 0 else 'AJSDCE', 'last']
+      if optimizer.minify_whitespace:
+        passes.append('minifyWhitespace')
+      misc_temp_files.note(final)
+      logging.debug('running cleanup on shell code: ' + ' '.join(passes))
+      final = shared.Building.js_optimizer_no_asmjs(final, passes)
+      if DEBUG: save_intermediate('postclean', 'js')
       if options.use_closure_compiler:
         logging.debug('running closure on shell code')
+        misc_temp_files.note(final)
         final = shared.Building.closure_compiler(final, pretty=not optimizer.minify_whitespace)
-      else:
-        assert optimizer.cleanup_shell
-        logging.debug('running cleanup on shell code')
-        passes = ['noPrintMetadata', 'JSDCE', 'last']
-        if optimizer.minify_whitespace:
-          passes.append('minifyWhitespace')
-        final = shared.Building.js_optimizer_no_asmjs(final, passes)
-      if DEBUG: save_intermediate('postclean', 'js')
+        if DEBUG: save_intermediate('postclosure', 'js')
   # replace placeholder strings with correct subresource locations
   if shared.Settings.SINGLE_FILE:
     f = open(final, 'r')
@@ -2435,7 +2470,6 @@ def do_binaryen(final, target, asm_target, options, memfile, wasm_binary_target,
       shared.try_delete(target)
     f.write(js)
     f.close()
-  return final
 
 
 def modularize(final):
@@ -2443,21 +2477,33 @@ def modularize(final):
   src = open(final).read()
   final = final + '.modular.js'
   f = open(final, 'w')
+  # Included code may refer to Module (e.g. from file packager), so alias it
+  # Export the function as Node module, otherwise it is lost when loaded in Node.js or similar environments
   f.write('''var %(EXPORT_NAME)s = function(%(EXPORT_NAME)s) {
   %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
-  var Module = %(EXPORT_NAME)s; // included code may refer to Module (e.g. from file packager), so alias it
 
 %(src)s
 
   return %(EXPORT_NAME)s;
 };
-// Export the function if this is for Node (or similar UMD-style exporting), otherwise it is lost.
 if (typeof module === "object" && module.exports) {
   module['exports'] = %(EXPORT_NAME)s;
 };
 ''' % {"EXPORT_NAME": shared.Settings.EXPORT_NAME, "src": src})
   f.close()
   if DEBUG: save_intermediate('modularized', 'js')
+  return final
+
+
+def module_export_name_substitution(final):
+  logging.debug('Private module export name substitution with ' + shared.Settings.EXPORT_NAME)
+  src = open(final).read()
+  final = final + '.module_export_name_substitution.js'
+  f = open(final, 'w')
+  replacement = "typeof %(EXPORT_NAME)s !== 'undefined' ? %(EXPORT_NAME)s : {}" % {"EXPORT_NAME": shared.Settings.EXPORT_NAME}
+  f.write(src.replace(shared.JS.module_export_name_substitution_pattern, replacement))
+  f.close()
+  if DEBUG: save_intermediate('module_export_name_substitution', 'js')
   return final
 
 
@@ -2645,7 +2691,7 @@ def generate_html(target, options, js_target, target_basename,
   html = open(target, 'wb')
   html_contents = shell.replace('{{{ SCRIPT }}}', script.replacement())
   html_contents = tools.line_endings.convert_line_endings(html_contents, '\n', options.output_eol)
-  html.write(html_contents.encode('utf-8'))
+  html.write(asbytes(html_contents))
   html.close()
 
 
@@ -2733,6 +2779,15 @@ def is_valid_abspath(options, path_name):
   # Any path that is underneath the emscripten repository root must be ok.
   if shared.path_from_root().replace('\\', '/') in path_name.replace('\\', '/'):
     return True
+
+  def in_directory(root, child):
+    # make both path absolute
+    root = os.path.realpath(root)
+    child = os.path.realpath(child)
+
+    # return true, if the common prefix of both is equal to directory
+    # e.g. /a/b/c/d.rst and directory is /a/b, the common prefix is /a/b
+    return os.path.commonprefix([root, child]) == root
 
   for valid_abspath in options.valid_abspaths:
     if in_directory(valid_abspath, path_name):

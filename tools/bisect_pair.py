@@ -38,8 +38,7 @@ assert left_result != right_result
 
 # Calculate diff chunks
 print('diffing')
-mylog.log_cmd(['diff', '-U', '5', 'left', 'right'], stdout=PIPE)
-diff = Popen(['diff', '-U', '5', 'left', 'right'], stdout=PIPE).communicate()[0].split('\n')
+diff = run_process(['diff', '-U', '5', 'left', 'right'], stdout=PIPE).stdout.split('\n')
 pre_diff = diff[:2]
 diff = diff[2:]
 
@@ -86,8 +85,7 @@ for mid in range(high):
     found = mid
     break
 
-mylog.log_cmd(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE)
-critical = Popen(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE).communicate()[0]
+critical = run_process(['diff', '-U', '5', 'middle' + str(mid-1), 'middle' + str(mid)], stdout=PIPE).stdout
 c = open('critical.diff', 'w')
 c.write(critical)
 c.close()
