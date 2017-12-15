@@ -223,6 +223,7 @@ def run_process(cmd, universal_newlines=True, check=True, *args, **kw):
 def execute(cmd, *args, **kw):
   try:
     cmd[0] = Building.remove_quotes(cmd[0])
+    mylog.log_cmd(cmd)
     return Popen(cmd, universal_newlines=True, *args, **kw).communicate() # let compiler frontend print directly, so colors are saved (PIPE kills that)
   except:
     if not isinstance(cmd, str):
@@ -234,6 +235,7 @@ def check_execute(cmd, *args, **kw):
   # TODO: use in more places. execute doesn't actually check that return values
   # are nonzero
   try:
+    mylog.log_cmd(cmd)
     subprocess.check_output(cmd, *args, **kw)
     logging.debug("Successfuly executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
@@ -242,6 +244,7 @@ def check_execute(cmd, *args, **kw):
 
 def check_call(cmd, *args, **kw):
   try:
+    mylog.log_cmd(cmd)
     subprocess.check_call(cmd, *args, **kw)
     logging.debug("Successfully executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
