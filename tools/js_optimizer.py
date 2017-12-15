@@ -14,6 +14,7 @@ try:
 except ImportError:
   # Python 2 circular import compatibility
   import shared
+  from shared import mylog
 
 configuration = shared.configuration
 temp_files = configuration.get_temp_files()
