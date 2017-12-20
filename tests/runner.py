@@ -329,6 +329,7 @@ class RunnerCore(unittest.TestCase):
       final_additional_files = []
       for f in additional_files:
         final_additional_files.append(os.path.join(dirname, os.path.basename(f)))
+        mylog.log_copy(f, final_additional_files[-1])
         shutil.copyfile(f, final_additional_files[-1])
       additional_files = final_additional_files
     else:
@@ -336,11 +337,15 @@ class RunnerCore(unittest.TestCase):
       # (rmtree() fails on Windows if the current working directory is inside the tree.)
       if os.getcwd().startswith(os.path.abspath(dirname)):
           os.chdir(os.path.join(dirname, '..'))
+      mylog.log_remove(dirname)
       shutil.rmtree(dirname)
+      mylog.log_copy(src, dirname)
       shutil.copytree(src, dirname)
+      mylog.log_move(os.path.join(dirname, main_file), filename)
       shutil.move(os.path.join(dirname, main_file), filename)
       # the additional files were copied; alter additional_files to point to their full paths now
       additional_files = [os.path.join(dirname, f) for f in additional_files]
+      mylog.log_chdir(self.get_dir())
       os.chdir(self.get_dir())
 
     if build_ll_hook or post_build or extra_emscripten_args:
@@ -351,6 +356,7 @@ class RunnerCore(unittest.TestCase):
       for f in [filename] + additional_files:
         try:
           # Make sure we notice if compilation steps failed
+          mylog.log_remove(f + '.o')
           os.remove(f + '.o')
         except:
           pass
@@ -358,11 +364,13 @@ class RunnerCore(unittest.TestCase):
                ['-I', dirname, '-I', os.path.join(dirname, 'include')] + \
                ['-I' + include for include in includes] + \
                ['-c', f, '-o', f + '.o']
+        mylog.log_cmd(args, stderr=self.stderr_redirect if not DEBUG else None)
         output = subprocess.check_call(args, stderr=self.stderr_redirect if not DEBUG else None)
         assert os.path.exists(f + '.o')
 
       # Link all files
       if len(additional_files) + len(libraries) > 0:
+        mylog.log_move(filename + '.o', filename + '.o.alone')
         shutil.move(filename + '.o', filename + '.o.alone')
         Building.link([filename + '.o.alone'] + [f + '.o' for f in additional_files] + libraries,
                  filename + '.o')
@@ -380,6 +388,7 @@ class RunnerCore(unittest.TestCase):
       all_files = [filename] + additional_files + libraries
       for i in range(len(all_files)):
         if '.' not in all_files[i]:
+          mylog.log_move(all_files[i], all_files[i] + '.bc')
           shutil.move(all_files[i], all_files[i] + '.bc')
           all_files[i] += '.bc'
       args = [PYTHON, EMCC] + Building.COMPILER_TEST_OPTS + Settings.serialize() + \
@@ -388,6 +397,7 @@ class RunnerCore(unittest.TestCase):
              ['-I' + include for include in includes] + \
              all_files + \
              ['-o', filename + '.o.js']
+      mylog.log_cmd(args, stderr=self.stderr_redirect if not DEBUG else None)
       output = subprocess.check_call(args, stderr=self.stderr_redirect if not DEBUG else None)
       if js_outfile:
         assert os.path.exists(filename + '.o.js')

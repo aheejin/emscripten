@@ -1106,7 +1106,8 @@ else:
   EMSDK_CXX_OPTS = []
 
 # HACK (aheejin): Disable optnone
-#COMPILER_OPTS += ['-Xclang', '-disable-O0-optnone']
+if 'fastcomp' not in CLANG_CC:
+  COMPILER_OPTS += ['-Xclang', '-disable-O0-optnone']
 
 # Engine tweaks
 
@@ -1680,6 +1681,7 @@ class Building(object):
       old_dir = os.getcwd()
     except:
       old_dir = None
+    mylog.log_chdir(project_dir)
     os.chdir(project_dir)
     generated_libs = [os.path.join(project_dir, lib) for lib in generated_libs]
     #for lib in generated_libs:

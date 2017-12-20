@@ -1360,8 +1360,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           exit_with_error('compiler frontend failed to generate LLVM bitcode, halting')
 
         # HACK (aheejin): for easy debugging
-        #shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
-        #                         output_file)
+        shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
+                                 output_file)
 
       # First, generate LLVM bitcode. For each input file, we get base.o with bitcode
       for i, input_file in input_files:
