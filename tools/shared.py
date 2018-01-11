@@ -404,7 +404,7 @@ actual_clang_version = None
 
 def expected_llvm_version():
   if get_llvm_target() == WASM_TARGET:
-    return "6.0"
+    return "7.0"
   else:
     return "4.0"
 
@@ -512,7 +512,7 @@ def check_fastcomp():
     logging.warning('could not check fastcomp: %s' % str(e))
     return True
 
-EXPECTED_NODE_VERSION = (0,8,0)
+EXPECTED_NODE_VERSION = (4, 1, 1)
 
 def check_node_version():
   jsrun.check_engine(NODE_JS)
@@ -1968,7 +1968,7 @@ class Building(object):
 
     logging.debug('emcc: LLVM opts: ' + ' '.join(opts) + '  [num inputs: ' + str(len(inputs)) + ']')
     target = out or (filename + '.opt.bc')
-    proc = run_process([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE)
+    proc = run_process([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE, check=False)
     output = proc.stdout
     if proc.returncode != 0 or not os.path.exists(target):
       logging.error('Failed to run llvm optimizations: ' + output)
@@ -2289,11 +2289,14 @@ class Building(object):
               #'--variable_map_output_file', filename + '.vars',
               '--js', filename, '--js_output_file', filename + '.cc.js']
       for extern in NODE_EXTERNS:
-          args.append('--externs')
-          args.append(extern)
+        args.append('--externs')
+        args.append(extern)
       for extern in BROWSER_EXTERNS:
-          args.append('--externs')
-          args.append(extern)
+        args.append('--externs')
+        args.append(extern)
+      if Settings.IGNORE_CLOSURE_COMPILER_ERRORS:
+        args.append('--jscomp_off')
+        args.append('*')
       if pretty: args += ['--formatting', 'PRETTY_PRINT']
       if os.environ.get('EMCC_CLOSURE_ARGS'):
         args += shlex.split(os.environ.get('EMCC_CLOSURE_ARGS'))
@@ -2344,12 +2347,12 @@ class Building(object):
     temp_files = configuration.get_temp_files()
     # first, get the JS part of the graph
     txt = Building.js_optimizer_no_asmjs(js_file, ['emitDCEGraph', 'noEmitAst'], return_output=True)
-    # ensure that functions expected to be exported to the outside are roots
     graph = json.loads(txt)
+    # ensure that functions expected to be exported to the outside are roots
     for item in graph:
       if 'export' in item:
-        name = item['export']
-        if name in Building.user_requested_exports or Settings.EXPORT_ALL:
+        export = item['export']
+        if export in Building.user_requested_exports or Settings.EXPORT_ALL:
           item['root'] = True
     if Settings.WASM_BACKEND:
       # wasm backend's imports are prefixed differently inside the wasm

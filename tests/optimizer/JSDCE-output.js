@@ -27,4 +27,23 @@ function glue() {
  }
 }
 glue();
+function _glCreateShader() {
+ return 1;
+}
+function emulate() {
+ _glCreateShader = function _glCreateShader(shaderType) {
+  return glCreateShader();
+ };
+}
+emulate();
+___cxa_find_matching_catch_before();
+function ___cxa_find_matching_catch_before() {
+ if (!___cxa_find_matching_catch_before.buffer) ___cxa_find_matching_catch_before.buffer = {};
+}
+function ___cxa_find_matching_catch_after() {
+ if (!___cxa_find_matching_catch_after.buffer) ___cxa_find_matching_catch_after.buffer = {};
+}
+___cxa_find_matching_catch_after();
+
+
 
