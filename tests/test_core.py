@@ -882,7 +882,7 @@ int main() {
   work(10);
   dump();
   struct mallinfo m2 = mallinfo();
-  assert(m1.arena == m2.arena && m1.uordblks == m2.uordblks);
+  assert(m1.uordblks == m2.uordblks);
   printf("ok.\n");
 }
 '''
@@ -4824,9 +4824,9 @@ PORT: 3979
       print('(iteration)')
       time.sleep(random.random()/(10*num)) # add some timing nondeterminism here, not that we need it, but whatever
       self.do_run(src, 'hello world\n77.\n')
-      ret = open('src.cpp.o.js').read()
+      ret = open('src.cpp.o.js', 'rb').read()
       if Settings.BINARYEN:
-        ret += open('src.cpp.o.wasm').read()
+        ret += open('src.cpp.o.wasm', 'rb').read()
       return ret
     builds = [test() for i in range(num)]
     print(list(map(len, builds)))
@@ -5996,6 +5996,18 @@ def process(filename):
     self.emcc_args += ['-DEXPORTED']
     Settings.EXTRA_EXPORTED_RUNTIME_METHODS = ['dynCall', 'addFunction']
     self.do_run_in_out_file_test('tests', 'core', 'dyncall')
+
+  def test_dyncall_specific(self):
+    emcc_args = self.emcc_args[:]
+    for which, exported_runtime_methods in [
+        ('DIRECT', []),
+        ('EXPORTED', []),
+        ('FROM_OUTSIDE', ['dynCall_viii'])
+      ]:
+      print(which)
+      self.emcc_args = emcc_args + ['-D' + which]
+      Settings.EXTRA_EXPORTED_RUNTIME_METHODS = exported_runtime_methods
+      self.do_run_in_out_file_test('tests', 'core', 'dyncall_specific')
 
   def test_getValue_setValue(self):
     # these used to be exported, but no longer are by default
