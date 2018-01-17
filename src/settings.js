@@ -228,12 +228,6 @@ var EMULATE_FUNCTION_POINTER_CASTS = 0; // Allows function pointers to be cast, 
                                         // call of an incorrect type with a runtime correction.
                                         // This adds overhead and should not be used normally.
                                         // It also forces ALIASING_FUNCTION_POINTERS to 0.
-var FUNCTION_POINTER_ALIGNMENT = 2; // Byte alignment of function pointers - we will fill the
-                                    // tables with zeros on aligned values. 1 means all values
-                                    // are aligned and all will be used (which is optimal).
-                                    // Sadly 1 breaks on &Class::method function pointer calls,
-                                    // which llvm assumes have the lower bit zero (see
-                                    // test_polymorph and issue #1692).
 
 var EXCEPTION_DEBUG = 0; // Print out exceptions in emscriptened code. Does not work in asm.js mode
 
@@ -382,6 +376,9 @@ var NO_FILESYSTEM = 0; // If set, does not build in any filesystem support. Usef
 var FORCE_FILESYSTEM = 0; // Makes full filesystem support be included, even if statically it looks like it is not
                           // used. For example, if your C code uses no files, but you include some JS that does,
                           // you might need this.
+var NODERAWFS = 0; // This mode is intended for use with Node.js (and will throw if the build runs in other engines)
+                   // The File System API will directly use Node.js API without requiring `FS.mount()`.
+                   // The initial working directory will be same as process.cwd() instead of VFS root directory.
 
 var EXPORTED_FUNCTIONS = ['_main'];
                                     // Functions that are explicitly exported. These functions are kept alive
@@ -646,6 +643,8 @@ var EMTERPRETIFY_ADVISE = 0; // Performs a static analysis to suggest which func
                              // appears they can be on the stack when a sync function is called in the EMTERPRETIFY_ASYNC option.
                              // After showing the suggested list, compilation will halt. You can apply the provided list as an
                              // emcc argument when compiling later.
+var EMTERPRETIFY_SYNCLIST = []; // If you have additional custom synchronous functions, add them to this list and the advise mode
+                                // will include them in its analysis.
 
 var SPLIT_MEMORY = 0; // If > 0, we split memory into chunks, of the size given in this parameter.
                       //  * TOTAL_MEMORY becomes the maximum amount of memory, as chunks are allocated on

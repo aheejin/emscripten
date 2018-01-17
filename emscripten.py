@@ -811,7 +811,7 @@ def make_function_tables_defs(implemented_functions, all_implemented, function_t
       body = list(map(receive, body))
     for j in range(settings['RESERVED_FUNCTION_POINTERS']):
       curr = 'jsCall_%s_%s' % (sig, j)
-      body[settings['FUNCTION_POINTER_ALIGNMENT'] * (1 + j)] = curr
+      body[1 + j] = curr
       implemented_functions.add(curr)
     Counter.next_item = 0
     def fix_item(item):
@@ -1998,7 +1998,7 @@ var establishStackSpace = Module['establishStackSpace'];
 
 def create_backend_args_wasm(infile, temp_s, settings):
   backend_compiler = os.path.join(shared.LLVM_ROOT, 'llc')
-  args = [backend_compiler, infile, '-march=wasm32', '-filetype=asm',
+  args = [backend_compiler, infile, '-mtriple=wasm32-unknown-unknown-elf', '-filetype=asm',
                   '-asm-verbose=false',
                   '-o', temp_s]
   args += ['-thread-model=single'] # no threads support in backend, tell llc to not emit atomics
