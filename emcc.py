@@ -83,7 +83,6 @@ DEBUG = os.environ.get('EMCC_DEBUG')
 if DEBUG == "0":
   DEBUG = None
 
-TEMP_DIR = os.environ.get('EMCC_TEMP_DIR')
 LEAVE_INPUTS_RAW = os.environ.get('EMCC_LEAVE_INPUTS_RAW') # Do not compile .ll files into .bc, just compile them with emscripten directly
                                                            # Not recommended, this is mainly for the test runner, or if you have some other
                                                            # specific need.
@@ -581,18 +580,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   else:
     final_suffix = ''
 
-  if TEMP_DIR:
-    temp_dir = TEMP_DIR
-    if os.path.exists(temp_dir):
-      #mylog.log_remove(temp_dir)
-      #shutil.rmtree(temp_dir) # clear it
-      pass
-    os.makedirs(temp_dir)
-  else:
-    temp_root = shared.TEMP_DIR
-    if not os.path.exists(temp_root):
-      os.makedirs(temp_root)
-    temp_dir = tempfile.mkdtemp(dir=temp_root)
+  temp_root = shared.TEMP_DIR
+  if not os.path.exists(temp_root):
+    os.makedirs(temp_root)
+  temp_dir = tempfile.mkdtemp(dir=temp_root)
 
   def in_temp(name):
     return os.path.join(temp_dir, os.path.basename(name))
@@ -1948,15 +1939,12 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if DEBUG: logging.debug('total time: %.2f seconds', (time.time() - start_time))
 
   finally:
-    if not TEMP_DIR:
-      try:
-        #shutil.rmtree(temp_dir)
-        pass
-      except:
-        pass
-    else:
-      logging.info('emcc saved files are in:' + temp_dir)
-
+    try:
+      #mylog.log_remove(temp_dir)
+      #shutil.rmtree(temp_dir)
+      pass
+    except:
+      pass
 
 def parse_args(newargs):
   options = EmccOptions()
