@@ -6,7 +6,9 @@ import atexit
 import stat
 
 def try_delete(filename):
+  return # test aheejin
   try:
+    mylog.log_remove(filename)
     os.unlink(filename)
   except:
     pass
