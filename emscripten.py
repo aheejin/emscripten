@@ -21,7 +21,7 @@ from collections import OrderedDict
 from tools import shared
 from tools import mylog
 from tools import jsrun, cache as cache_module, tempfiles
-from tools.response_file import read_response_file
+from tools.response_file import substitute_response_files
 from tools.shared import WINDOWS, asstr
 
 __rootpath__ = os.path.abspath(os.path.dirname(__file__))
@@ -525,13 +525,8 @@ def update_settings_glue(settings, metadata):
 def compile_settings(compiler_engine, settings, libraries, temp_files):
   # Save settings to a file to work around v8 issue 1579
   with temp_files.get_file('.txt') as settings_file:
-    def save_settings():
-      global settings_text
-      settings_text = json.dumps(settings, sort_keys=True)
-      s = open(settings_file, 'w')
-      s.write(settings_text)
-      s.close()
-    save_settings()
+    with open(settings_file, 'w') as s:
+      json.dump(settings, s, sort_keys=True)
 
     # Call js compiler
     out = jsrun.run_js(path_from_root('src', 'compiler.js'), compiler_engine,
@@ -2266,17 +2261,7 @@ def _main(args=None):
   if args is None:
     args = sys.argv[1:]
 
-  response_file = True
-  while response_file:
-    response_file = None
-    for index in range(len(args)):
-      if args[index][0] == '@':
-        # found one, loop again next time
-        response_file = True
-        response_file_args = read_response_file(args[index])
-        # slice in extra_args in place of the response file arg
-        args[index:index+1] = response_file_args
-        break
+  substitute_response_files(args)
 
   parser = argparse.ArgumentParser(
     usage='%(prog)s [-h] [-H HEADERS] [-o OUTFILE] [-c COMPILER_ENGINE] [-s FOO=BAR]* infile',
