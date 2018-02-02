@@ -1891,10 +1891,11 @@ class Building(object):
 
     logging.debug('emcc: LLVM opts: ' + ' '.join(opts) + '  [num inputs: ' + str(len(inputs)) + ']')
     target = out or (filename + '.opt.bc')
-    proc = run_process([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE, check=False)
-    output = proc.stdout
-    if proc.returncode != 0 or not os.path.exists(target):
-      logging.error('Failed to run llvm optimizations: ' + output)
+    try:
+      run_process([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE)
+      assert os.path.exists(target), 'llvm optimizer emitted no output.'
+    except subprocess.CalledProcessError as e:
+      logging.error('Failed to run llvm optimizations: ' + e.stdout)
       for i in inputs:
         if not os.path.exists(i):
           logging.warning('Note: Input file "' + i + '" did not exist.')
@@ -2218,8 +2219,7 @@ class Building(object):
         args.append('--externs')
         args.append(extern)
       if Settings.IGNORE_CLOSURE_COMPILER_ERRORS:
-        args.append('--jscomp_off')
-        args.append('*')
+        args.append('--jscomp_off=*')
       if pretty: args += ['--formatting', 'PRETTY_PRINT']
       if os.environ.get('EMCC_CLOSURE_ARGS'):
         args += shlex.split(os.environ.get('EMCC_CLOSURE_ARGS'))
