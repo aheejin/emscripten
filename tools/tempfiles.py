@@ -40,7 +40,7 @@ def try_delete(pathname):
         make_writable(i)
 
   try:
-    mylog.log_Remove(pathname)
+    mylog.log_remove(pathname)
     shutil.rmtree(pathname, ignore_errors=True)
   except:
     pass
