@@ -521,6 +521,15 @@ def update_settings_glue(settings, metadata):
   settings['MAX_GLOBAL_ALIGN'] = metadata['maxGlobalAlign']
   settings['IMPLEMENTED_FUNCTIONS'] = metadata['implementedFunctions']
 
+  # addFunction support for Wasm backend
+  if settings['WASM_BACKEND'] and settings['RESERVED_FUNCTION_POINTERS'] > 0:
+    start_index = metadata['jsCallStartIndex']
+    # e.g. jsCallFunctionType ['v', 'ii'] -> sig2order{'v': 0, 'ii': 1}
+    sig2order = {sig: i for i, sig in enumerate(metadata['jsCallFuncType'])}
+    # Index in the Wasm function table in which jsCall thunk function starts
+    settings['JSCALL_START_INDEX'] = start_index
+    settings['JSCALL_SIG_ORDER'] = sig2order
+
 
 def compile_settings(compiler_engine, settings, libraries, temp_files):
   # Save settings to a file to work around v8 issue 1579
@@ -1772,6 +1781,8 @@ def emscript_wasm_backend(infile, settings, outfile, libraries=None, compiler_en
   pre = None
 
   invoke_funcs = read_wast_invoke_imports(wast)
+  # List of function signatures used in jsCall functions, e.g.['v', 'vi']
+  jscall_sigs = metadata.get('jsCallFuncType', [])
 
   try:
     del forwarded_json['Variables']['globals']['_llvm_global_ctors'] # not a true variable
@@ -1779,11 +1790,13 @@ def emscript_wasm_backend(infile, settings, outfile, libraries=None, compiler_en
     pass
 
   # sent data
-  sending = create_sending_wasm(invoke_funcs, forwarded_json, metadata, settings)
+  sending = create_sending_wasm(invoke_funcs, jscall_sigs, forwarded_json,
+                                metadata, settings)
   receiving = create_receiving_wasm(exported_implemented_functions, settings)
 
   # finalize
-  module = create_module_wasm(sending, receiving, invoke_funcs, exported_implemented_functions, settings)
+  module = create_module_wasm(sending, receiving, invoke_funcs, jscall_sigs,
+                              exported_implemented_functions, settings)
 
   write_output_file(outfile, post, module)
   module = None
@@ -1868,7 +1881,12 @@ def build_wasm_lld(temp_files, infile, outfile, settings, DEBUG):
     wasm = basename + '.wasm'
     base_wasm = basename + '.lld.wasm'
     meta = basename + '.json'
-    shared.check_call([wasm_link_metadata, temp_o, '-o', meta])
+    shared.check_call([
+        wasm_link_metadata,
+        ('--emscripten-reserved-function-pointers=%d' %
+         shared.Settings.RESERVED_FUNCTION_POINTERS),
+        temp_o,
+        '-o', meta])
     debug_copy(meta, 'lld-metadata.json')
 
     libc_rt_lib = shared.Cache.get('wasm_libc_rt.a', wasm_rt_fail('wasm_libc_rt.a'), 'a')
@@ -1887,7 +1905,12 @@ def build_wasm_lld(temp_files, infile, outfile, settings, DEBUG):
     ])
     debug_copy(base_wasm, 'base_wasm.wasm')
 
-    shared.check_call([wasm_emscripten_finalize, base_wasm, '-o', wasm])
+    shared.check_call([
+        wasm_emscripten_finalize,
+        ('--emscripten-reserved-function-pointers=%d' %
+         shared.Settings.RESERVED_FUNCTION_POINTERS),
+        base_wasm,
+        '-o', wasm])
     debug_copy(wasm, 'lld-emscripten-output.wasm')
 
     # TODO: This is gross. We currently read exports from the wast in order to
@@ -1989,7 +2012,8 @@ def read_wast_invoke_imports(wast):
   return invoke_funcs
 
 
-def create_sending_wasm(invoke_funcs, forwarded_json, metadata, settings):
+def create_sending_wasm(invoke_funcs, jscall_sigs, forwarded_json, metadata,
+                        settings):
   basic_funcs = ['abort', 'assert', 'enlargeMemory', 'getTotalMemory']
   if settings['ABORTING_MALLOC']:
     basic_funcs += ['abortOnCannotGrowMemory']
@@ -2006,7 +2030,10 @@ def create_sending_wasm(invoke_funcs, forwarded_json, metadata, settings):
   implemented_functions = set(metadata['implementedFunctions'])
   global_funcs = list(set([key for key, value in forwarded_json['Functions']['libraryFunctions'].items() if value != 2]).difference(set(global_vars)).difference(implemented_functions))
 
-  send_items = basic_funcs + invoke_funcs + global_funcs + basic_vars + global_vars
+  jscall_funcs = ['jsCall_' + sig for sig in jscall_sigs]
+
+  send_items = (basic_funcs + invoke_funcs + jscall_funcs + global_funcs +
+                basic_vars + global_vars)
   def math_fix(g):
     return g if not g.startswith('Math_') else g.split('_')[1]
   return '{ ' + ', '.join(['"' + math_fix(s) + '": ' + s for s in send_items]) + ' }'
@@ -2032,9 +2059,11 @@ return real_''' + asmjs_mangle(s) + '''.apply(null, arguments);
   return receiving
 
 
-def create_module_wasm(sending, receiving, invoke_funcs, exported_implemented_functions, settings):
+def create_module_wasm(sending, receiving, invoke_funcs, jscall_sigs,
+                       exported_implemented_functions, settings):
   access_quote = access_quoter(settings)
   invoke_wrappers = create_invoke_wrappers(invoke_funcs)
+  jscall_funcs = create_jscall_funcs(jscall_sigs)
 
   the_global = '{}'
 
@@ -2074,6 +2103,7 @@ var establishStackSpace = Module['establishStackSpace'];
       module.append('var %s;\n' % name)
 
   module.append(invoke_wrappers)
+  module.append(jscall_funcs)
   return module
 
 def create_backend_args_wasm(infile, temp_s, settings):
@@ -2115,6 +2145,8 @@ def create_s2wasm_args(temp_s):
   args += ['--global-base=%d' % shared.Settings.GLOBAL_BASE]
   args += ['--initial-memory=%d' % shared.Settings.TOTAL_MEMORY]
   args += ['--allow-memory-growth'] if shared.Settings.ALLOW_MEMORY_GROWTH else []
+  args += ['--emscripten-reserved-function-pointers=%d' %
+           shared.Settings.RESERVED_FUNCTION_POINTERS]
   args += ['-l', libc_rt_lib]
   args += ['-l', compiler_rt_lib]
 
@@ -2169,7 +2201,8 @@ def add_metadata_from_wast(metadata, wast):
       if import_type == 'memory':
         continue
       elif import_type == 'func':
-        if not import_name.startswith('invoke_'):
+        if (not import_name.startswith('invoke_') and
+            not import_name.startswith('jsCall_')):
           metadata['declares'].append(import_name)
       elif import_type == 'global':
         metadata['externs'].append('_' + import_name)
@@ -2203,6 +2236,13 @@ def create_invoke_wrappers(invoke_funcs):
     sig = invoke[len('invoke_'):]
     invoke_wrappers += '\n' + shared.JS.make_invoke(sig) + '\n'
   return invoke_wrappers
+
+
+def create_jscall_funcs(sigs):
+  jscall_funcs = ''
+  for i, sig in enumerate(sigs):
+    jscall_funcs += '\n' + shared.JS.make_jscall(sig, i) + '\n'
+  return jscall_funcs
 
 
 def asmjs_mangle(name):
