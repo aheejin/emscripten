@@ -1002,7 +1002,7 @@ class BrowserCore(RunnerCore):
       if not manual_reference:
         args = args + ['--pre-js', 'reftest.js', '-s', 'GL_TESTING=1']
     all_args = [PYTHON, EMCC, '-s', 'IN_TEST_HARNESS=1', temp_filepath, '-o', outfile] + args
-    #print 'all args:', all_args
+    #print('all args:', all_args)
     try_delete(outfile)
     mylog.log_cmd(all_args)
     Popen(all_args).communicate()
