@@ -1599,7 +1599,7 @@ def process(filename):
 
     if self.run_name == 'asm2':
       self.emcc_args += ['--closure', '1'] # Use closure here for some additional coverage
-    self.do_run(open(path_from_root('tests', 'emscripten_get_now.cpp')).read(), 'Timer resolution is good.')
+    self.do_run(open(path_from_root('tests', 'emscripten_get_now.cpp')).read(), 'Timer resolution is good')
 
   def test_emscripten_get_compiler_setting(self):
     test_path = path_from_root('tests', 'core', 'emscripten_get_compiler_setting')
@@ -3586,11 +3586,13 @@ Module = {
       Initter initter;
     ''', expected=['extern is 456.\n'])
 
-  def test_dylink_mallocs(self):
+  def test_dylink_stdlib(self):
     self.dylink_test(header=r'''
+      #include <math.h>
       #include <stdlib.h>
       #include <string.h>
       char *side(const char *data);
+      double pow_two(double x);
     ''', main=r'''
       #include <stdio.h>
       #include "header.h"
@@ -3600,6 +3602,7 @@ Module = {
         strcpy(ret, temp);
         temp[1] = 'x';
         puts(ret);
+        printf("pow_two: %d.\n", int(pow_two(5.9)));
         return 0;
       }
     ''', side=r'''
@@ -3609,7 +3612,10 @@ Module = {
         strcpy(ret, data);
         return ret;
       }
-    ''', expected=['hello through side\n'])
+      double pow_two(double x) {
+        return pow(2, x);
+      }
+    ''', expected=['hello through side\n\npow_two: 59.'])
 
   def test_dylink_jslib(self):
     Settings.BINARYEN_TRAP_MODE = 'clamp' # avoid using asm2wasm imports, which don't work in side modules yet (should they?)
