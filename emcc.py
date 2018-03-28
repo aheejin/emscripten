@@ -1402,12 +1402,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           cmd += ['-o', specified_target]
         # Do not compile, but just output the result from preprocessing stage or output the dependency rule. Warning: clang and gcc behave differently with -MF! (clang seems to not recognize it)
         logging.debug(('just preprocessor ' if '-E' in newargs else 'just dependencies: ') + ' '.join(cmd))
-<<<<<<< HEAD
         mylog.log_cmd(cmd)
-        exit(subprocess.call(cmd))
-=======
         return subprocess.call(cmd)
->>>>>>> incoming
 
       def compile_source_file(i, input_file):
         logging.debug('compiling source file: ' + input_file)
