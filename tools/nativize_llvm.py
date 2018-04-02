@@ -1,17 +1,15 @@
 #!/usr/bin/env python2
-
-'''
-Small utility to build some llvm bitcode into native code. Useful when lli (called
-from exec_llvm) fails for some reason.
+"""Small utility to build some llvm bitcode into native code. Useful when lli
+(called from exec_llvm) fails for some reason.
 
  * Use llc to generate x86 asm
  * Use as to generate an object file
  * Use g++ to link it to an executable
-'''
+"""
 
 from __future__ import print_function
 import os, sys
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import call, check_call, PIPE, STDOUT
 import mylog
 
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,16 +25,16 @@ libs = sys.argv[2:] # e.g.: dl for dlopen/dlclose, util for openpty/forkpty
 
 print('bc => clean bc')
 mylog.log_cmd([LLVM_OPT, filename, '-strip-debug', '-o', filename + '.clean.bc'])
-Popen([LLVM_OPT, filename, '-strip-debug', '-o', filename + '.clean.bc']).communicate()[0]
+check_call([LLVM_OPT, filename, '-strip-debug', '-o', filename + '.clean.bc'])
 print('bc => s')
 for params in [['-march=x86'], ['-march=x86-64']]: # try x86, then x86-64 FIXME
   print('params', params)
   for triple in [['-mtriple=i386-pc-linux-gnu'], []]:
     mylog.log_cmd([LLVM_COMPILER] + params + triple + [filename + '.clean.bc', '-o', filename + '.s'])
-    Popen([LLVM_COMPILER] + params + triple + [filename + '.clean.bc', '-o', filename + '.s']).communicate()[0]
+    call([LLVM_COMPILER] + params + triple + [filename + '.clean.bc', '-o', filename + '.s'])
     print('s => o')
     mylog.log_cmd(['as', filename + '.s', '-o', filename + '.o'])
-    Popen(['as', filename + '.s', '-o', filename + '.o']).communicate()[0]
+    call(['as', filename + '.s', '-o', filename + '.o'])
     if os.path.exists(filename + '.o'): break
   if os.path.exists(filename + '.o'): break
 
@@ -45,6 +43,7 @@ if not os.path.exists(filename + '.o'):
   sys.exit(1)
 
 print('o => runnable')
-mylog.log_cmd(['g++', path_from_root('system', 'lib', 'debugging.cpp'), filename + '.o', '-o', filename + '.run'] + ['-l' + lib for lib in libs])
-Popen(['g++', path_from_root('system', 'lib', 'debugging.cpp'), filename + '.o', '-o', filename + '.run'] + ['-l' + lib for lib in libs]).communicate()[0]
+mylog.log_cmd(['g++', '-no-pie', path_from_root('system', 'lib', 'debugging.cpp'), filename + '.o', '-o', filename + '.run'] + ['-l' + lib for lib in libs])
+check_call(['g++', '-no-pie', path_from_root('system', 'lib', 'debugging.cpp'), filename + '.o', '-o', filename + '.run'] + ['-l' + lib for lib in libs])
 
+sys.exit(0)
