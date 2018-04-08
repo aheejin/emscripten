@@ -74,10 +74,9 @@ class other(RunnerCore):
 
       output = run_process(py + [path_from_root('emcc'), '--version'], stdout=PIPE, stderr=PIPE, env=env).stderr
       expected_call = 'Running on Python %s which is not officially supported yet' % major
-      if major > 2:
-        assert expected_call in output
-      else:
-        assert expected_call not in output
+      # we currently support python 2 and 3 officially
+      assert expected_call not in output
+      assert output == '', output
 
   def test_emcc(self):
     for compiler in [EMCC, EMXX]:
@@ -5353,6 +5352,36 @@ function _main() {
     out = run_process([PYTHON, EMCC, path_from_root('tests', 'emterpreter_advise_synclist.c'), '-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1', '-s', 'EMTERPRETIFY_ADVISE=1', '-s', 'EMTERPRETIFY_SYNCLIST=["_j","_k"]'], stdout=PIPE).stdout
     self.assertContained('-s EMTERPRETIFY_WHITELIST=\'["_a", "_b", "_e", "_f", "_main"]\'', out)
 
+  def test_emterpreter_async_assertions(self):
+    # emterpretify-async mode with assertions adds checks on each call out of the emterpreter;
+    # make sure we handle all possible types there
+    for t, out in [
+      ('int',    '18.00'),
+      ('float',  '18.51'),
+      ('double', '18.51'),
+    ]:
+      print(t, out)
+      open('src.c', 'w').write(r'''
+        #include <stdio.h>
+        #include <emscripten.h>
+
+        #define TYPE %s
+
+        TYPE marfoosh(TYPE input) {
+          return input * 1.5;
+        }
+
+        TYPE fleefl(TYPE input) {
+          return marfoosh(input);
+        }
+
+        int main(void) {
+          printf("result: %%.2f\n", (double)fleefl((TYPE)12.34));
+        }
+      ''' % t)
+      run_process([PYTHON, EMCC, 'src.c', '-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1', '-s', 'EMTERPRETIFY_WHITELIST=["_fleefl"]', '-s', 'PRECISE_F32=1'])
+      self.assertContained('result: ' + out, run_js('a.out.js'))
+
   def test_link_with_a_static(self):
     for args in [[], ['-O2']]:
       print(args)
@@ -5626,6 +5655,13 @@ print(os.environ.get('NM'))
 ''')
     check('emconfigure', [PYTHON, 'test.py'], expect=tools.shared.LLVM_NM)
 
+  def test_emmake_python(self):
+    # simulates a configure/make script that looks for things like CC, AR, etc., and which we should
+    # not confuse by setting those vars to something containing `python X` as the script checks for
+    # the existence of an executable.
+    result = run_process([PYTHON, path_from_root('emmake.py'), PYTHON, path_from_root('tests', 'emmake', 'make.py')], stdout=PIPE, stderr=PIPE)
+    print(result.stdout, result.stderr)
+
   def test_sdl2_config(self):
     for args, expected in [
       [['--version'], '2.0.0'],
@@ -5749,7 +5785,7 @@ int main() {
     for pre_fail, post_fail, opts in [
       ('', '', []),
       ('EM_ASM( Module.temp = HEAP32[DYNAMICTOP_PTR>>2] );', 'EM_ASM( assert(Module.temp === HEAP32[DYNAMICTOP_PTR>>2], "must not adjust DYNAMICTOP when an alloc fails!") );', []),
-      ('', '', ['-s', 'SPLIT_MEMORY=' + str(16*1024*1024)]),
+      ('', '', ['-s', 'SPLIT_MEMORY=' + str(16*1024*1024), '-DSPLIT']),
     ]:
       for growth in [0, 1]:
         for aborting in [0, 1]:
@@ -5792,6 +5828,9 @@ int main() {
   }
   assert(has);
   printf("an allocation failed!\n");
+#ifdef SPLIT
+  return 0;
+#endif
   while (1) {
     assert(allocs.size() > 0);
     void *curr = allocs.back();
@@ -5808,11 +5847,19 @@ int main() {
           if not aborting: args += ['-s', 'ABORTING_MALLOC=0']
           print(args, pre_fail)
           check_execute(args)
-          manage_malloc = (not aborting) or growth # growth also disables aborting
-          output = run_js('a.out.js', stderr=PIPE, full_output=True, assert_returncode=0 if manage_malloc else None)
-          if manage_malloc:
-            # we should fail eventually, then free, then succeed
-            self.assertContained('''managed another malloc!\n''', output)
+          # growth also disables aborting
+          can_manage_another = (not aborting) or growth
+          split = '-DSPLIT' in args
+          print('can manage another:', can_manage_another, 'split:', split)
+          output = run_js('a.out.js', stderr=PIPE, full_output=True, assert_returncode=0 if can_manage_another else None)
+          if can_manage_another:
+            self.assertContained('''an allocation failed!\n''', output)
+            if not split:
+              # split memory allocation may fail due to GC objects no longer being allocatable,
+              # and we can't expect to recover from that deterministically. So just check we
+              # get to the fail.
+              # otherwise, we should fail eventually, then free, then succeed
+              self.assertContained('''managed another malloc!\n''', output)
           else:
             # we should see an abort
             self.assertContained('''abort("Cannot enlarge memory arrays''', output)
