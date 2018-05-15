@@ -1841,7 +1841,6 @@ def build_wasm(temp_files, infile, outfile, settings, DEBUG):
       mylog.log_copy(temp_s, os.path.join(shared.CANONICAL_TEMP_DIR, 'emcc-llvm-backend-output.s'))
       shutil.copyfile(temp_s, os.path.join(shared.CANONICAL_TEMP_DIR, 'emcc-llvm-backend-output.s'))
 
-    assert shared.Settings.BINARYEN_ROOT, 'need BINARYEN_ROOT config set so we can use Binaryen s2wasm on the backend output'
     basename = shared.unsuffixed(outfile.name)
     wasm = basename + '.wasm'
     metadata_file = basename + '.metadata'
@@ -1869,10 +1868,9 @@ def build_wasm(temp_files, infile, outfile, settings, DEBUG):
 
 
 def build_wasm_lld(temp_files, infile, outfile, settings, DEBUG):
-  assert shared.Settings.BINARYEN_ROOT, 'need BINARYEN_ROOT config set so we can use Binaryen tools on the backend output'
-  wasm_emscripten_finalize = os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 'wasm-emscripten-finalize')
-  wasm_as = os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 'wasm-as')
-  wasm_dis = os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 'wasm-dis')
+  wasm_emscripten_finalize = os.path.join(shared.BINARYEN_ROOT, 'bin', 'wasm-emscripten-finalize')
+  wasm_as = os.path.join(shared.BINARYEN_ROOT, 'bin', 'wasm-as')
+  wasm_dis = os.path.join(shared.BINARYEN_ROOT, 'bin', 'wasm-dis')
 
   def debug_copy(src, dst):
     if DEBUG:
@@ -2160,7 +2158,7 @@ def create_s2wasm_args(temp_s, wasm):
   compiler_rt_lib = shared.Cache.get('wasm_compiler_rt.a', wasm_rt_fail('wasm_compiler_rt.a'), 'a')
   libc_rt_lib = shared.Cache.get('wasm_libc_rt.a', wasm_rt_fail('wasm_libc_rt.a'), 'a')
 
-  s2wasm_path = os.path.join(shared.Settings.BINARYEN_ROOT, 'bin', 's2wasm')
+  s2wasm_path = os.path.join(shared.BINARYEN_ROOT, 'bin', 's2wasm')
 
   args = [s2wasm_path, temp_s, '-o', wasm, '--emscripten-glue', '--emit-binary']
   args += ['--global-base=%d' % shared.Settings.GLOBAL_BASE]
