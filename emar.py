@@ -64,11 +64,12 @@ def run():
 
   if DEBUG:
     print('Invoking ' + str(newargs))
-  mylog.log_cmd(newargs)
-  subprocess.call(newargs, stdin=sys.stdin)
-  for d in to_delete:
-    shared.try_delete(d)
+  try:
+    mylog.log_cmd(newargs)
+    return subprocess.call(newargs, stdin=sys.stdin)
+  finally:
+    for d in to_delete:
+      shared.try_delete(d)
 
 if __name__ == '__main__':
-  run()
-  sys.exit(0)
+  sys.exit(run())
