@@ -12,6 +12,15 @@ import mylog
 # Temp file utilities
 from .tempfiles import try_delete
 
+
+class FatalError(Exception):
+  """Error representing an unrecoverable error such as the failure of
+  a subprocess.
+
+  These are usually handled at the entry point of each script."""
+  pass
+
+
 # On Windows python suffers from a particularly nasty bug if python is spawning new processes while python itself is spawned from some other non-console process.
 # Use a custom replacement for Popen on Windows to avoid the "WindowsError: [Error 6] The handle is invalid" errors when emcc is driven through cmake or mingw32-make.
 # See http://bugs.python.org/issue3905
@@ -152,8 +161,7 @@ def check_execute(cmd, *args, **kw):
     subprocess.check_output(cmd, *args, **kw)
     logging.debug("Successfuly executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
-    logging.error("'%s' failed with output:\n%s" % (" ".join(e.cmd), e.output))
-    raise
+    raise FatalError("'%s' failed with output:\n%s" % (" ".join(e.cmd), e.output))
 
 def check_call(cmd, *args, **kw):
   try:
@@ -161,8 +169,7 @@ def check_call(cmd, *args, **kw):
     subprocess.check_call(cmd, *args, **kw)
     logging.debug("Successfully executed %s" % " ".join(cmd))
   except subprocess.CalledProcessError as e:
-    logging.error("'%s' failed" % " ".join(cmd))
-    raise
+    raise FatalError("'%s' failed" % " ".join(cmd))
 
 
 # Emscripten configuration is done through the --em-config command line option or
@@ -722,6 +729,7 @@ LLVM_DIS=os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-dis')))
 LLVM_NM=os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-nm')))
 LLVM_INTERPRETER=os.path.expanduser(build_llvm_tool_path(exe_suffix('lli')))
 LLVM_COMPILER=os.path.expanduser(build_llvm_tool_path(exe_suffix('llc')))
+LLVM_DWARFDUMP=os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-dwarfdump')))
 WASM_LD=os.path.expanduser(build_llvm_tool_path(exe_suffix('wasm-ld')))
 
 EMSCRIPTEN = path_from_root('emscripten.py')
