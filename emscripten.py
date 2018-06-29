@@ -112,7 +112,7 @@ def compile_js(infile, settings, temp_files, DEBUG):
       t = time.time()
     with ToolchainProfiler.profile_block('emscript_llvm_backend'):
       mylog.log_cmd(backend_args, stdout=subprocess.PIPE)
-      shared.jsrun.timeout_run(subprocess.Popen(backend_args, stdout=subprocess.PIPE, universal_newlines=True), note_args=backend_args)
+      jsrun.timeout_run(subprocess.Popen(backend_args, stdout=subprocess.PIPE, universal_newlines=True), note_args=backend_args)
     if DEBUG:
       logging.debug('  emscript: llvm backend took %s seconds' % (time.time() - t))
 
@@ -2069,8 +2069,13 @@ var establishStackSpace = Module['establishStackSpace'];
   return module
 
 def create_backend_args_wasm(infile, outfile, settings):
+  # TODO(sbc): Don't allow -O0 due to bug in wasm-emscripten-finalize:
+  # https://github.com/WebAssembly/binaryen/issues/1612
+  optlevel = settings['OPT_LEVEL']
+  if optlevel == 0:
+    optlevel = 1
   args = [shared.LLVM_COMPILER, infile, '-mtriple=' + shared.WASM_TARGET,
-          '-filetype=obj', '-o', outfile, '-O%s' % settings['OPT_LEVEL']]
+          '-filetype=obj', '-o', outfile, '-O%s' % optlevel]
   args += ['-thread-model=single'] # no threads support in backend, tell llc to not emit atomics
   # disable slow and relatively unimportant optimization passes
   args += ['-combiner-global-alias-analysis=false']
