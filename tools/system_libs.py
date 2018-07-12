@@ -820,12 +820,7 @@ class Ports(object):
       cmake_build_type = 'Release'
 
       # Configure
-<<<<<<< HEAD
-      mylog.log_cmd(['cmake', '-DCMAKE_BUILD_TYPE=' + cmake_build_type, '.'])
-      subprocess.check_call(['cmake', '-DCMAKE_BUILD_TYPE=' + cmake_build_type, '.'])
-=======
       check_call(['cmake', '-DCMAKE_BUILD_TYPE=' + cmake_build_type, '.'])
->>>>>>> incoming
 
       # Check which CMake generator CMake used so we know which form to pass parameters to make/msbuild/etc. build tool.
       generator = re.search('CMAKE_GENERATOR:INTERNAL=(.*)$', open('CMakeCache.txt', 'r').read(), re.MULTILINE).group(1)
@@ -839,12 +834,7 @@ class Ports(object):
         make_args = ['--config', cmake_build_type, '--', '/maxcpucount:' + num_cores]
 
       # Kick off the build.
-<<<<<<< HEAD
-      mylog.log_cmd(['cmake', '--build', '.'] + make_args)
-      subprocess.check_call(['cmake', '--build', '.'] + make_args)
-=======
       check_call(['cmake', '--build', '.'] + make_args)
->>>>>>> incoming
     finally:
       os.chdir(old)
 

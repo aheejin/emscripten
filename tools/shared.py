@@ -21,11 +21,7 @@ from .toolchain_profiler import ToolchainProfiler
 from .tempfiles import try_delete
 from . import jsrun, cache, tempfiles, colored_logger
 from . import response_file
-<<<<<<< HEAD
-import logging, platform, multiprocessing
 import mylog
-=======
->>>>>>> incoming
 
 colored_logger.enable()
 
@@ -2992,16 +2988,11 @@ def safe_move(src, dst):
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
     dst = os.path.join(dst, os.path.basename(src))
-<<<<<<< HEAD
-  if src == dst: return
-  if dst == '/dev/null': return
-  mylog.log_move(src, dst)
-=======
   if src == dst:
     return
   if dst == '/dev/null':
     return
->>>>>>> incoming
+  mylog.log_move(src, dst)
   shutil.move(src, dst)
 
 
@@ -3011,16 +3002,11 @@ def safe_copy(src, dst):
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
     dst = os.path.join(dst, os.path.basename(src))
-<<<<<<< HEAD
-  if src == dst: return
-  if dst == '/dev/null': return
-  mylog.log_copy(src, dst)
-=======
   if src == dst:
     return
   if dst == '/dev/null':
     return
->>>>>>> incoming
+  mylog.log_copy(src, dst)
   shutil.copyfile(src, dst)
 
 
