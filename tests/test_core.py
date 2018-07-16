@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 import glob, hashlib, os, re, shutil, subprocess, sys, json, random
+import json
 import unittest
 from textwrap import dedent
 import tools.shared
@@ -1583,14 +1584,6 @@ int main() {
     self.set_setting('EMULATED_FUNCTION_POINTERS', 1)
     test()
 
-  def test_ptrtoint(self):
-      runner = self
-      def check_warnings(output):
-          runner.assertEqual([line for line in output.split('\n') if 'Warning' in line].__len__(), 4)
-
-      self.do_run_in_out_file_test('tests', 'core', 'test_ptrtoint',
-                                   output_processor=check_warnings)
-
   def test_sizeof(self):
       # Has invalid writes between printouts
       self.set_setting('SAFE_HEAP', 0)
@@ -1615,14 +1608,14 @@ def process(filename):
 '''
       self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_save_me_aimee'])
       self.do_run_in_out_file_test('tests', 'core', 'test_emscripten_api',
-                                   post_build=check)
+                                   js_transform=check)
 
       # test EXPORT_ALL
       self.set_setting('EXPORTED_FUNCTIONS', [])
       self.set_setting('EXPORT_ALL', 1)
       self.set_setting('LINKABLE', 1)
       self.do_run_in_out_file_test('tests', 'core', 'test_emscripten_api',
-                                   post_build=check)
+                                   js_transform=check)
 
   def test_emscripten_run_script_string_utf8(self):
     src = r'''
@@ -2498,7 +2491,7 @@ def process(filename):
       }
       '''
     self.do_run(src, 'Constructing main object.\nConstructing lib object.\n',
-                post_build=self.dlfcn_post_build)
+                js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_i64(self):
     # avoid using asm2wasm imports, which don't work in side modules yet (should they?)
@@ -2542,7 +2535,7 @@ def process(filename):
         return 0;
       }
       '''
-    self.do_run(src, '|65830|', post_build=self.dlfcn_post_build)
+    self.do_run(src, '|65830|', js_transform=self.dlfcn_post_build)
 
   @no_wasm # TODO: EM_ASM in shared wasm modules, stored inside the wasm somehow
   def test_dlfcn_em_asm(self):
@@ -2580,7 +2573,7 @@ def process(filename):
       }
       '''
     self.do_run(src, 'Constructing main object.\nConstructing lib object.\nAll done.\n',
-                post_build=self.dlfcn_post_build)
+                js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_qsort(self):
     if not self.can_dlfcn(): return
@@ -2659,7 +2652,7 @@ def process(filename):
       '''
     self.do_run(src, 'Sort with main comparison: 5 4 3 2 1 *Sort with lib comparison: 1 2 3 4 5 *',
                 output_nicerizer=lambda x, err: x.replace('\n', '*'),
-                post_build=self.dlfcn_post_build)
+                js_transform=self.dlfcn_post_build)
 
     if self.get_setting('ASM_JS') and SPIDERMONKEY_ENGINE and os.path.exists(SPIDERMONKEY_ENGINE[0]) and not self.is_wasm():
       out = run_js('liblib.so', engine=SPIDERMONKEY_ENGINE, full_output=True, stderr=STDOUT)
@@ -2762,7 +2755,7 @@ def process(filename):
     self.set_setting('EXPORTED_FUNCTIONS', ['_main'])
     self.do_run(src, 'In func: 13*First calling main_fptr from lib.*Second calling lib_fptr from main.*parent_func called from child*parent_func called from child*Var: 42*',
                  output_nicerizer=lambda x, err: x.replace('\n', '*'),
-                 post_build=self.dlfcn_post_build)
+                 js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_varargs(self):
     # this test is not actually valid - it fails natively. the child should fail to be loaded, not load and successfully see the parent print_ints func
@@ -2814,7 +2807,7 @@ def process(filename):
       '''
     self.set_setting('EXPORTED_FUNCTIONS', ['_main'])
     self.do_run(src, '100\n200\n13\n42\n',
-                post_build=self.dlfcn_post_build)
+                js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_alignment_and_zeroing(self):
     if not self.can_dlfcn(): return
@@ -2895,7 +2888,7 @@ def process(filename):
       }
       '''
     self.do_run(src, 'success.\n',
-                post_build=self.dlfcn_post_build)
+                js_transform=self.dlfcn_post_build)
 
   @no_wasm # TODO: this needs to add JS functions to a wasm Table, need to figure that out
   def test_dlfcn_self(self):
@@ -2917,7 +2910,7 @@ def process(filename):
     test_path = path_from_root('tests', 'core', 'test_dlfcn_self')
     src, output = (test_path + s for s in ('.c', '.out'))
 
-    self.do_run_from_file(src, output, post_build=(None, post))
+    self.do_run_from_file(src, output, post_build=post)
 
   def test_dlfcn_unique_sig(self):
     if not self.can_dlfcn(): return
@@ -2960,7 +2953,7 @@ def process(filename):
       }
       '''
     self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_malloc'])
-    self.do_run(src, 'success', force_c=True, post_build=self.dlfcn_post_build)
+    self.do_run(src, 'success', force_c=True, js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_info(self):
     if not self.can_dlfcn(): return
@@ -3018,7 +3011,7 @@ def process(filename):
       }
       '''
     self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_malloc'])
-    self.do_run(src, 'success', force_c=True, post_build=self.dlfcn_post_build)
+    self.do_run(src, 'success', force_c=True, js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_stacks(self):
     if not self.can_dlfcn(): return
@@ -3077,7 +3070,7 @@ def process(filename):
       }
       '''
     self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_malloc', '_strcmp'])
-    self.do_run(src, 'success', force_c=True, post_build=self.dlfcn_post_build)
+    self.do_run(src, 'success', force_c=True, js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_funcs(self):
     if not self.can_dlfcn(): return
@@ -3176,7 +3169,7 @@ void 1
 int 0 54
 int 1 9000
 ok
-''', force_c=True, post_build=self.dlfcn_post_build)
+''', force_c=True, js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_mallocs(self):
     if not self.can_dlfcn(): return
@@ -3202,7 +3195,7 @@ ok
     self.prep_dlfcn_main()
     src = open(path_from_root('tests', 'dlmalloc_proxy.c')).read()
     self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_malloc', '_free'])
-    self.do_run(src, '''*294,153*''', force_c=True, post_build=self.dlfcn_post_build)
+    self.do_run(src, '''*294,153*''', force_c=True, js_transform=self.dlfcn_post_build)
 
   def test_dlfcn_longjmp(self):
     if not self.can_dlfcn(): return
@@ -3266,7 +3259,7 @@ pre 7
 pre 8
 pre 9
 out!
-''', post_build=self.dlfcn_post_build, force_c=True)
+''', js_transform=self.dlfcn_post_build, force_c=True)
 
   def zzztest_dlfcn_exceptions(self): # TODO: make this work. need to forward tempRet0 across modules
     if not self.can_dlfcn(): return
@@ -3334,7 +3327,7 @@ out!
 ok: 65
 int 123
 ok
-''', post_build=self.dlfcn_post_build)
+''', js_transform=self.dlfcn_post_build)
 
   def dylink_test(self, main, side, expected, header=None, main_emcc_args=[], force_c=False, need_reverse=True, auto_load=True):
     if not self.can_dlfcn(): return
@@ -4399,7 +4392,7 @@ def process(filename):
         return '\n'.join([line for line in (out + err).split('\n') if 'binaryen' not in line and 'wasm' not in line and 'so not running' not in line])
 
       self.do_run(src, [x if 'SYSCALL_DEBUG=1' not in mode else ('syscall! 146,SYS_writev' if self.run_name == 'default' else 'syscall! 146') for x in ('size: 7\ndata: 100,-56,50,25,10,77,123\nloop: 100 -56 50 25 10 77 123 \ninput:hi there!\ntexto\n$\n5 : 10,30,20,11,88\nother=some data.\nseeked=me da.\nseeked=ata.\nseeked=ta.\nfscanfed: 10 - hello\n5 bytes to dev/null: 5\nok.\ntexte\n', 'size: 7\ndata: 100,-56,50,25,10,77,123\nloop: 100 -56 50 25 10 77 123 \ninput:hi there!\ntexto\ntexte\n$\n5 : 10,30,20,11,88\nother=some data.\nseeked=me da.\nseeked=ata.\nseeked=ta.\nfscanfed: 10 - hello\n5 bytes to dev/null: 5\nok.\n')],
-                  post_build=post, output_nicerizer=clean)
+                  js_transform=post, output_nicerizer=clean)
       if self.uses_memory_init_file():
         assert os.path.exists(mem_file), 'File %s does not exist' % mem_file
 
@@ -4435,7 +4428,7 @@ def process(filename):
       '''
     def clean(out, err):
       return '\n'.join([line for line in (out + err).split('\n') if 'warning' not in line and 'binaryen' not in line])
-    self.do_run(src, ('got: 35\ngot: 45\ngot: 25\ngot: 15\n \nisatty? 0,0,1\n', 'got: 35\ngot: 45\ngot: 25\ngot: 15\nisatty? 0,0,1\n', 'isatty? 0,0,1\ngot: 35\ngot: 45\ngot: 25\ngot: 15\n'), post_build=post, output_nicerizer=clean)
+    self.do_run(src, ('got: 35\ngot: 45\ngot: 25\ngot: 15\n \nisatty? 0,0,1\n', 'got: 35\ngot: 45\ngot: 25\ngot: 15\nisatty? 0,0,1\n', 'isatty? 0,0,1\ngot: 35\ngot: 45\ngot: 25\ngot: 15\n'), js_transform=post, output_nicerizer=clean)
 
   def test_mount(self):
     self.set_setting('FORCE_FILESYSTEM', 1)
@@ -4626,7 +4619,7 @@ def process(filename):
 '''
     src = open(path_from_root('tests', 'fcntl', 'src.c'), 'r').read()
     expected = open(path_from_root('tests', 'fcntl', 'output.txt'), 'r').read()
-    self.do_run(src, expected, post_build=add_pre_run, )
+    self.do_run(src, expected, js_transform=add_pre_run)
 
   def test_fcntl_open(self):
     src = open(path_from_root('tests', 'fcntl-open', 'src.c'), 'r').read()
@@ -4644,7 +4637,7 @@ def process(filename):
 '''
     src = open(path_from_root('tests', 'fcntl-misc', 'src.c'), 'r').read()
     expected = open(path_from_root('tests', 'fcntl-misc', 'output.txt'), 'r').read()
-    self.do_run(src, expected, post_build=add_pre_run)
+    self.do_run(src, expected, js_transform=add_pre_run)
 
   def test_poll(self):
     add_pre_run = '''
@@ -4664,7 +4657,7 @@ def process(filename):
     test_path = path_from_root('tests', 'core', 'test_poll')
     src, output = (test_path + s for s in ('.c', '.out'))
 
-    self.do_run_from_file(src, output, post_build=add_pre_run)
+    self.do_run_from_file(src, output, js_transform=add_pre_run)
 
   def test_statvfs(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_statvfs')
@@ -4748,7 +4741,7 @@ def process(filename):
 '''
       src = 'int main() {return 0;}\n'
       expected = open(path_from_root('tests', 'filesystem', 'output.txt'), 'r').read()
-      self.do_run(src, expected, post_build=addJS)
+      self.do_run(src, expected, js_transform=addJS)
     finally:
       self.set_setting('INCLUDE_FULL_LIBRARY', 0)
 
@@ -4835,7 +4828,7 @@ def process(filename):
         );
         return 0;
       }
-    ''', 'at Object.readFile', js_engines=js_engines, post_build=post) # engines has different error stack format
+    ''', 'at Object.readFile', js_engines=js_engines, js_transform=post) # engines has different error stack format
 
   @also_with_noderawfs
   def test_fs_llseek(self, js_engines=None):
@@ -5408,7 +5401,7 @@ return malloc(size);
       generated = re.sub(r'\n+[ \n]*\n+', '\n', generated)
       main = generated[generated.find('function runPostSets'):]
       main = main[:main.find('\n}')]
-      assert main.count('\n') <= 7, ('must not emit too many postSets: %d' % main.count('\n')) + ' : ' + main
+      assert main.count('\n') <= 7, ('must not emit too many js_transform: %d' % main.count('\n')) + ' : ' + main
 
     if not self.is_wasm(): # TODO: wrappers for wasm modules
       print('relocatable')
@@ -5646,7 +5639,8 @@ return malloc(size);
 
   @SIMD
   def test_simd15(self):
-    if self.run_name == 'asm1': self.skipTest('legalizing -O1 output is much harder, and not worth it - we work on -O0 and -O2+')
+    if any(opt in self.emcc_args for opt in ('-O1', '-Os', '-Oz')):
+      self.skipTest('legalizing -O1/s/z output is much harder, and not worth it - we work on -O0 and -O2+')
     self.emcc_args = self.emcc_args + ['-msse', '-msse2']
     test_path = path_from_root('tests', 'core', 'test_simd15')
     src, output = (test_path + s for s in ('.c', '.out'))
@@ -5756,7 +5750,7 @@ def process(filename):
                    ['font.ttf', 'test!', '150', '120', '25'],
                    libraries=self.get_freetype(),
                    includes=[path_from_root('tests', 'freetype', 'include')],
-                   post_build=post)
+                   js_transform=post)
       self.set_setting('OUTLINING_LIMIT', 0)
 
     # github issue 324
@@ -5766,7 +5760,7 @@ def process(filename):
                  ['font.ttf', 'w', '32', '32', '25'],
                  libraries=self.get_freetype(),
                  includes=[path_from_root('tests', 'freetype', 'include')],
-                 post_build=post)
+                 js_transform=post)
 
     print('[issue 324 case 2]')
     self.do_run(open(path_from_root('tests', 'freetype', 'main_3.c'), 'r').read(),
@@ -5774,7 +5768,7 @@ def process(filename):
                  ['font.ttf', 'W', '32', '32', '0'],
                  libraries=self.get_freetype(),
                  includes=[path_from_root('tests', 'freetype', 'include')],
-                 post_build=post)
+                 js_transform=post)
 
     print('[issue 324 case 3]')
     self.do_run('',
@@ -5927,7 +5921,7 @@ def process(filename):
       self.do_ll_run(combined,
                      str(list(bytearray(open(path_from_root('tests', 'poppler', 'ref.ppm'), 'rb').read()))).replace(' ', ''),
                      args='-scale-to 512 paper.pdf filename'.split(' '),
-                     post_build=post)
+                     js_transform=post)
                      #, build_ll_hook=self.do_autodebug)
 
     test()
@@ -6019,7 +6013,7 @@ def process(filename):
                              path_from_root('tests', 'openjpeg', 'common'),
                              os.path.join(self.get_build_dir(), 'openjpeg')],
                    force_c=True,
-                   post_build=post,
+                   js_transform=post,
                    output_nicerizer=image_compare)#, build_ll_hook=self.do_autodebug)
 
     do_test()
@@ -6262,12 +6256,12 @@ def process(filename):
 '''
 
     self.set_setting('EXPORTED_FUNCTIONS', self.get_setting('EXPORTED_FUNCTIONS') + ['_get_int', '_get_float', '_get_bool', '_get_string', '_print_int', '_print_float', '_print_bool', '_print_string', '_multi', '_pointer', '_call_ccall_again', '_malloc'])
-    self.do_run_in_out_file_test('tests', 'core', 'test_ccall', post_build=post)
+    self.do_run_in_out_file_test('tests', 'core', 'test_ccall', js_transform=post)
 
     if '-O2' in self.emcc_args or self.is_emterpreter():
       print('with closure')
       self.emcc_args += ['--closure', '1']
-      self.do_run_in_out_file_test('tests', 'core', 'test_ccall', post_build=post)
+      self.do_run_in_out_file_test('tests', 'core', 'test_ccall', js_transform=post)
 
   def test_dyncall(self):
     self.do_run_in_out_file_test('tests', 'core', 'dyncall')
@@ -6518,10 +6512,11 @@ def process(filename):
   def test_linker_response_file(self):
     objfile = os.path.join(self.get_dir(), 'response_file.o')
     run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.cpp'), '-o', objfile] + self.emcc_args)
-    # TODO(sbc): This should expand into -Wl,foobar which is currently ignored
-    # by emscripten
+    # This should expand into -Wl,--export=foo which will then be ignored
+    # by emscripten, except when using the wasm backend (lld) in which case it
+    # should pass the original flag to the linker.
     with open('rsp_file', 'w') as f:
-      f.write(objfile + ' -foobar')
+      f.write(objfile + ' --export=foo')
     run_process([PYTHON, EMCC, "-Wl,@rsp_file", '-o', os.path.join(self.get_dir(), 'response_file.o.js')] + self.emcc_args)
     self.do_run('' , 'hello, world', basename='response_file', no_build=True)
 
@@ -6988,7 +6983,7 @@ err = err = function(){};
         src.write(open(path_from_root('tests', 'webidl', 'post.js')).read())
         src.write('\n\n')
         src.close()
-      self.do_run(src, open(path_from_root('tests', 'webidl', "output_%s.txt" % mode)).read(), post_build=(None, post),
+      self.do_run(src, open(path_from_root('tests', 'webidl', "output_%s.txt" % mode)).read(), post_build=post,
         output_nicerizer=(lambda out, err: out))
 
     do_test_in_mode('ALL', False)
@@ -7159,35 +7154,33 @@ err = err = function(){};
     build_and_check()
 
   def test_modularize_closure_pre(self):
-    emcc_args = self.emcc_args[:]
-    for instance in [0, 1]:
-      print(instance)
-      # test that the combination of modularize + closure + pre-js works. in that mode,
-      # closure should not minify the Module object in a way that the pre-js cannot use it.
-      self.emcc_args = emcc_args + [
-        '--pre-js', path_from_root('tests', 'core', 'modularize_closure_pre.js'),
-        '--closure', '1',
-        '-g1'
-      ]
-      if not instance:
-        self.emcc_args += ['-s', 'MODULARIZE=1']
+    # test that the combination of modularize + closure + pre-js works. in that mode,
+    # closure should not minify the Module object in a way that the pre-js cannot use it.
+    base_args = self.emcc_args + [
+      '--pre-js', path_from_root('tests', 'core', 'modularize_closure_pre.js'),
+      '--closure', '1',
+      '-g1'
+    ]
+
+    for instance in (0, 1):
+      print("instance: %d" % instance)
+      if instance:
+        self.emcc_args = base_args + ['-s', 'MODULARIZE_INSTANCE=1']
       else:
-        self.emcc_args += ['-s', 'MODULARIZE_INSTANCE=1']
+        self.emcc_args = base_args + ['-s', 'MODULARIZE=1']
+
       def post(filename):
-        src = open(filename, 'a')
-        src.write('\n\n')
-        if not instance:
-          src.write('var TheModule = Module();\n')
-        src.close()
-      self.do_run(
-        open(path_from_root('tests', 'core', 'modularize_closure_pre.c')).read(),
-        open(path_from_root('tests', 'core', 'modularize_closure_pre.txt')).read(),
-        post_build=(None, post))
+        with open(filename, 'a') as f:
+          f.write('\n\n')
+          if not instance:
+            f.write('var TheModule = Module();\n')
+
+      self.do_run_in_out_file_test('tests', 'core', 'modularize_closure_pre', post_build=post)
 
   @no_emterpreter
   def test_exception_source_map(self):
     if self.is_wasm(): self.skipTest('wasmifying destroys debug info and stack tracability')
-    if '-g4' not in Building.COMPILER_TEST_OPTS: Building.COMPILER_TEST_OPTS.append('-g4')
+    self.emcc_args.append('-g4')
     if not jsrun.check_engine(NODE_JS): self.skipTest('sourcemapper requires Node to run')
 
     src = '''
@@ -7211,19 +7204,20 @@ err = err = function(){};
     '''
 
     def post(filename):
-      import json
       map_filename = filename + '.map'
+      assert os.path.exists(map_filename)
       mappings = json.loads(jsrun.run_js(
         path_from_root('tools', 'source-maps', 'sourcemap2json.js'),
         tools.shared.NODE_JS, [map_filename]))
-      with open(filename) as f: lines = f.readlines()
+      with open(filename) as f:
+        lines = f.readlines()
       for m in mappings:
         if m['originalLine'] == 5 and '__cxa_throw' in lines[m['generatedLine']-1]: # -1 to fix 0-start vs 1-start
           return
       assert False, 'Must label throw statements with line numbers'
 
     dirname = self.get_dir()
-    self.build(src, dirname, os.path.join(dirname, 'src.cpp'), post_build=(None, post))
+    self.build(src, dirname, os.path.join(dirname, 'src.cpp'), post_build=post)
 
   def test_emscripten_log(self):
     if self.is_wasm(): self.skipTest('wasmifying destroys debug info and stack tracability')
@@ -7845,6 +7839,7 @@ def make_run(name, emcc_args=None, env=None):
 
     assert emcc_args is not None
     self.emcc_args = emcc_args[:]
+    Settings.load(self.emcc_args)
     Building.LLVM_OPTS = 0
 
     Building.COMPILER_TEST_OPTS += [
@@ -7858,12 +7853,6 @@ def make_run(name, emcc_args=None, env=None):
     for arg in self.emcc_args:
       if arg.startswith('-O'):
         Building.COMPILER_TEST_OPTS.append(arg) # so bitcode is optimized too, this is for cpp to ll
-
-    # forward  -s K=V
-    for i in range(len(self.emcc_args)):
-      if self.emcc_args[i] == '-s':
-        key, value = self.emcc_args[i + 1].split('=', 1)
-        self.settings_mods[key] = json.loads(value)
 
   TT.setUp = setUp
 
