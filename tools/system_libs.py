@@ -704,6 +704,7 @@ class Ports(object):
   @staticmethod
   def fetch_project(name, url, subdir, is_tarbz2=False):
     fullname = os.path.join(Ports.get_dir(), name)
+    fullpath = fullname + ('.tar.bz2' if is_tarbz2 else '.zip')
 
     if name not in Ports.name_cache: # only mention each port once in log
       logging.debug('including port: ' + name)
@@ -731,7 +732,7 @@ class Ports(object):
             path, subdir = local[1].split('|')
             logging.warning('grabbing local port: ' + name + ' from ' + path + ', into ' + subdir)
             # zip up the directory, so it looks the same as if we downloaded a zip from the remote server
-            z = zipfile.ZipFile(fullname + '.zip', 'w')
+            z = zipfile.ZipFile(fullpath, 'w')
 
             def add_dir(p):
               for f in os.listdir(p):
@@ -755,14 +756,14 @@ class Ports(object):
         from urllib2 import urlopen
       f = urlopen(url)
       data = f.read()
-      open(fullname + ('.zip' if not is_tarbz2 else '.tar.bz2'), 'wb').write(data)
+      open(fullpath, 'wb').write(data)
       State.retrieved = True
 
     def check_tag():
       if is_tarbz2:
-        names = tarfile.open(fullname + '.tar.bz2', 'r:bz2').getnames()
+        names = tarfile.open(fullpath, 'r:bz2').getnames()
       else:
-        names = zipfile.ZipFile(fullname + '.zip', 'r').namelist()
+        names = zipfile.ZipFile(fullpath, 'r').namelist()
 
       # check if first entry of the archive is prefixed with the same
       # tag as we need so no longer download and recompile if so
@@ -772,9 +773,9 @@ class Ports(object):
       logging.warning('unpacking port: ' + name)
       shared.safe_ensure_dirs(fullname)
       if is_tarbz2:
-        z = tarfile.open(fullname + '.tar.bz2', 'r:bz2')
+        z = tarfile.open(fullpath, 'r:bz2')
       else:
-        z = zipfile.ZipFile(fullname + '.zip', 'r')
+        z = zipfile.ZipFile(fullpath, 'r')
       try:
         cwd = os.getcwd()
         os.chdir(fullname)
@@ -788,7 +789,7 @@ class Ports(object):
 
     shared.Cache.acquire_cache_lock()
     try:
-      if not os.path.exists(fullname + '.zip'):
+      if not os.path.exists(fullpath):
         retrieve()
 
       if not os.path.exists(fullname):
@@ -797,7 +798,7 @@ class Ports(object):
       if not check_tag():
         logging.warning('local copy of port is not correct, retrieving from remote server')
         shared.try_delete(fullname)
-        shared.try_delete(fullname + '.zip')
+        shared.try_delete(fullpath)
         retrieve()
         unpack()
 
