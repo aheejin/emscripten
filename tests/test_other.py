@@ -80,28 +80,6 @@ class other(RunnerCore):
       self.assertNotContained('this is dangerous', output.stdout)
       self.assertNotContained('this is dangerous', output.stderr)
 
-  def test_emcc_python_version(self):
-    env = os.environ.copy()
-    env['EMSCRIPTEN_ALLOW_NEWER_PYTHON'] = '1'
-
-    for version in [2, 3]:
-      py = ["py", '-%s' % version] if WINDOWS else ["python%s" % version]
-      try:
-        output = run_process(py + ['--version'], stdout=PIPE, stderr=PIPE)
-        print("python%s" % version)
-      except:
-        print("python%s does not exist, skipping" % version)
-        continue
-
-      # Python 2 emits its version in stderr
-      major = int((output.stdout if output.stdout else output.stderr)[7])
-
-      output = run_process(py + [path_from_root('emcc'), '--version'], stdout=PIPE, stderr=PIPE, env=env).stderr
-      expected_call = 'Running on Python %s which is not officially supported yet' % major
-      # we currently support python 2 and 3 officially
-      assert expected_call not in output
-      assert output == '', output
-
   def test_emcc_generate_config(self):
     for compiler in [EMCC, EMXX]:
       config_path = './emscripten_config'
@@ -8609,3 +8587,30 @@ T6:(else) !NO_EXIT_RUNTIME""", output)
     ret = run_process(NODE_JS + [os.path.join('subdir', 'a.js')], stdout=PIPE).stdout
     self.assertContained('hello, world!', ret)
 
+  def test_is_bitcode(self):
+    fname = os.path.join(self.get_dir(), 'tmp.o')
+
+    with open(fname, 'wb') as f:
+      f.write(b'foo')
+    self.assertFalse(Building.is_bitcode(fname))
+
+    with open(fname, 'wb') as f:
+      f.write(b'\xDE\xC0\x17\x0B')
+      f.write(16 * b'\x00')
+      f.write(b'BC')
+    self.assertTrue(Building.is_bitcode(fname))
+
+    with open(fname, 'wb') as f:
+      f.write(b'BC')
+    self.assertTrue(Building.is_bitcode(fname))
+
+  def test_is_ar(self):
+    fname = os.path.join(self.get_dir(), 'tmp.a')
+
+    with open(fname, 'wb') as f:
+      f.write(b'foo')
+    self.assertFalse(Building.is_ar(fname))
+
+    with open(fname, 'wb') as f:
+      f.write(b'!<arch>\n')
+    self.assertTrue(Building.is_ar(fname))
