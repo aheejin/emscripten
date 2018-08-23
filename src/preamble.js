@@ -1189,6 +1189,7 @@ if (!ENVIRONMENT_IS_PTHREAD) {
   Module['wasmMemory'] = new WebAssembly.Memory({ 'initial': TOTAL_MEMORY / WASM_PAGE_SIZE , 'maximum': TOTAL_MEMORY / WASM_PAGE_SIZE, 'shared': true });
 #endif
   buffer = Module['wasmMemory'].buffer;
+  assert(buffer instanceof SharedArrayBuffer, 'requested a shared WebAssembly.Memory but the returned buffer is not a SharedArrayBuffer, indicating that while the browser has SharedArrayBuffer it does not have WebAssembly threads support - you may need to set a flag');
 }
 
 updateGlobalBufferViews();
@@ -2508,7 +2509,7 @@ function integrateWasmJS() {
 #endif // native-wasm
 
 #if ASSERTIONS
-    assert(exports, 'no binaryen method succeeded. consider enabling more options, like interpreting, if you want that: https://github.com/kripken/emscripten/wiki/WebAssembly#binaryen-methods');
+    assert(exports, 'no binaryen method succeeded. consider enabling more options, like interpreting, if you want that: http://kripken.github.io/emscripten-site/docs/compiling/WebAssembly.html#binaryen-methods');
 #else
     assert(exports, 'no binaryen method succeeded.');
 #endif
