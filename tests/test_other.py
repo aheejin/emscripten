@@ -513,7 +513,7 @@ f.close()
       else:
         return 'Skipping NMake test for CMake support, since nmake was not found in PATH. Run this test in Visual Studio command prompt to easily access nmake.'
 
-    def check_makefile(configuration, dirname):
+    def check_makefile(dirname):
       assert os.path.exists(dirname + '/Makefile'), 'CMake call did not produce a Makefile!'
 
     configurations = { 'MinGW Makefiles'     : { 'prebuild': check_makefile,
@@ -543,10 +543,8 @@ f.close()
 
       make = conf['build']
 
-      try:
-        detector = conf['detect']
-      except KeyError:
-        detector = None
+      detector = conf.get('detect')
+      prebuild = conf.get('prebuild')
 
       if detector:
         error = detector(conf)
@@ -559,16 +557,6 @@ f.close()
       if error:
         logging.warning(error)
         continue
-
-      try:
-        prebuild = conf['prebuild']
-      except KeyError:
-        prebuild = None
-
-      try:
-        postbuild = conf['postbuild']
-      except KeyError:
-        postbuild = None
 
       # ('directory to the test', 'output filename', ['extra args to pass to CMake'])
       # Testing all combinations would be too much work and the test would take 10 minutes+ to finish (CMake feature detection is slow),
@@ -602,7 +590,7 @@ f.close()
             raise Exception('cmake call failed!')
 
           if prebuild:
-            prebuild(configuration, tempdirname)
+            prebuild(tempdirname)
 
           # Build
           cmd = make
@@ -616,9 +604,6 @@ f.close()
             logging.error('Result:\n' + ret.stdout)
             raise Exception('make failed!')
           assert os.path.exists(tempdirname + '/' + output_file), 'Building a cmake-generated Makefile failed to produce an output file %s!' % tempdirname + '/' + output_file
-
-          if postbuild:
-            postbuild(configuration, tempdirname)
 
           # Run through node, if CMake produced a .js file.
           if output_file.endswith('.js'):
@@ -7774,12 +7759,16 @@ int main() {
           if '--separate-asm' in params: files += ['a.asm.js']
           if output_suffix == 'html': files += ['a.html']
           cmd = [PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-o', 'a.' + output_suffix, '--output_eol', eol] + params
-          print(cmd)
           run_process(cmd)
           for f in files:
             print(str(cmd) + ' ' + str(params) + ' ' + eol + ' ' + f)
             assert os.path.isfile(f)
-            ret = tools.line_endings.check_line_endings(f, expect_only_specific_line_endings='\n' if eol == 'linux' else '\r\n')
+            if eol == 'linux':
+              expected_ending = '\n'
+            else:
+              expected_ending = '\r\n'
+
+            ret = tools.line_endings.check_line_endings(f, expect_only=expected_ending)
             assert ret == 0
 
           for f in files:
@@ -8671,3 +8660,46 @@ T6:(else) !NO_EXIT_RUNTIME""", output)
     with open(fname, 'wb') as f:
       f.write(b'!<arch>\n')
     self.assertTrue(Building.is_ar(fname))
+
+  def test_emcc_parsing(self):
+    with open('src.c', 'w') as f:
+      f.write(r'''
+        #include <stdio.h>
+        void a() { printf("a\n"); }
+        void b() { printf("b\n"); }
+        void c() { printf("c\n"); }
+        void d() { printf("d\n"); }
+      ''')
+    with open('response', 'w') as f:
+      f.write(r'''[
+"_a",
+"_b",
+"_c",
+"_d"
+]
+''')
+
+    for export_arg, expected in [
+      # extra space at end - should be ignored
+      ("EXPORTED_FUNCTIONS=['_a', '_b', '_c', '_d' ]", ''),
+      # extra newline in response file - should be ignored
+      ("EXPORTED_FUNCTIONS=@response", ''),
+      # stray slash
+      ("EXPORTED_FUNCTIONS=['_a', '_b', \\'_c', '_d']", '''function requested to be exported, but not implemented: "\\\\'_c'"'''),
+      # stray slash
+      ("EXPORTED_FUNCTIONS=['_a', '_b',\ '_c', '_d']", '''function requested to be exported, but not implemented: "\\\\ '_c'"'''),
+      # stray slash
+      ('EXPORTED_FUNCTIONS=["_a", "_b", \\"_c", "_d"]', 'function requested to be exported, but not implemented: "\\\\"_c""'),
+      # stray slash
+      ('EXPORTED_FUNCTIONS=["_a", "_b",\ "_c", "_d"]', 'function requested to be exported, but not implemented: "\\\\ "_c"'),
+      # missing comma
+      ('EXPORTED_FUNCTIONS=["_a", "_b" "_c", "_d"]', 'function requested to be exported, but not implemented: "_b" "_c"'),
+    ]:
+      print(export_arg)
+      err = run_process([PYTHON, EMCC, 'src.c', '-s', export_arg], stdout=PIPE, stderr=PIPE).stderr
+      print(err)
+      if not expected:
+        assert not err
+      else:
+        self.assertContained(expected, err)
+
