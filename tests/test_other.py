@@ -1,4 +1,9 @@
 # coding=utf-8
+# Copyright 2013 The Emscripten Authors.  All rights reserved.
+# Emscripten is available under two separate licenses, the MIT license and the
+# University of Illinois/NCSA Open Source License.  Both these licenses can be
+# found in the LICENSE file.
+
 # noqa: E241
 
 from __future__ import print_function
@@ -197,7 +202,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       for path in [os.path.abspath(os.path.join('..', 'file1.js')), os.path.join('b_dir', 'file2.js')]:
         print(path)
         os.chdir(self.get_dir())
-        self.clear(in_curr=True)
+        self.clear()
         print(os.listdir(os.getcwd()))
         os.makedirs('a_dir')
         os.chdir('a_dir')
@@ -820,14 +825,14 @@ f.close()
       self.assertContained(expected, run_js(self.in_dir('a.out.js'), stderr=PIPE, full_output=True, assert_returncode=None))
       # TODO: emulation function support in wasm is imperfect
       print('with emulated function pointers in asm.js')
-      run_process([PYTHON, EMCC, '-s', 'WASM=0', 'src.c', '-s', 'BINARYEN_ASYNC_COMPILATION=0'] + args + ['-s', 'EMULATED_FUNCTION_POINTERS=1'], stderr=PIPE)
+      run_process([PYTHON, EMCC, '-s', 'WASM=0', 'src.c', '-s', 'ASSERTIONS=1'] + args + ['-s', 'EMULATED_FUNCTION_POINTERS=1'], stderr=PIPE)
       out = run_js(self.in_dir('a.out.js'), stderr=PIPE, full_output=True, assert_returncode=None)
       self.assertContained(expected, out)
 
     # fastcomp. all asm, so it can't just work with wrong sigs. but,
     # ASSERTIONS=2 gives much better info to debug
     # Case 1: No useful info, but does mention ASSERTIONS
-    test(['-O1'], 'Build with -s ASSERTIONS=1 for more info.')
+    test(['-O1'], 'ASSERTIONS')
     # Case 2: Some useful text
     test(['-O1', '-s', 'ASSERTIONS=1'], [
         "Invalid function pointer called with signature 'v'. Perhaps this is an invalid value",
@@ -3862,15 +3867,15 @@ int main() {
                   if self.is_wasm_backend() or (wasm and (relocate or emulate_fps)):
                     # wasm trap raised by the vm
                     self.assertContained('function signature mismatch', output)
-                  elif safe and not wasm:
+                  elif opts == 0 and safe and not wasm:
                     # non-wasm safe mode checks asm.js function table masks
                     self.assertContained('Function table mask error', output)
                   elif opts == 0:
                     # informative error message (assertions are enabled in -O0)
                     self.assertContained('Invalid function pointer called', output)
                   else:
-                    # non-informative abort()
-                    self.assertContained('abort(', output)
+                    # non-informative error
+                    self.assertContained(('abort(', 'exception'), output)
 
   @no_wasm_backend()
   def test_aliased_func_pointers(self):
@@ -8042,7 +8047,7 @@ int main() {
           if expect_emit_text:
             text = open('a.out.wast').read()
             assert ';;' in text, 'must see debug info comment'
-            assert 'hello_world.cpp:6' in text, 'must be file:line info'
+            assert 'hello_world.cpp:12' in text, 'must be file:line info'
         js = open('a.out.js').read()
         assert expect_clean_js == ('// ' not in js), 'cleaned-up js must not have comments'
         assert expect_whitespace_js == ('{\n  ' in js), 'whitespace-minified js must not have excess spacing'
@@ -8190,6 +8195,13 @@ int main() {
       (['-Os'],  0, [],                         ['tempDoublePtr', 'waka'],    58,  0,  1), # noqa
       (['-Oz'],  0, [],                         ['tempDoublePtr', 'waka'],    58,  0,  1), # noqa
     ])
+
+    print('test on libc++: see effects of emulated function pointers')
+    test(path_from_root('tests', 'hello_libcxx.cpp'), [
+      (['-O2'], 53, ['abort', 'tempDoublePtr'], ['waka'],                 208677,  30,   44), # noqa
+      (['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
+                53, ['abort', 'tempDoublePtr'], ['waka'],                 208677,  31,   31), # noqa
+    ]) # noqa
 
   # ensures runtime exports work, even with metadce
   def test_extra_runtime_exports(self):
