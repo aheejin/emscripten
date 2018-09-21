@@ -1284,10 +1284,11 @@ def create_exports(exported_implemented_functions, in_table, function_table_data
   quote = quoter()
   asm_runtime_funcs = create_asm_runtime_funcs()
   all_exported = exported_implemented_functions + asm_runtime_funcs + function_tables(function_table_data)
-  # in a wasm shared library + emulated function pointers, export all the table so that
-  # we can easily find the function pointer for each function
-  if (shared.Settings.RELOCATABLE or not shared.Settings.WASM) and \
-     shared.Settings.EMULATED_FUNCTION_POINTERS:
+  # In asm.js + emulated function pointers, export all the table because we use
+  # JS to add the asm.js module's functions to the table (which is external
+  # in this mode). In wasm, we don't need that since wasm modules can
+  # directly add functions to the imported Table.
+  if not shared.Settings.WASM and shared.Settings.EMULATED_FUNCTION_POINTERS:
     all_exported += in_table
   exports = []
   for export in sorted(set(all_exported)):
