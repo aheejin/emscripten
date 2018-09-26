@@ -39,7 +39,7 @@ import tempfile
 import time
 from subprocess import PIPE
 
-from tools import shared, jsrun, system_libs, client_mods, js_optimizer
+from tools import shared, system_libs, client_mods, js_optimizer, jsrun
 from tools.shared import suffix, unsuffixed, unsuffixed_basename, WINDOWS, safe_copy, safe_move, run_process, asbytes, read_and_preprocess, exit_with_error, DEBUG
 from tools import mylog
 from tools.response_file import substitute_response_files
@@ -2459,11 +2459,11 @@ def emterpretify(js_target, optimizer, options):
 
 def emit_js_source_maps(target, js_transform_tempfiles):
   logging.debug('generating source maps')
-  jsrun.run_js(shared.path_from_root('tools', 'source-maps', 'sourcemapper.js'),
-               shared.NODE_JS, js_transform_tempfiles +
-               ['--sourceRoot', os.getcwd(),
-                '--mapFileBaseName', target,
-                '--offset', str(0)])
+  jsrun.run_js_tool(shared.path_from_root('tools', 'source-maps', 'sourcemapper.js'),
+                    shared.NODE_JS, js_transform_tempfiles +
+                    ['--sourceRoot', os.getcwd(),
+                     '--mapFileBaseName', target,
+                     '--offset', '0'])
 
 
 def separate_asm_js(final, asm_target):
@@ -2474,7 +2474,7 @@ def separate_asm_js(final, asm_target):
   # extra only-my-code logic
   if shared.Settings.ONLY_MY_CODE:
     temp = asm_target + '.only.js'
-    print(jsrun.run_js(shared.path_from_root('tools', 'js-optimizer.js'), shared.NODE_JS, args=[asm_target, 'eliminateDeadGlobals', 'last', 'asm'], stdout=open(temp, 'w')))
+    jsrun.run_js_tool(shared.path_from_root('tools', 'js-optimizer.js'), shared.NODE_JS, jsargs=[asm_target, 'eliminateDeadGlobals', 'last', 'asm'], stdout=open(temp, 'w'))
     mylog.log_move(temp, asm_target)
     shutil.move(temp, asm_target)
 
