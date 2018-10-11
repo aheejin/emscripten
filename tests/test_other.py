@@ -747,8 +747,9 @@ f.close()
       run_process([PYTHON, EMCC, 'binary.' + suffix])
       self.assertContained('hello, world!', run_js(os.path.join(self.get_dir(), 'a.out.js')))
 
-  def test_catch_undef(self):
-    open(os.path.join(self.get_dir(), 'test.cpp'), 'w').write(r'''
+  def test_ubsan(self):
+    with open('test.cpp', 'w') as f:
+      f.write(r'''
       #include <vector>
       #include <stdio.h>
 
@@ -764,8 +765,28 @@ f.close()
         return 0;
       }
     ''')
-    run_process([PYTHON, EMCC, os.path.join(self.get_dir(), 'test.cpp'), '-fsanitize=undefined'])
-    self.assertContained('hello, world!', run_js(os.path.join(self.get_dir(), 'a.out.js')))
+
+    run_process([PYTHON, EMCC, 'test.cpp', '-fsanitize=undefined'])
+    self.assertContained('hello, world!', run_js('a.out.js'))
+
+  def test_ubsan_add_overflow(self):
+    with open('test.cpp', 'w') as f:
+      f.write(r'''
+      #include <stdio.h>
+
+      int main(int argc, char **argv) {
+        printf("hello, world!\n");
+        fflush(stdout);
+        int k = 0x7fffffff;
+        k += argc;
+        return k;
+      }
+    ''')
+
+    run_process([PYTHON, EMCC, 'test.cpp', '-fsanitize=undefined'])
+    output = run_js('a.out.js', assert_returncode=1, stderr=STDOUT)
+    self.assertContained('hello, world!', output)
+    self.assertContained('Undefined behavior! ubsan_handle_add_overflow:', output)
 
   @no_wasm_backend()
   def test_asm_minify(self):
@@ -5170,7 +5191,7 @@ main(const int argc, const char * const * const argv)
       self.assertLess(sizes['no_fs_manual'], sizes['no_fs'] + 30)
 
     test(['-s', 'ASSERTIONS=0'], 120000) # we don't care about code size with assertions
-    test(['-O1'], 90000)
+    test(['-O1'], 91000)
     test(['-O2'], 46000)
     test(['-O3', '--closure', '1'], 17000)
     # asm.js too
@@ -8207,7 +8228,7 @@ int main() {
                  0, [],                         ['tempDoublePtr', 'waka'],     8,   0,    0), # noqa; totally empty!
       # but we don't metadce with linkable code! other modules may want it
       (['-O3', '-s', 'MAIN_MODULE=1'],
-              1526, ['invoke_i'],               ['waka'],                 469663, 149, 1439),
+              1529, ['invoke_i'],               ['waka'],                 469663, 149, 1439),
     ]) # noqa
 
     print('test on a minimal pure computational thing')
@@ -8625,6 +8646,26 @@ int main() {
 var ASM_CONSTS = [function() { var x = !<->5.; }];
                                         ^
 ''', output.stderr)
+
+  def test_check_sourcemapurl(self):
+    if not self.is_wasm():
+      return
+    shutil.copyfile(path_from_root('tests', 'hello_123.c'), 'hello_123.c')
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_123.c'), '-g4', '-o', 'a.js', '--source-map-base', 'dir/'])
+    output = open('a.wasm').read()
+    # has sourceMappingURL section content and points to 'dir/a.wasm.map' file
+    source_mapping_url_content = chr(len('sourceMappingURL')) + 'sourceMappingURL' + chr(len('dir/a.wasm.map')) + 'dir/a.wasm.map'
+    self.assertContained(source_mapping_url_content, output)
+
+  def test_check_sourcemapurl_default(self):
+    if not self.is_wasm():
+      return
+    shutil.copyfile(path_from_root('tests', 'hello_123.c'), 'hello_123.c')
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_123.c'), '-g4', '-o', 'a.js'])
+    output = open('a.wasm').read()
+    # has sourceMappingURL section content and points to 'a.wasm.map' file
+    source_mapping_url_content = chr(len('sourceMappingURL')) + 'sourceMappingURL' + chr(len('a.wasm.map')) + 'a.wasm.map'
+    self.assertContained(source_mapping_url_content, output)
 
   def test_wasm_sourcemap(self):
     # The no_main.c will be read (from relative location) due to speficied "-s"
