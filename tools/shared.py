@@ -1928,11 +1928,10 @@ class Building(object):
     # if Settings.DEBUG_LEVEL < 2 and not Settings.PROFILING_FUNCS:
     #   cmd.append('--strip-debug')
 
+    for export in expand_response(Settings.EXPORTED_FUNCTIONS):
+      cmd += ['--export', export[1:]] # Strip the leading underscore
     if Settings.EXPORT_ALL:
-      cmd += ['--no-gc-sections', '--export-all']
-    else:
-      for export in expand_response(Settings.EXPORTED_FUNCTIONS):
-        cmd += ['--export', export[1:]] # Strip the leading underscore
+      cmd += ['--export-all']
 
     logging.debug('emcc: lld-linking: %s to %s', args, target)
     check_call(cmd)
@@ -2458,6 +2457,7 @@ class Building(object):
 
       # Something like this (adjust memory as needed):
       #   java -Xmx1024m -jar CLOSURE_COMPILER --compilation_level ADVANCED_OPTIMIZATIONS --variable_map_output_file src.cpp.o.js.vars --js src.cpp.o.js --js_output_file src.cpp.o.cc.js
+      outfile = filename + '.cc.js'
       args = [JAVA,
               '-Xmx' + (os.environ.get('JAVA_HEAP_SIZE') or '1024m'), # if you need a larger Java heap, use this environment variable
               '-jar', CLOSURE_COMPILER,
@@ -2465,7 +2465,7 @@ class Building(object):
               '--language_in', 'ECMASCRIPT5',
               '--externs', CLOSURE_EXTERNS,
               # '--variable_map_output_file', filename + '.vars',
-              '--js', filename, '--js_output_file', filename + '.cc.js']
+              '--js', filename, '--js_output_file', outfile]
       for extern in NODE_EXTERNS:
         args.append('--externs')
         args.append(extern)
@@ -2479,11 +2479,12 @@ class Building(object):
       if os.environ.get('EMCC_CLOSURE_ARGS'):
         args += shlex.split(os.environ.get('EMCC_CLOSURE_ARGS'))
       logging.debug('closure compiler: ' + ' '.join(args))
-      process = run_process(args, stdout=PIPE, stderr=STDOUT, check=False)
-      if process.returncode != 0 or not os.path.exists(filename + '.cc.js'):
-        raise Exception('closure compiler error: ' + process.stdout + ' (rc: %d)' % process.returncode)
+      proc = run_process(args, stderr=PIPE, check=False)
+      if proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        exit_with_error('closure compiler failed (rc: %d)', proc.returncode)
 
-      return filename + '.cc.js'
+      return outfile
 
   # minify the final wasm+JS combination. this is done after all the JS
   # and wasm optimizations; here we do the very final optimizations on them
