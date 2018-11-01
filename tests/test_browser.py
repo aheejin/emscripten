@@ -96,9 +96,29 @@ def no_swiftshader(f):
   return decorated
 
 
+# used for tests that fail now and then on CI, due to timing or other
+# random causes. this tries the test a few times, looking for at least
+# one pass
+def flaky(f):
+  max_tries = 3
+
+  def decorated(self):
+    for i in range(max_tries - 1):
+      try:
+        f(self)
+        return
+      except Exception:
+        print('flaky...')
+        continue
+    # run the last time normally, to get a simpler stack trace
+    f(self)
+  return decorated
+
+
 requires_graphics_hardware = unittest.skipIf(os.getenv('EMTEST_LACKS_GRAPHICS_HARDWARE'), "This test requires graphics hardware")
 requires_sound_hardware = unittest.skipIf(os.getenv('EMTEST_LACKS_SOUND_HARDWARE'), "This test requires sound hardware")
 requires_threads = unittest.skipIf(os.environ.get('EMTEST_LACKS_THREAD_SUPPORT'), "This test requires thread support")
+requires_sync_compilation = unittest.skipIf(is_chrome(), "This test requires synchronous compilation, which does not work in Chrome (except for tiny wasms)")
 
 
 class browser(BrowserCore):
@@ -674,12 +694,12 @@ If manually bisecting:
   def test_sdl_image_prepare(self):
     # load an image file, get pixel data.
     shutil.copyfile(path_from_root('tests', 'screenshot.jpg'), os.path.join(self.get_dir(), 'screenshot.not'))
-    self.btest('sdl_image_prepare.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-lSDL', '-lGL'], also_proxied=True)
+    self.btest('sdl_image_prepare.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-lSDL', '-lGL'], also_proxied=True, manually_trigger_reftest=True)
 
   def test_sdl_image_prepare_data(self):
     # load an image file, get pixel data.
     shutil.copyfile(path_from_root('tests', 'screenshot.jpg'), os.path.join(self.get_dir(), 'screenshot.not'))
-    self.btest('sdl_image_prepare_data.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-lSDL', '-lGL'])
+    self.btest('sdl_image_prepare_data.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-lSDL', '-lGL'], manually_trigger_reftest=True)
 
   def test_sdl_image_must_prepare(self):
     # load an image file, get pixel data.
@@ -819,22 +839,14 @@ window.close = function() {
           open(os.path.join(self.get_dir(), 'pre.js'), 'w').write('''
             function keydown(c) {
              %s
-              //out('push keydown');
-              var event = document.createEvent("KeyboardEvent");
-              event.initKeyEvent("keydown", true, true, window,
-                                 0, 0, 0, 0,
-                                 c, c);
+              var event = new KeyboardEvent("keydown", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
               document.dispatchEvent(event);
              %s
             }
 
             function keyup(c) {
              %s
-              //out('push keyup');
-              var event = document.createEvent("KeyboardEvent");
-              event.initKeyEvent("keyup", true, true, window,
-                                 0, 0, 0, 0,
-                                 c, c);
+              var event = new KeyboardEvent("keyup", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
               document.dispatchEvent(event);
              %s
             }
@@ -861,18 +873,12 @@ window.close = function() {
       html = html.replace('</body>', '''
 <script>
 function keydown(c) {
-  var event = document.createEvent("KeyboardEvent");
-  event.initKeyEvent("keydown", true, true, window,
-                     0, 0, 0, 0,
-                     c, c);
+  var event = new KeyboardEvent("keydown", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
   document.dispatchEvent(event);
 }
 
 function keyup(c) {
-  var event = document.createEvent("KeyboardEvent");
-  event.initKeyEvent("keyup", true, true, window,
-                     0, 0, 0, 0,
-                     c, c);
+  var event = new KeyboardEvent("keyup", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
   document.dispatchEvent(event);
 }
 
@@ -896,26 +902,17 @@ keydown(100);keyup(100); // trigger the end
       html = html.replace('</body>', '''
 <script>
 function keydown(c) {
-  var event = document.createEvent("KeyboardEvent");
-  event.initKeyEvent("keydown", true, true, window,
-                     0, 0, 0, 0,
-                     c, c);
+  var event = new KeyboardEvent("keydown", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
   return document.dispatchEvent(event);
 }
 
 function keypress(c) {
-  var event = document.createEvent("KeyboardEvent");
-  event.initKeyEvent("keypress", true, true, window,
-                     0, 0, 0, 0,
-                     c, c);
+  var event = new KeyboardEvent("keypress", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
   return document.dispatchEvent(event);
 }
 
 function keyup(c) {
-  var event = document.createEvent("KeyboardEvent");
-  event.initKeyEvent("keyup", true, true, window,
-                     0, 0, 0, 0,
-                     c, c);
+  var event = new KeyboardEvent("keyup", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
   return document.dispatchEvent(event);
 }
 
@@ -956,10 +953,8 @@ keydown(100);keyup(100); // trigger the end
         setTimeout(doOne, 1000/60);
       }
 
-      function simulateKeyEvent(charCode) {
-        var event = document.createEvent("KeyboardEvent");
-        event.initKeyEvent("keypress", true, true, window,
-                           0, 0, 0, 0, 0, charCode);
+      function simulateKeyEvent(c) {
+        var event = new KeyboardEvent("keypress", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
         document.body.dispatchEvent(event);
       }
     ''')
@@ -1429,10 +1424,7 @@ keydown(100);keyup(100); // trigger the end
     # key events should be detected using SDL_PumpEvents
     open(os.path.join(self.get_dir(), 'pre.js'), 'w').write('''
       function keydown(c) {
-        var event = document.createEvent("KeyboardEvent");
-        event.initKeyEvent("keydown", true, true, window,
-                           0, 0, 0, 0,
-                           c, c);
+        var event = new KeyboardEvent("keydown", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
         document.dispatchEvent(event);
       }
     ''')
@@ -1898,7 +1890,7 @@ keydown(100);keyup(100); // trigger the end
     self.btest('cubegeom_pre.c', reference='cubegeom_pre.png', args=['-s', 'LEGACY_GL_EMULATION=1', '-lGL', '-lSDL'])
 
   @requires_graphics_hardware
-  @no_chrome("RELOCATABLE=1 forces synchronous compilation which chrome doesn't support")
+  @requires_sync_compilation
   def test_cubegeom_pre_relocatable(self):
     self.btest('cubegeom_pre.c', reference='cubegeom_pre.png', args=['-s', 'LEGACY_GL_EMULATION=1', '-lGL', '-lSDL', '-s', 'RELOCATABLE=1'])
 
@@ -2088,6 +2080,7 @@ void *getBindBuffer() {
     shutil.copyfile(path_from_root('tests', 'screenshot.dds'), os.path.join(self.get_dir(), 'screenshot.dds'))
     self.btest('s3tc.c', reference='s3tc.png', args=['--preload-file', 'screenshot.dds', '-s', 'LEGACY_GL_EMULATION=1', '-s', 'GL_FFP_ONLY=1', '-lGL', '-lSDL'])
 
+  @no_chrome('see #7117')
   @requires_graphics_hardware
   def test_aniso(self):
     if SPIDERMONKEY_ENGINE in JS_ENGINES:
@@ -2133,8 +2126,8 @@ void *getBindBuffer() {
       print(wasm)
       main, supp = self.setup_runtimelink_test()
       open('supp.cpp', 'w').write(supp)
-      run_process([PYTHON, EMCC, 'supp.cpp', '-o', 'supp.' + ('wasm' if wasm else 'js'), '-s', 'SIDE_MODULE=1', '-O2', '-s', 'WASM=%d' % wasm])
-      self.btest(main, args=['-DBROWSER=1', '-s', 'MAIN_MODULE=1', '-O2', '-s', 'WASM=%d' % wasm, '-s', 'RUNTIME_LINKED_LIBS=["supp.' + ('wasm' if wasm else 'js') + '"]'], expected='76')
+      run_process([PYTHON, EMCC, 'supp.cpp', '-o', 'supp.' + ('wasm' if wasm else 'js'), '-s', 'SIDE_MODULE=1', '-O2', '-s', 'WASM=%d' % wasm, '-s', 'EXPORT_ALL=1'])
+      self.btest(main, args=['-DBROWSER=1', '-s', 'MAIN_MODULE=1', '-O2', '-s', 'WASM=%d' % wasm, '-s', 'RUNTIME_LINKED_LIBS=["supp.' + ('wasm' if wasm else 'js') + '"]', '-s', 'EXPORT_ALL=1'], expected='76')
 
   def test_pre_run_deps(self):
     # Adding a dependency in preRun will delay run
@@ -2326,7 +2319,7 @@ void *getBindBuffer() {
   @unittest.skip('non-fastcomp is deprecated and fails in 3.5')
   def test_module(self):
     run_process([PYTHON, EMCC, path_from_root('tests', 'browser_module.cpp'), '-o', 'module.js', '-O2', '-s', 'SIDE_MODULE=1', '-s', 'DLOPEN_SUPPORT=1', '-s', 'EXPORTED_FUNCTIONS=["_one", "_two"]'])
-    self.btest('browser_main.cpp', args=['-O2', '-s', 'MAIN_MODULE=1', '-s', 'DLOPEN_SUPPORT=1'], expected='8')
+    self.btest('browser_main.cpp', args=['-O2', '-s', 'MAIN_MODULE=1', '-s', 'DLOPEN_SUPPORT=1', '-s', 'EXPORT_ALL=1'], expected='8')
 
   def test_preload_module(self):
     open('library.c', 'w').write(r'''
@@ -2335,7 +2328,7 @@ void *getBindBuffer() {
         return 42;
       }
     ''')
-    run_process([PYTHON, EMCC, 'library.c', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'library.wasm', '-s', 'WASM=1'])
+    run_process([PYTHON, EMCC, 'library.c', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'library.wasm', '-s', 'WASM=1', '-s', 'EXPORT_ALL=1'])
     os.rename('library.wasm', 'library.so')
     main = r'''
       #include <dlfcn.h>
@@ -2366,7 +2359,7 @@ void *getBindBuffer() {
     '''
     self.btest(
       main,
-      args=['-s', 'MAIN_MODULE=1', '--preload-file', '.@/', '-O2', '-s', 'WASM=1', '--use-preload-plugins'],
+      args=['-s', 'MAIN_MODULE=1', '--preload-file', '.@/', '-O2', '-s', 'WASM=1', '--use-preload-plugins', '-s', 'EXPORT_ALL=1'],
       expected='0')
 
   def test_mmap_file(self):
@@ -2504,6 +2497,7 @@ Module["preRun"].push(function () {
       print(opts)
       self.btest(path_from_root('tests', 'webgl_destroy_context.cpp'), args=opts + ['--shell-file', path_from_root('tests/webgl_destroy_context_shell.html'), '-lGL'], expected='0', timeout=20)
 
+  @no_chrome('see #7373')
   @requires_graphics_hardware
   def test_webgl_context_params(self):
     if WINDOWS:
@@ -2704,7 +2698,7 @@ Module['onRuntimeInitialized'] = function() {
       run_process([PYTHON, path_from_root('tools', 'distill_asm.py'), 'a.out.js', 'second.js', 'swap-in'])
       assert os.path.exists('second.js')
 
-      if isinstance(SPIDERMONKEY_ENGINE, list) and len(SPIDERMONKEY_ENGINE[0]) != 0:
+      if SPIDERMONKEY_ENGINE in JS_ENGINES:
         out = run_js('second.js', engine=SPIDERMONKEY_ENGINE, stderr=PIPE, full_output=True, assert_returncode=None)
         self.validate_asmjs(out)
       else:
@@ -2752,26 +2746,18 @@ Module['onRuntimeInitialized'] = function() {
         }
 
         function keydown(c) {
-          var event = document.createEvent("KeyboardEvent");
-          event.initKeyEvent("keydown", true, true, window,
-                             0, 0, 0, 0,
-                             c, c);
+          var event = new KeyboardEvent("keydown", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
           var prevented = !document.dispatchEvent(event);
 
           //send keypress if not prevented
           if (!prevented) {
-            event = document.createEvent("KeyboardEvent");
-            event.initKeyEvent("keypress", true, true, window,
-                               0, 0, 0, 0, 0, c);
+            var event = new KeyboardEvent("keypress", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
             document.dispatchEvent(event);
           }
         }
 
         function keyup(c) {
-          var event = document.createEvent("KeyboardEvent");
-          event.initKeyEvent("keyup", true, true, window,
-                             0, 0, 0, 0,
-                             c, c);
+          var event = new KeyboardEvent("keyup", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
           document.dispatchEvent(event);
         }
       ''')
@@ -2790,10 +2776,8 @@ Module['onRuntimeInitialized'] = function() {
         setTimeout(doOne, 1000/60);
       }
 
-      function simulateKeyEvent(charCode) {
-        var event = document.createEvent("KeyboardEvent");
-        event.initKeyEvent("keypress", true, true, window,
-                           0, 0, 0, 0, 0, charCode);
+      function simulateKeyEvent(c) {
+        var event = new KeyboardEvent("keypress", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
         document.body.dispatchEvent(event);
       }
     ''')
@@ -2802,6 +2786,7 @@ Module['onRuntimeInitialized'] = function() {
     run_process([PYTHON, EMCC, os.path.join(self.get_dir(), 'sdl2_text.c'), '-o', 'page.html', '--pre-js', 'pre.js', '-s', '''EXPORTED_FUNCTIONS=['_main', '_one']''', '-s', 'USE_SDL=2'])
     self.run_browser('page.html', '', '/report_result?1')
 
+  @flaky
   def test_sdl2_mouse(self):
     open(os.path.join(self.get_dir(), 'pre.js'), 'w').write('''
       function simulateMouseEvent(x, y, button) {
@@ -2928,7 +2913,7 @@ Module['onRuntimeInitialized'] = function() {
     self.btest('sdl2_canvas_twice.c', reference='sdl_canvas_twice.png', args=['-s', 'USE_SDL=2'])
 
   def test_sdl2_gfx(self):
-    self.btest('sdl2_gfx.cpp', args=['-s', 'USE_SDL=2', '-s', 'USE_SDL_GFX=2'], reference='sdl2_gfx.png', reference_slack=1)
+    self.btest('sdl2_gfx.cpp', args=['-s', 'USE_SDL=2', '-s', 'USE_SDL_GFX=2'], reference='sdl2_gfx.png', reference_slack=2)
 
   def test_sdl2_canvas_palette_2(self):
     open(os.path.join(self.get_dir(), 'args-r.js'), 'w').write('''
@@ -2953,12 +2938,12 @@ Module['onRuntimeInitialized'] = function() {
   def test_sdl2_image_prepare(self):
     # load an image file, get pixel data.
     shutil.copyfile(path_from_root('tests', 'screenshot.jpg'), os.path.join(self.get_dir(), 'screenshot.not'))
-    self.btest('sdl2_image_prepare.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-s', 'USE_SDL=2', '-s', 'USE_SDL_IMAGE=2'])
+    self.btest('sdl2_image_prepare.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-s', 'USE_SDL=2', '-s', 'USE_SDL_IMAGE=2'], manually_trigger_reftest=True)
 
   def test_sdl2_image_prepare_data(self):
     # load an image file, get pixel data.
     shutil.copyfile(path_from_root('tests', 'screenshot.jpg'), os.path.join(self.get_dir(), 'screenshot.not'))
-    self.btest('sdl2_image_prepare_data.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-s', 'USE_SDL=2', '-s', 'USE_SDL_IMAGE=2'])
+    self.btest('sdl2_image_prepare_data.c', reference='screenshot.jpg', args=['--preload-file', 'screenshot.not', '-s', 'USE_SDL=2', '-s', 'USE_SDL_IMAGE=2'], manually_trigger_reftest=True)
 
   @requires_graphics_hardware
   def test_sdl2_canvas_proxy(self):
@@ -2990,10 +2975,7 @@ window.close = function() {
     # key events should be detected using SDL_PumpEvents
     open(os.path.join(self.get_dir(), 'pre.js'), 'w').write('''
       function keydown(c) {
-        var event = document.createEvent("KeyboardEvent");
-        event.initKeyEvent("keydown", true, true, window,
-                           0, 0, 0, 0,
-                           c, c);
+        var event = new KeyboardEvent("keydown", { 'keyCode': c, 'charCode': c, 'view': window, 'bubbles': true, 'cancelable': true });
         document.dispatchEvent(event);
       }
     ''')
@@ -3159,6 +3141,7 @@ window.close = function() {
   def test_emterpreter_async_iostream(self):
     self.btest('emterpreter_async_iostream.cpp', '1', args=['-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1'])
 
+  @requires_sync_compilation
   def test_modularize(self):
     for opts in [[], ['-O1'], ['-O2', '-profiling'], ['-O2'], ['-O2', '--closure', '1']]:
       for args, code in [
@@ -3255,7 +3238,7 @@ window.close = function() {
       print(opts)
       self.btest(os.path.join('webidl', 'test.cpp'), '1', args=['--post-js', 'glue.js', '-I.', '-DBROWSER'] + opts)
 
-  @no_chrome("required synchronous wasm compilation")
+  @requires_sync_compilation
   def test_dynamic_link(self):
     open('pre.js', 'w').write('''
       Module.dynamicLibraries = ['side.wasm'];
@@ -3294,16 +3277,16 @@ window.close = function() {
         return ret;
       }
     ''')
-    run_process([PYTHON, EMCC, 'side.cpp', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'side.wasm'])
-    self.btest(self.in_dir('main.cpp'), '2', args=['-s', 'MAIN_MODULE=1', '-O2', '--pre-js', 'pre.js'])
+    run_process([PYTHON, EMCC, 'side.cpp', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'side.wasm', '-s', 'EXPORT_ALL=1'])
+    self.btest(self.in_dir('main.cpp'), '2', args=['-s', 'MAIN_MODULE=1', '-O2', '--pre-js', 'pre.js', '-s', 'EXPORT_ALL=1'])
 
     print('wasm in worker (we can read binary data synchronously there)')
 
     open('pre.js', 'w').write('''
       var Module = { dynamicLibraries: ['side.wasm'] };
   ''')
-    run_process([PYTHON, EMCC, 'side.cpp', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'side.wasm', '-s', 'WASM=1'])
-    self.btest(self.in_dir('main.cpp'), '2', args=['-s', 'MAIN_MODULE=1', '-O2', '--pre-js', 'pre.js', '-s', 'WASM=1', '--proxy-to-worker'])
+    run_process([PYTHON, EMCC, 'side.cpp', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'side.wasm', '-s', 'WASM=1', '-s', 'EXPORT_ALL=1'])
+    self.btest(self.in_dir('main.cpp'), '2', args=['-s', 'MAIN_MODULE=1', '-O2', '--pre-js', 'pre.js', '-s', 'WASM=1', '--proxy-to-worker', '-s', 'EXPORT_ALL=1'])
 
     print('wasm (will auto-preload since no sync binary reading)')
 
@@ -3311,10 +3294,10 @@ window.close = function() {
       Module.dynamicLibraries = ['side.wasm'];
   ''')
     # same wasm side module works
-    self.btest(self.in_dir('main.cpp'), '2', args=['-s', 'MAIN_MODULE=1', '-O2', '--pre-js', 'pre.js', '-s', 'WASM=1'])
+    self.btest(self.in_dir('main.cpp'), '2', args=['-s', 'MAIN_MODULE=1', '-O2', '--pre-js', 'pre.js', '-s', 'WASM=1', '-s', 'EXPORT_ALL=1'])
 
   @requires_graphics_hardware
-  @no_chrome("required synchronous wasm compilation")
+  @requires_sync_compilation
   def test_dynamic_link_glemu(self):
     open('pre.js', 'w').write('''
       Module.dynamicLibraries = ['side.wasm'];
@@ -3341,9 +3324,9 @@ window.close = function() {
         return (const char *)glGetString(GL_EXTENSIONS);
       }
     ''')
-    run_process([PYTHON, EMCC, 'side.cpp', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'side.wasm', '-lSDL'])
+    run_process([PYTHON, EMCC, 'side.cpp', '-s', 'SIDE_MODULE=1', '-O2', '-o', 'side.wasm', '-lSDL', '-s', 'EXPORT_ALL=1'])
 
-    self.btest(self.in_dir('main.cpp'), '1', args=['-s', 'MAIN_MODULE=1', '-O2', '-s', 'LEGACY_GL_EMULATION=1', '-lSDL', '-lGL', '--pre-js', 'pre.js'])
+    self.btest(self.in_dir('main.cpp'), '1', args=['-s', 'MAIN_MODULE=1', '-O2', '-s', 'LEGACY_GL_EMULATION=1', '-lSDL', '-lGL', '--pre-js', 'pre.js', '-s', 'EXPORT_ALL=1'])
 
   def test_memory_growth_during_startup(self):
     open('data.dat', 'w').write('X' * (30 * 1024 * 1024))
@@ -3584,6 +3567,7 @@ window.close = function() {
     self.btest(path_from_root('tests', 'pthread', 'test_pthread_proxying_in_futex_wait.cpp'), expected='0', args=['-O3', '-s', 'USE_PTHREADS=1', '-s', 'PTHREAD_POOL_SIZE=1'])
 
   # Test that sbrk() operates properly in multithreaded conditions
+  @flaky
   @requires_threads
   def test_pthread_sbrk(self):
     for aborting_malloc in [0, 1]:
@@ -3629,6 +3613,13 @@ window.close = function() {
     for mem_init_mode in [[], ['--memory-init-file', '0'], ['--memory-init-file', '1'], ['-s', 'MEM_INIT_METHOD=2', '-s', 'WASM=0']]:
       for args in [[], ['-O3']]:
         self.btest(path_from_root('tests', 'pthread', 'test_pthread_global_data_initialization.c'), expected='20', args=args + mem_init_mode + ['-s', 'USE_PTHREADS=1', '-s', 'PROXY_TO_PTHREAD=1', '-s', 'PTHREAD_POOL_SIZE=1'])
+
+  @requires_threads
+  @requires_sync_compilation
+  def test_pthread_global_data_initialization_in_sync_compilation_mode(self):
+    for mem_init_mode in [[], ['--memory-init-file', '0'], ['--memory-init-file', '1'], ['-s', 'MEM_INIT_METHOD=2', '-s', 'WASM=0']]:
+      args = ['-s', 'BINARYEN_ASYNC_COMPILATION=0']
+      self.btest(path_from_root('tests', 'pthread', 'test_pthread_global_data_initialization.c'), expected='20', args=args + mem_init_mode + ['-s', 'USE_PTHREADS=1', '-s', 'PROXY_TO_PTHREAD=1', '-s', 'PTHREAD_POOL_SIZE=1'])
 
   # Test that emscripten_get_now() reports coherent wallclock times across all pthreads, instead of each pthread independently reporting wallclock times since the launch of that pthread.
   @requires_threads
@@ -3778,7 +3769,7 @@ window.close = function() {
     self.btest('browser_test_hello_world.c', expected='0', args=['-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="interpret-binary"'])
     self.btest('browser_test_hello_world.c', expected='0', args=['-s', 'BINARYEN=1', '-s', 'BINARYEN_METHOD="interpret-binary"', '-O2'])
 
-  @no_chrome("chrome doesn't support synchronous compilation over 4k")
+  @requires_sync_compilation
   def test_binaryen_async(self):
     # notice when we use async compilation
     script = '''
@@ -3850,16 +3841,19 @@ window.close = function() {
   def test_utf16_textdecoder(self):
     self.btest('benchmark_utf16.cpp', expected='0', args=['--embed-file', path_from_root('tests/utf16_corpus.txt') + '@/utf16_corpus.txt', '-s', 'EXTRA_EXPORTED_RUNTIME_METHODS=["UTF16ToString","stringToUTF16","lengthBytesUTF16"]'])
 
+  @no_chrome('see #7374')
   @requires_threads
   def test_webgl_offscreen_canvas_in_pthread(self):
     for args in [[], ['-DTEST_CHAINED_WEBGL_CONTEXT_PASSING']]:
       self.btest('gl_in_pthread.cpp', expected='1', args=args + ['-s', 'USE_PTHREADS=1', '-s', 'PTHREAD_POOL_SIZE=2', '-s', 'OFFSCREENCANVAS_SUPPORT=1', '-lGL'])
 
+  @no_chrome('see #7374')
   @requires_threads
   def test_webgl_offscreen_canvas_in_mainthread_after_pthread(self):
     for args in [[], ['-DTEST_MAIN_THREAD_EXPLICIT_COMMIT']]:
       self.btest('gl_in_mainthread_after_pthread.cpp', expected='0', args=args + ['-s', 'USE_PTHREADS=1', '-s', 'PTHREAD_POOL_SIZE=2', '-s', 'OFFSCREENCANVAS_SUPPORT=1', '-lGL'])
 
+  @no_chrome('see #7374')
   def test_webgl_offscreen_canvas_only_in_pthread(self):
     self.btest('gl_only_in_pthread.cpp', expected='0', args=['-s', 'USE_PTHREADS=1', '-s', 'PTHREAD_POOL_SIZE=1', '-s', 'OFFSCREENCANVAS_SUPPORT=1', '-lGL'])
 

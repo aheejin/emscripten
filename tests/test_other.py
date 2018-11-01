@@ -108,6 +108,7 @@ class other(RunnerCore):
       run_process([PYTHON, compiler, '--generate-config', config_path])
       assert os.path.exists(config_path), 'A config file should have been created at %s' % config_path
       config_contents = open(config_path).read()
+      self.assertContained('EMSCRIPTEN_ROOT', config_contents)
       self.assertContained('LLVM_ROOT', config_contents)
       os.remove(config_path)
 
@@ -1881,6 +1882,7 @@ int f() {
           print('checking "%s" %s=%s' % (args, action, value))
           extra = ['-s', action + '_ON_UNDEFINED_SYMBOLS=%d' % value] if action else []
           proc = run_process([PYTHON, EMCC, os.path.join(self.get_dir(), 'main.cpp')] + extra + args, stderr=PIPE, check=False)
+          print(proc.stderr)
           if value or action is None:
             # The default is that we error in undefined symbols
             self.assertContained('error: undefined symbol: something', proc.stderr)
@@ -3004,7 +3006,8 @@ myreade(){
                  '--embed-file', 'proxyfs_embed.txt', '--pre-js', 'proxyfs_pre.js',
                  '-s', 'EXTRA_EXPORTED_RUNTIME_METHODS=["ccall", "cwrap"]',
                  '-s', 'BINARYEN_ASYNC_COMPILATION=0',
-                 '-s', 'MAIN_MODULE=1'])
+                 '-s', 'MAIN_MODULE=1',
+                 '-s', 'EXPORT_ALL=1'])
     # Following shutil.copyfile just prevent 'require' of node.js from caching js-object.
     # See https://nodejs.org/api/modules.html
     shutil.copyfile('proxyfs_test.js', 'proxyfs_test1.js')
@@ -6224,13 +6227,13 @@ int main(int argc, char** argv) {
           #include <stdio.h>
           void library_func() {
           #ifdef USE_PRINTF
-            printf("hello from library: %p\n", (int)&library_func);
+            printf("hello from library: %p\n", &library_func);
           #else
             puts("hello from library");
           #endif
           }
         ''')
-        run_process([PYTHON, EMCC, 'library.c', '-s', 'SIDE_MODULE=1', '-O2', '-o', library_file, '-s', 'WASM=' + str(wasm)] + library_args)
+        run_process([PYTHON, EMCC, 'library.c', '-s', 'SIDE_MODULE=1', '-O2', '-o', library_file, '-s', 'WASM=' + str(wasm), '-s', 'EXPORT_ALL=1'] + library_args)
         open('main.c', 'w').write(r'''
           #include <dlfcn.h>
           #include <stdio.h>
@@ -6266,12 +6269,14 @@ int main(int argc, char** argv) {
       full = test()
       # printf is not used in main, but libc was linked in, so it's there
       printf = test(library_args=['-DUSE_PRINTF'])
-      # dce in main, and side happens to be ok since it uses puts as well
-      dce = test(main_args=['-s', 'MAIN_MODULE=2'])
+      # dce in main, and it fails since puts is not exported
+      dce = test(main_args=['-s', 'MAIN_MODULE=2'], expected=('cannot', 'undefined'))
+      # with exporting, it works
+      dce = test(main_args=['-s', 'MAIN_MODULE=2', '-s', 'EXPORTED_FUNCTIONS=["_main", "_puts"]'])
       # printf is not used in main, and we dce, so we failz
       dce_fail = test(main_args=['-s', 'MAIN_MODULE=2'], library_args=['-DUSE_PRINTF'], expected=('cannot', 'undefined'))
       # exporting printf in main keeps it alive for the library
-      dce_save = test(main_args=['-s', 'MAIN_MODULE=2', '-s', 'EXPORTED_FUNCTIONS=["_main", "_printf"]'], library_args=['-DUSE_PRINTF'])
+      dce_save = test(main_args=['-s', 'MAIN_MODULE=2', '-s', 'EXPORTED_FUNCTIONS=["_main", "_printf", "_puts"]'], library_args=['-DUSE_PRINTF'])
 
       assert percent_diff(full[0], printf[0]) < 4
       assert percent_diff(dce[0], dce_fail[0]) < 4
@@ -6377,10 +6382,10 @@ main()
 
 ''')
 
-    run_process([PYTHON, EMCC, '-o', 'libhello1.wasm', 'hello1.c', '-s', 'SIDE_MODULE=1'])
-    run_process([PYTHON, EMCC, '-o', 'libhello2.wasm', 'hello2.c', '-s', 'SIDE_MODULE=1'])
-    run_process([PYTHON, EMCC, '-o', 'libhello3.wasm', 'hello3.c', '-s', 'SIDE_MODULE=1'])
-    run_process([PYTHON, EMCC, '-o', 'libhello4.wasm', 'hello4.c', '-s', 'SIDE_MODULE=1'])
+    run_process([PYTHON, EMCC, '-o', 'libhello1.wasm', 'hello1.c', '-s', 'SIDE_MODULE=1', '-s', 'EXPORT_ALL=1'])
+    run_process([PYTHON, EMCC, '-o', 'libhello2.wasm', 'hello2.c', '-s', 'SIDE_MODULE=1', '-s', 'EXPORT_ALL=1'])
+    run_process([PYTHON, EMCC, '-o', 'libhello3.wasm', 'hello3.c', '-s', 'SIDE_MODULE=1', '-s', 'EXPORT_ALL=1'])
+    run_process([PYTHON, EMCC, '-o', 'libhello4.wasm', 'hello4.c', '-s', 'SIDE_MODULE=1', '-s', 'EXPORT_ALL=1'])
     run_process([PYTHON, EMCC, '-o', 'main.js', 'main.c', '-s', 'MAIN_MODULE=1', '-s', 'TOTAL_MEMORY=' + str(32 * 1024 * 1024),
                  '--embed-file', 'libhello1.wasm@/lib/libhello1.wasm',
                  '--embed-file', 'libhello2.wasm@/usr/lib/libhello2.wasm',
@@ -6453,8 +6458,8 @@ main(int argc,char** argv)
 }
 ''')
 
-    run_process([PYTHON, EMCC, '-o', 'libhello1.js', 'hello1.c', '-s', 'SIDE_MODULE=1', '-s', 'WASM=0'])
-    run_process([PYTHON, EMCC, '-o', 'libhello2.js', 'hello2.c', '-s', 'SIDE_MODULE=1', '-s', 'WASM=0'])
+    run_process([PYTHON, EMCC, '-o', 'libhello1.js', 'hello1.c', '-s', 'SIDE_MODULE=1', '-s', 'WASM=0', '-s', 'EXPORT_ALL=1'])
+    run_process([PYTHON, EMCC, '-o', 'libhello2.js', 'hello2.c', '-s', 'SIDE_MODULE=1', '-s', 'WASM=0', '-s', 'EXPORT_ALL=1'])
     run_process([PYTHON, EMCC, '-o', 'main.js', 'main.c', '-s', 'MAIN_MODULE=1', '-s', 'WASM=0',
                  '--embed-file', 'libhello1.js',
                  '--embed-file', 'libhello2.js'])
@@ -8245,7 +8250,7 @@ int main() {
                  0, [],                         ['tempDoublePtr', 'waka'],     8,   0,    0, 0), # noqa; totally empty!
       # but we don't metadce with linkable code! other modules may want it
       (['-O3', '-s', 'MAIN_MODULE=1'],
-              1489, ['invoke_v'],               ['waka'],                 469663, 149, 1443, None), # noqa; don't compare the # of functions in a main module, which changes a lot
+              1489, ['invoke_v'],               ['waka'],                 226057,  30,   75, None), # noqa; don't compare the # of functions in a main module, which changes a lot
     ]) # noqa
 
     print('test on a minimal pure computational thing')
@@ -8286,9 +8291,9 @@ int main() {
     # test disabling of JS FFI legalization
     wasm_dis = os.path.join(Building.get_binaryen_bin(), 'wasm-dis')
     for (args, js_ffi) in [
-        (['-s', 'LEGALIZE_JS_FFI=1', '-s', 'SIDE_MODULE=1', '-O2'], True),
-        (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O2'], False),
-        (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O0'], False),
+        (['-s', 'LEGALIZE_JS_FFI=1', '-s', 'SIDE_MODULE=1', '-O2', '-s', 'EXPORT_ALL=1'], True),
+        (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O2', '-s', 'EXPORT_ALL=1'], False),
+        (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O0', '-s', 'EXPORT_ALL=1'], False),
         (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'WARN_ON_UNDEFINED_SYMBOLS=0', '-O0'], False),
       ]:
       if self.is_wasm_backend() and 'SIDE_MODULE=1' in args:
