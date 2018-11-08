@@ -1560,8 +1560,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         assert(os.path.exists(output_file))
 
         # HACK (aheejin): for easy debugging
-        shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
-                                 output_file)
+        #shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
+        #                         output_file)
 
       # First, generate LLVM bitcode. For each input file, we get base.o with bitcode
       for i, input_file in input_files:
@@ -2658,11 +2658,11 @@ def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
   if shared.Settings.SIDE_MODULE:
     wso = shared.WebAssembly.make_shared_library(final, wasm_binary_target)
     # replace the wasm binary output with the dynamic library. TODO: use a specific suffix for such files?
-    shutil.move(wso, wasm_binary_target)
     mylog.log_move(wso, wasm_binary_target)
+    shutil.move(wso, wasm_binary_target)
     if not shared.Settings.WASM_BACKEND and not DEBUG:
-      os.unlink(asm_target) # we don't need the asm.js, it can just confuse
       mylog.log_remove(asm_target)
+      os.unlink(asm_target) # we don't need the asm.js, it can just confuse
     sys.exit(0) # and we are done.
   if options.opt_level >= 2:
     # minify the JS
