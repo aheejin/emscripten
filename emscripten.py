@@ -30,6 +30,7 @@ from tools.response_file import substitute_response_files
 from tools.shared import WINDOWS, asstr, path_from_root, exit_with_error
 from tools.toolchain_profiler import ToolchainProfiler
 from tools import mylog
+from tools.minified_js_name_generator import MinifiedJsNameGenerator
 
 if __name__ == '__main__':
   ToolchainProfiler.record_process_start()
@@ -224,7 +225,6 @@ def compiler_glue(metadata, libraries, compiler_engine, temp_files, DEBUG):
 
   optimize_syscalls(metadata['declares'], DEBUG)
   update_settings_glue(metadata)
-  assert not (metadata['simd'] and shared.Settings.SPLIT_MEMORY), 'SIMD is used, but not supported in SPLIT_MEMORY'
 
   assert not (metadata['simd'] and shared.Settings.WASM), 'SIMD is used, but not supported in WASM mode yet'
   assert not (shared.Settings.SIMD and shared.Settings.WASM), 'SIMD is requested, but not supported in WASM mode yet'
@@ -308,14 +308,31 @@ def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data,
   if shared.Settings.RELOCATABLE:
     global_funcs += ['g$' + extern for extern in metadata['externs']]
 
+  # Tracks the set of used (minified) function names in
+  # JS symbols imported to asm.js module.
+  minified_js_names = MinifiedJsNameGenerator()
+
+  # Converts list of imports ['foo', 'bar', ...] to a dictionary of
+  # name mappings in form { 'minified': 'unminified', ... }
+  def define_asmjs_import_names(imports):
+    if shared.Settings.MINIFY_ASMJS_IMPORT_NAMES:
+      return [(minified_js_names.generate(), i) for i in imports]
+    else:
+      return [(i, i) for i in imports]
+
+  basic_funcs = define_asmjs_import_names(basic_funcs)
+  global_funcs = define_asmjs_import_names(global_funcs)
+  basic_vars = define_asmjs_import_names(basic_vars)
+  global_vars = define_asmjs_import_names(global_vars)
+
   bg_funcs = basic_funcs + global_funcs
   bg_vars = basic_vars + global_vars
   asm_global_funcs = create_asm_global_funcs(bg_funcs, metadata)
   asm_global_vars = create_asm_global_vars(bg_vars)
 
   the_global = create_the_global(metadata)
-  sending_vars = basic_funcs + global_funcs + basic_vars + global_vars
-  sending = '{ ' + ', '.join(['"' + math_fix(s) + '": ' + s for s in sending_vars]) + ' }'
+  sending_vars = bg_funcs + bg_vars
+  sending = '{ ' + ', '.join(['"' + math_fix(minified) + '": ' + unminified for (minified, unminified) in sending_vars]) + ' }'
 
   receiving = create_receiving(function_table_data, function_tables_defs,
                                exported_implemented_functions)
@@ -584,18 +601,13 @@ def memory_and_global_initializers(pre, metadata, mem_init):
   staticbump = metadata['staticBump']
   while staticbump % 16 != 0:
     staticbump += 1
-  split_memory = ''
-  if shared.Settings.SPLIT_MEMORY:
-    split_memory = ('assert(STATICTOP < SPLIT_MEMORY, "SPLIT_MEMORY size must be big enough so the '
-                    'entire static memory, need " + STATICTOP);')
   pthread = ''
   if shared.Settings.USE_PTHREADS:
     pthread = 'if (!ENVIRONMENT_IS_PTHREAD)'
   pre = pre.replace('STATICTOP = STATIC_BASE + 0;', '''\
-STATICTOP = STATIC_BASE + {staticbump};{split_memory}
+STATICTOP = STATIC_BASE + {staticbump};
 /* global initializers */ {pthread} __ATINIT__.push({global_initializers});
 {mem_init}'''.format(staticbump=staticbump,
-                     split_memory=split_memory,
                      pthread=pthread,
                      global_initializers=global_initializers,
                      mem_init=mem_init))
@@ -1086,7 +1098,7 @@ def create_asm_global_funcs(bg_funcs, metadata):
     maths += ['Math.fround']
 
   asm_global_funcs = ''.join(['  var ' + g.replace('.', '_') + '=global' + access_quote(g) + ';\n' for g in maths])
-  asm_global_funcs += ''.join(['  var ' + g + '=env' + access_quote(math_fix(g)) + ';\n' for g in bg_funcs])
+  asm_global_funcs += ''.join(['  var ' + unminified + '=env' + access_quote(math_fix(minified)) + ';\n' for (minified, unminified) in bg_funcs])
   asm_global_funcs += global_simd_funcs(access_quote, metadata)
   if shared.Settings.USE_PTHREADS:
     asm_global_funcs += ''.join(['  var Atomics_' + ty + '=global' + access_quote('Atomics') + access_quote(ty) + ';\n' for ty in ['load', 'store', 'exchange', 'compareExchange', 'add', 'sub', 'and', 'or', 'xor']])
@@ -1094,7 +1106,7 @@ def create_asm_global_funcs(bg_funcs, metadata):
 
 
 def create_asm_global_vars(bg_vars):
-  asm_global_vars = ''.join(['  var ' + g + '=env' + access_quote(g) + '|0;\n' for g in bg_vars])
+  asm_global_vars = ''.join(['  var ' + unminified + '=env' + access_quote(minified) + '|0;\n' for (minified, unminified) in bg_vars])
   if shared.Settings.WASM and shared.Settings.SIDE_MODULE:
     # wasm side modules internally define their stack, these are set at module startup time
     asm_global_vars += '\n  var STACKTOP = 0, STACK_MAX = 0;\n'
@@ -1371,7 +1383,8 @@ def create_basic_vars(exported_implemented_functions, forwarded_json, metadata):
     if not (shared.Settings.WASM and shared.Settings.SIDE_MODULE):
       basic_vars += ['gb', 'fb']
     else:
-      basic_vars += ['memoryBase', 'tableBase'] # wasm side modules have a specific convention for these
+      # wasm side modules have a specific convention for these
+      basic_vars += ['__memory_base', '__table_base']
 
   # See if we need ASYNCIFY functions
   # We might not need them even if ASYNCIFY is enabled
@@ -1772,38 +1785,7 @@ def create_asm_end(exports):
 
 
 def create_first_in_asm():
-  first_in_asm = ''
-  if shared.Settings.SPLIT_MEMORY:
-    if not shared.Settings.SAFE_SPLIT_MEMORY:
-      first_in_asm += ''.join([make_get_set(info) for info in HEAP_TYPE_INFOS]) + '\n'
-    first_in_asm += 'buffer = new ArrayBuffer(32); // fake\n'
-  return first_in_asm
-
-
-def make_get_set(info):
-  """Generates get*/set* functions for the different heap types.
-
-  Generated symbols:
-    get8 get16 get32 getU8 getU16 getU32 getF32 getF64
-    set8 set16 set32 setU8 setU16 setU32 setF32 setF64
-  """
-  access = ('{name}s[ptr >> SPLIT_MEMORY_BITS][(ptr & SPLIT_MEMORY_MASK) >> {shift}]'
-            .format(name=info.heap_name, shift=info.shift_amount))
-  # TODO: fround when present for Float32
-  return '''
-function get{short}(ptr) {{
-  ptr = ptr | 0;
-  return {coerced_access};
-}}
-function set{short}(ptr, value) {{
-  ptr = ptr | 0;
-  value = {coerced_value};
-  {access} = value;
-}}'''.format(
-    short=info.short_name(),
-    coerced_value=info.coerce('value'),
-    access=access,
-    coerced_access=info.coerce(access))
+  return ''
 
 
 def create_memory_views():
@@ -1914,10 +1896,9 @@ def emscript_wasm_backend(infile, outfile, libraries, compiler_engine,
   staticbump = metadata['staticBump']
   while staticbump % 16 != 0:
     staticbump += 1
-  pre = pre.replace('STATICTOP = STATIC_BASE + 0;', '''STATICTOP = STATIC_BASE + %d;%s
+  pre = pre.replace('STATICTOP = STATIC_BASE + 0;', '''STATICTOP = STATIC_BASE + %d;
 /* global initializers */ %s __ATINIT__.push(%s);
 ''' % (staticbump,
-       'assert(STATICTOP < SPLIT_MEMORY, "SPLIT_MEMORY size must be big enough so the entire static memory, need " + STATICTOP);' if shared.Settings.SPLIT_MEMORY else '',
        'if (!ENVIRONMENT_IS_PTHREAD)' if shared.Settings.USE_PTHREADS else '',
        global_initializers))
 

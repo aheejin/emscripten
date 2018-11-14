@@ -943,20 +943,6 @@ var EMTERPRETIFY_ADVISE = 0;
 // and the advise mode will include them in its analysis.
 var EMTERPRETIFY_SYNCLIST = [];
 
-// If > 0, we split memory into chunks, of the size given in this parameter.
-//  * TOTAL_MEMORY becomes the maximum amount of memory, as chunks are allocated on
-//    demand. That means this achieves a result similar to ALLOW_MEMORY_GROWTH, but
-//    better since it can free chunks in the middle. You still to set
-//    ALLOW_MEMORY_GROWTH if you want memory to grow beyond the initial TOTAL_MEMORY
-//    target.
-//  * Larger SPLIT_MEMORY sizes are generally faster to run.
-// TODO: more docs
-// TODO: add malloc-split to embuilder
-var SPLIT_MEMORY = 0;
-
-// Similar to SAFE_HEAP, but for SPLIT_MEMORY.
-var SAFE_SPLIT_MEMORY = 0;
-
 // whether js opts will be run, after the main compiler
 var RUNNING_JS_OPTS = 0;
 
@@ -1285,3 +1271,8 @@ var ENVIRONMENT_MAY_BE_WORKER = 1;
 var ENVIRONMENT_MAY_BE_NODE = 1;
 var ENVIRONMENT_MAY_BE_SHELL = 1;
 var ENVIRONMENT_MAY_BE_WEB_OR_WORKER = 1;
+
+// Internal: passes information to emscripten.py about whether to minify
+// JS -> asm.js import names. Controlled by optimization level, enabled
+// at -O1 and higher, but disabled at -g2 and higher.
+var MINIFY_ASMJS_IMPORT_NAMES = 0;
