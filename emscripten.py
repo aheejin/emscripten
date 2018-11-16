@@ -32,13 +32,15 @@ from tools.toolchain_profiler import ToolchainProfiler
 from tools import mylog
 from tools.minified_js_name_generator import MinifiedJsNameGenerator
 
+logger = logging.getLogger('emscripten')
+
 if __name__ == '__main__':
   ToolchainProfiler.record_process_start()
 
 STDERR_FILE = os.environ.get('EMCC_STDERR_FILE')
 if STDERR_FILE:
   STDERR_FILE = os.path.abspath(STDERR_FILE)
-  logging.info('logging stderr in js compiler phase into %s' % STDERR_FILE)
+  logger.info('logging stderr in js compiler phase into %s' % STDERR_FILE)
   STDERR_FILE = open(STDERR_FILE, 'w')
 
 
@@ -117,13 +119,13 @@ def compile_js(infile, temp_files, DEBUG):
     backend_args = create_backend_args(infile, temp_js)
 
     if DEBUG:
-      logging.debug('emscript: llvm backend: ' + ' '.join(backend_args))
+      logger.debug('emscript: llvm backend: ' + ' '.join(backend_args))
       t = time.time()
     with ToolchainProfiler.profile_block('emscript_llvm_backend'):
       mylog.log_cmd(backend_args, stdout=subprocess.PIPE)
       jsrun.timeout_run(subprocess.Popen(backend_args, stdout=subprocess.PIPE, universal_newlines=True), note_args=backend_args)
     if DEBUG:
-      logging.debug('  emscript: llvm backend took %s seconds' % (time.time() - t))
+      logger.debug('  emscript: llvm backend took %s seconds' % (time.time() - t))
 
     # Split up output
     backend_output = open(temp_js).read()
@@ -151,7 +153,7 @@ def parse_backend_output(backend_output, DEBUG):
   try:
     metadata = json.loads(metadata_raw, object_pairs_hook=OrderedDict)
   except:
-    logging.error('emscript: failure to parse metadata output from compiler backend. raw output is: \n' + metadata_raw)
+    logger.error('emscript: failure to parse metadata output from compiler backend. raw output is: \n' + metadata_raw)
     raise
 
   # functions marked llvm.used in the code are exports requested by the user
@@ -188,7 +190,7 @@ def fixup_functions(funcs, metadata):
     # undercounts by one, but that is what we want
     table_sizes[k] = str(v.count(','))
     # if shared.Settings.ASSERTIONS >= 2 and table_sizes[k] == 0:
-    #   logging.warning('no function pointers with signature ' + k + ', but there is a call, which will abort if it occurs (this can result from undefined behavior, check for compiler warnings on your source files and consider -Werror)'
+    #   logger.warning('no function pointers with signature ' + k + ', but there is a call, which will abort if it occurs (this can result from undefined behavior, check for compiler warnings on your source files and consider -Werror)'
   funcs = re.sub(r"#FM_(\w+)#", lambda m: table_sizes[m.groups(0)[0]], funcs)
 
   # fix +float into float.0, if not running js opts
@@ -210,7 +212,7 @@ def fixup_functions(funcs, metadata):
 
 def compiler_glue(metadata, libraries, compiler_engine, temp_files, DEBUG):
   if DEBUG:
-    logging.debug('emscript: js compiler glue')
+    logger.debug('emscript: js compiler glue')
     t = time.time()
 
   # Settings changes
@@ -232,14 +234,14 @@ def compiler_glue(metadata, libraries, compiler_engine, temp_files, DEBUG):
   glue, forwarded_data = compile_settings(compiler_engine, libraries, temp_files)
 
   if DEBUG:
-    logging.debug('  emscript: glue took %s seconds' % (time.time() - t))
+    logger.debug('  emscript: glue took %s seconds' % (time.time() - t))
 
   return glue, forwarded_data
 
 
 def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data, outfile, DEBUG):
   if DEBUG:
-    logging.debug('emscript: python processing: function tables and exports')
+    logger.debug('emscript: python processing: function tables and exports')
     t = time.time()
 
   forwarded_json = json.loads(forwarded_data)
@@ -289,7 +291,11 @@ def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data,
   # List of function signatures of used 'invoke_xxx()' functions in the application
   # For backwards compatibility if one might be using a mismatching Emscripten compiler version, if 'invokeFuncs' is not present in metadata,
   # use the full list of signatures in function table and generate invoke_() functions for all signatures in the program (producing excessive code size)
-  invoke_function_names = metadata['invokeFuncs'] if 'invokeFuncs' in metadata else ['invoke_' + x for x in function_table_sigs]
+  # we must also emit the full list if we are emitting code that can be linked later
+  if 'invokeFuncs' in metadata and not shared.Settings.LINKABLE:
+    invoke_function_names = metadata['invokeFuncs']
+  else:
+    invoke_function_names = ['invoke_' + x for x in function_table_sigs]
 
   asm_setup = create_asm_setup(debug_tables, function_table_data, invoke_function_names, metadata)
   basic_funcs = create_basic_funcs(function_table_sigs, invoke_function_names)
@@ -354,11 +360,11 @@ def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data,
     )
 
   if DEBUG:
-    logging.debug('asm text sizes' + str([
+    logger.debug('asm text sizes' + str([
       [len(s) for s in funcs_js], len(asm_setup), len(asm_global_vars), len(asm_global_funcs), len(pre_tables),
       len('\n'.join(function_tables_impls)), len(function_tables_defs) + (function_tables_defs.count('\n') * len('  ')),
       len(exports), len(the_global), len(sending), len(receiving)]))
-    logging.debug('  emscript: python processing: function tables and exports took %s seconds' % (time.time() - t))
+    logger.debug('  emscript: python processing: function tables and exports took %s seconds' % (time.time() - t))
 
   bundled_args = (funcs_js, asm_setup, the_global, sending, receiving, asm_global_vars,
                   asm_global_funcs, pre_tables, final_function_tables, exports)
@@ -370,14 +376,14 @@ def finalize_output(outfile, post, function_table_data, bundled_args, metadata, 
   module = create_module_asmjs(function_table_sigs, metadata, *bundled_args)
 
   if DEBUG:
-    logging.debug('emscript: python processing: finalize')
+    logger.debug('emscript: python processing: finalize')
     t = time.time()
 
   write_output_file(outfile, post, module)
   module = None
 
   if DEBUG:
-    logging.debug('  emscript: python processing: finalize took %s seconds' % (time.time() - t))
+    logger.debug('  emscript: python processing: finalize took %s seconds' % (time.time() - t))
 
   write_cyberdwarf_data(outfile, metadata)
 
@@ -514,7 +520,7 @@ def optimize_syscalls(declares, DEBUG):
   syscalls = [int(s) for s in syscall_numbers if is_int(s)]
   if set(syscalls).issubset(set([6, 54, 140, 146])): # close, ioctl, llseek, writev
     if DEBUG:
-      logging.debug('very limited syscalls (%s) so disabling full filesystem support', ', '.join(str(s) for s in syscalls))
+      logger.debug('very limited syscalls (%s) so disabling full filesystem support', ', '.join(str(s) for s in syscalls))
     shared.Settings.FILESYSTEM = 0
 
 
@@ -536,7 +542,7 @@ def update_settings_glue(metadata):
     shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE = [] # we don't need any JS library contents in side modules
 
   if metadata.get('cantValidate') and shared.Settings.ASM_JS != 2:
-    logging.warning('disabling asm.js validation due to use of non-supported features: ' + metadata['cantValidate'])
+    logger.warning('disabling asm.js validation due to use of non-supported features: ' + metadata['cantValidate'])
     shared.Settings.ASM_JS = 2
 
   all_funcs = shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE + [shared.JS.to_nice_ident(d) for d in metadata['declares']]
@@ -547,7 +553,7 @@ def update_settings_glue(metadata):
   if metadata['simd']:
     shared.Settings.SIMD = 1
     if shared.Settings.ASM_JS != 2:
-      logging.warning('disabling asm.js validation due to use of SIMD')
+      logger.warning('disabling asm.js validation due to use of SIMD')
       shared.Settings.ASM_JS = 2
 
   shared.Settings.MAX_GLOBAL_ALIGN = metadata['maxGlobalAlign']
@@ -669,7 +675,7 @@ def check_all_implemented(all_implemented, pre):
       if shared.Settings.ERROR_ON_UNDEFINED_SYMBOLS:
         exit_with_error('undefined exported function: "%s"', requested)
       elif shared.Settings.WARN_ON_UNDEFINED_SYMBOLS:
-        logging.warning('undefined exported function: "%s"', requested)
+        logger.warning('undefined exported function: "%s"', requested)
 
 
 def is_already_implemented(requested, pre, all_implemented):
@@ -1880,7 +1886,7 @@ def emscript_wasm_backend(infile, outfile, libraries, compiler_engine,
   # js compiler
 
   if DEBUG:
-    logging.debug('emscript: js compiler glue')
+    logger.debug('emscript: js compiler glue')
 
   update_settings_glue(metadata)
 
@@ -1888,7 +1894,7 @@ def emscript_wasm_backend(infile, outfile, libraries, compiler_engine,
     t = time.time()
   glue, forwarded_data = compile_settings(compiler_engine, libraries, temp_files)
   if DEBUG:
-    logging.debug('  emscript: glue took %s seconds' % (time.time() - t))
+    logger.debug('  emscript: glue took %s seconds' % (time.time() - t))
     t = time.time()
 
   forwarded_json = json.loads(forwarded_data)
@@ -1978,7 +1984,7 @@ def finalize_wasm(temp_files, infile, outfile, DEBUG):
                      '--dwarfdump=' + shared.LLVM_DWARFDUMP,
                      '-o',  base_source_map]
     if not shared.Settings.SOURCE_MAP_BASE:
-      logging.warn("Wasm source map won't be usable in a browser without --source-map-base")
+      logger.warn("Wasm source map won't be usable in a browser without --source-map-base")
     shared.check_call(sourcemap_cmd)
     debug_copy(base_source_map, 'base_wasm.map')
 
@@ -2005,7 +2011,7 @@ def finalize_wasm(temp_files, infile, outfile, DEBUG):
 def create_metadata_wasm(metadata_raw, DEBUG):
   metadata = load_metadata(metadata_raw)
   if DEBUG:
-    logging.debug("Metadata parsed: " + pprint.pformat(metadata))
+    logger.debug("Metadata parsed: " + pprint.pformat(metadata))
   return metadata
 
 
@@ -2200,7 +2206,7 @@ def load_metadata(metadata_raw):
   try:
     metadata_json = json.loads(metadata_raw)
   except Exception:
-    logging.error('emscript: failure to parse metadata output from wasm-emscripten-finalize. raw output is: \n' + metadata_raw)
+    logger.error('emscript: failure to parse metadata output from wasm-emscripten-finalize. raw output is: \n' + metadata_raw)
     raise
 
   metadata = {
@@ -2338,7 +2344,7 @@ def _main(args):
   positional = keywords.infile
 
   if len(positional) != 1:
-    logging.error('Must provide exactly one positional argument. Got ' + str(len(positional)) + ': "' + '", "'.join(positional) + '"')
+    logger.error('Must provide exactly one positional argument. Got ' + str(len(positional)) + ': "' + '", "'.join(positional) + '"')
     return 1
 
   keywords.infile = os.path.abspath(positional[0])

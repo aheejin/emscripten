@@ -92,6 +92,24 @@ def encode_leb(number):
   return struct.pack('<i', number)[:1]
 
 
+# look for emscripten-version.txt files under or alongside the llvm source dir
+def get_fastcomp_src_dir():
+  d = LLVM_ROOT
+  emroot = path_from_root() # already abspath
+  # look for version file in llvm repo, making sure not to mistake the emscripten repo for it
+  while d != os.path.dirname(d):
+    d = os.path.abspath(d)
+    # when the build directory lives below the source directory
+    if os.path.exists(os.path.join(d, 'emscripten-version.txt')) and not d == emroot:
+      return d
+    # when the build directory lives alongside the source directory
+    elif os.path.exists(os.path.join(d, 'src', 'emscripten-version.txt')) and not os.path.join(d, 'src') == emroot:
+      return os.path.join(d, 'src')
+    else:
+      d = os.path.dirname(d)
+  return None
+
+
 class other(RunnerCore):
   # Utility to run a simple test in this suite. This receives a directory which
   # should contain a test.cpp and test.out files, compiles the cpp, and runs it
@@ -3696,7 +3714,7 @@ int main()
     grep_path = Building.which('grep')
     if not grep_path:
       self.skipTest('Skipping other.test_llvm_lit: This test needs the "grep" tool in PATH. If you are using emsdk on Windows, you can obtain it via installing and activating the gnu package.')
-    llvm_src = shared.get_fastcomp_src_dir()
+    llvm_src = get_fastcomp_src_dir()
     LLVM_LIT = os.path.join(LLVM_ROOT, 'llvm-lit.py')
     if not os.path.exists(LLVM_LIT):
       LLVM_LIT = os.path.join(LLVM_ROOT, 'llvm-lit')
@@ -6141,7 +6159,7 @@ int main(int argc, char** argv) {
 
     self.assertGreater(vector, 1000)
     # we can strip out almost all of libcxx when just using vector
-    self.assertLess(2.5 * vector, iostream)
+    self.assertLess(2.4 * vector, iostream)
 
   @no_wasm_backend('relies on EMULATED_FUNCTION_POINTERS')
   def test_emulated_function_pointers(self):
@@ -7921,9 +7939,9 @@ int main() {
 
     print('test on hello world')
     test(path_from_root('tests', 'hello_world.cpp'), [
-      ([],      23, ['abort', 'tempDoublePtr'], ['waka'],                  46505,  24,   19, 62), # noqa
-      (['-O1'], 18, ['abort', 'tempDoublePtr'], ['waka'],                  12630,  16,   17, 34), # noqa
-      (['-O2'], 18, ['abort', 'tempDoublePtr'], ['waka'],                  12616,  16,   17, 33), # noqa
+      ([],      21, ['abort', 'tempDoublePtr'], ['waka'],                  46505,  24,   19, 62), # noqa
+      (['-O1'], 16, ['abort', 'tempDoublePtr'], ['waka'],                  12630,  16,   17, 34), # noqa
+      (['-O2'], 16, ['abort', 'tempDoublePtr'], ['waka'],                  12616,  16,   17, 33), # noqa
       (['-O3'],  7, [],                         [],  2690,  10,    2, 21), # noqa; in -O3, -Os and -Oz we metadce
       (['-Os'],  7, [],                         [],  2690,  10,    2, 21), # noqa
       (['-Oz'],  7, [],                         [],  2690,  10,    2, 21), # noqa
@@ -7932,7 +7950,7 @@ int main() {
                  0, [],                         [],     8,   0,    0, 0), # noqa; totally empty!
       # but we don't metadce with linkable code! other modules may want it
       (['-O3', '-s', 'MAIN_MODULE=1'],
-              1494, [],                         [], 226057,  30,   75, None), # noqa; don't compare the # of functions in a main module, which changes a lot
+              1503, [],                         [], 226057,  30,   75, None), # noqa; don't compare the # of functions in a main module, which changes a lot
     ]) # noqa
 
     print('test on a minimal pure computational thing')
@@ -7945,7 +7963,7 @@ int main() {
       }
       ''')
     test('minimal.c', [
-      ([],      23, ['abort', 'tempDoublePtr'], ['waka'],                  22712, 24, 18, 31), # noqa
+      ([],      21, ['abort', 'tempDoublePtr'], ['waka'],                  22712, 24, 18, 31), # noqa
       (['-O1'], 11, ['abort', 'tempDoublePtr'], ['waka'],                  10450,  9, 15, 15), # noqa
       (['-O2'], 11, ['abort', 'tempDoublePtr'], ['waka'],                  10440,  9, 15, 15), # noqa
       # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
@@ -7956,9 +7974,9 @@ int main() {
 
     print('test on libc++: see effects of emulated function pointers')
     test(path_from_root('tests', 'hello_libcxx.cpp'), [
-      (['-O2'], 53, ['abort', 'tempDoublePtr'], ['waka'],                 208677,  30,   44, 661), # noqa
+      (['-O2'], 34, ['abort', 'tempDoublePtr'], ['waka'],                 208677,  30,   44, 661), # noqa
       (['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
-                54, ['abort', 'tempDoublePtr'], ['waka'],                 208677,  30,   25, 622), # noqa
+                34, ['abort', 'tempDoublePtr'], ['waka'],                 208677,  30,   25, 622), # noqa
     ]) # noqa
 
   # ensures runtime exports work, even with metadce
