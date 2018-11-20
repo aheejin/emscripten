@@ -92,18 +92,17 @@ def encode_leb(number):
   return struct.pack('<i', number)[:1]
 
 
-# look for emscripten-version.txt files under or alongside the llvm source dir
 def get_fastcomp_src_dir():
+  """Locate fastcomp source tree by searching realtive to LLVM_ROOT."""
   d = LLVM_ROOT
-  emroot = path_from_root() # already abspath
-  # look for version file in llvm repo, making sure not to mistake the emscripten repo for it
+  key_file = 'readme-emscripten-fastcomp.txt'
   while d != os.path.dirname(d):
     d = os.path.abspath(d)
     # when the build directory lives below the source directory
-    if os.path.exists(os.path.join(d, 'emscripten-version.txt')) and not d == emroot:
+    if os.path.exists(os.path.join(d, key_file)):
       return d
     # when the build directory lives alongside the source directory
-    elif os.path.exists(os.path.join(d, 'src', 'emscripten-version.txt')) and not os.path.join(d, 'src') == emroot:
+    elif os.path.exists(os.path.join(d, 'src', key_file)):
       return os.path.join(d, 'src')
     else:
       d = os.path.dirname(d)
@@ -3584,7 +3583,7 @@ int main() {
       print(name, args)
       self.clear()
       run_process([PYTHON, EMCC, path_from_root('system', 'lib', 'dlmalloc.c')] + args, stdout=PIPE, stderr=PIPE)
-      sizes[name] = os.stat('dlmalloc.o').st_size
+      sizes[name] = os.path.getsize('dlmalloc.o')
     print(sizes)
     # -c should not affect code size
     for name in ['0', '1', '2', '3', 's', 'z']:
@@ -3713,12 +3712,15 @@ int main()
   def test_llvm_lit(self):
     grep_path = Building.which('grep')
     if not grep_path:
-      self.skipTest('Skipping other.test_llvm_lit: This test needs the "grep" tool in PATH. If you are using emsdk on Windows, you can obtain it via installing and activating the gnu package.')
+      self.skipTest('This test needs the "grep" tool in PATH. If you are using emsdk on Windows, you can obtain it via installing and activating the gnu package.')
     llvm_src = get_fastcomp_src_dir()
+    if not llvm_src:
+      self.skipTest('llvm source tree not found')
     LLVM_LIT = os.path.join(LLVM_ROOT, 'llvm-lit.py')
     if not os.path.exists(LLVM_LIT):
       LLVM_LIT = os.path.join(LLVM_ROOT, 'llvm-lit')
-      self.assertTrue(os.path.exists(LLVM_LIT))
+      if not os.path.exists(LLVM_LIT):
+        self.skipTest('llvm-lit not found; fastcomp directory is most likely prebuilt')
     cmd = [PYTHON, LLVM_LIT, '-v', os.path.join(llvm_src, 'test', 'CodeGen', 'JS')]
     print(cmd)
     run_process(cmd)
@@ -5200,11 +5202,11 @@ main(const int argc, const char * const * const argv)
     FS_MARKER = 'var FS'
     # fopen forces full filesystem support
     run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world_fopen.c')])
-    yes_size = os.stat('a.out.js').st_size
+    yes_size = os.path.getsize('a.out.js')
     self.assertContained('hello, world!', run_js('a.out.js'))
     self.assertContained(FS_MARKER, open('a.out.js').read())
     run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c')])
-    no_size = os.stat('a.out.js').st_size
+    no_size = os.path.getsize('a.out.js')
     self.assertContained('hello, world!', run_js('a.out.js'))
     self.assertNotContained(FS_MARKER, open('a.out.js').read())
     print('yes fs, no fs:', yes_size, no_size)
@@ -6280,10 +6282,10 @@ int main(int argc, char** argv) {
         ''' % library_file)
         run_process([PYTHON, EMCC, 'main.c', '-s', 'MAIN_MODULE=1', '--embed-file', library_file, '-O2', '-s', 'WASM=' + str(wasm)] + main_args)
         self.assertContained(expected, run_js('a.out.js', assert_returncode=None, stderr=STDOUT))
-        size = os.stat('a.out.js').st_size
+        size = os.path.getsize('a.out.js')
         if wasm:
-          size += os.stat('a.out.wasm').st_size
-        side_size = os.stat(library_file).st_size
+          size += os.path.getsize('a.out.wasm')
+        side_size = os.path.getsize(library_file)
         print('  sizes:', size, side_size)
         return (size, side_size)
 
@@ -6816,7 +6818,7 @@ Resolved: "/" => "/"
       print(cmd)
       run_process(cmd)
       self.assertContained('hello, world!', run_js('a.out.js'))
-      sizes[lto] = os.stat('a.out.wasm').st_size
+      sizes[lto] = os.path.getsize('a.out.wasm')
     print(sizes)
 
     # LTO sizes should be distinct
@@ -6866,7 +6868,7 @@ Resolved: "/" => "/"
           cmd += ['-s', 'MALLOC="%s"' % malloc]
         print(cmd)
         run_process(cmd)
-        sizes[name] = os.stat('a.out.wasm').st_size
+        sizes[name] = os.path.getsize('a.out.wasm')
       print(sizes)
       # dlmalloc is the default
       self.assertEqual(sizes['dlmalloc'], sizes['default'])
@@ -6969,7 +6971,7 @@ int main() {
 }
 ''')
     run_process([PYTHON, EMCC, 'src.c', '-O2', '-g'])
-    size = os.stat('a.out.wasm').st_size
+    size = os.path.getsize('a.out.wasm')
     # size should be much smaller than the size of that zero-initialized buffer
     assert size < (123456 / 2), size
 
@@ -7646,7 +7648,7 @@ int main() {
       else:
         # should be just one name, for the export
         self.assertEqual(code.count(b'malloc'), 1)
-      sizes[str(args)] = os.stat('a.out.wasm').st_size
+      sizes[str(args)] = os.path.getsize('a.out.wasm')
     print(sizes)
     self.assertLess(sizes["['-O2']"], sizes["['-O2', '--profiling-funcs']"], 'when -profiling-funcs, the size increases due to function names')
 
@@ -7843,7 +7845,7 @@ int main() {
         asm2wasm_line = asm2wasm_line.strip() + ' ' # ensure it ends with a space, for simpler searches below
         print('|' + asm2wasm_line + '|')
         assert expect == (' --ignore-implicit-traps ' in asm2wasm_line)
-        sizes.append(os.stat('a.out.wasm').st_size)
+        sizes.append(os.path.getsize('a.out.wasm'))
     print('sizes:', sizes)
 
   def test_binaryen_methods(self):
@@ -7924,7 +7926,7 @@ int main() {
         for not_exists in expected_not_exists:
           self.assertNotIn(not_exists, sent)
         self.assertEqual(len(sent), expected_len)
-        wasm_size = os.stat('a.out.wasm').st_size
+        wasm_size = os.path.getsize('a.out.wasm')
         ratio = abs(wasm_size - expected_wasm_size) / float(expected_wasm_size)
         print('  seen wasm size: %d (expected: %d), ratio to expected: %f' % (wasm_size, expected_wasm_size, ratio))
         self.assertLess(ratio, 0.05)
