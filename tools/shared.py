@@ -152,7 +152,10 @@ class Py2CompletedProcess:
       raise Py2CalledProcessError(returncode=self.returncode, cmd=self.args, output=self.stdout, stderr=self.stderr)
 
 
-def run_base(cmd, check=False, input=None, *args, **kw):
+def run_process(cmd, check=True, input=None, universal_newlines=True, *args, **kw):
+  mylog.log_cmd(cmd)
+  kw.setdefault('universal_newlines', True)
+
   if hasattr(subprocess, "run"):
     return subprocess.run(cmd, check=check, input=input, *args, **kw)
 
@@ -165,11 +168,6 @@ def run_base(cmd, check=False, input=None, *args, **kw):
   if check:
     result.check_returncode()
   return result
-
-
-def run_process(cmd, universal_newlines=True, check=True, *args, **kw):
-  mylog.log_cmd(cmd)
-  return run_base(cmd, universal_newlines=universal_newlines, check=check, *args, **kw)
 
 
 def check_call(cmd, *args, **kw):
