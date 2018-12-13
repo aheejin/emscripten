@@ -23,7 +23,7 @@ from tools.shared import Building, STDOUT, PIPE, run_js, run_process, try_delete
 from tools.shared import NODE_JS, V8_ENGINE, JS_ENGINES, SPIDERMONKEY_ENGINE, PYTHON, EMCC, EMAR, CLANG, WINDOWS, AUTODEBUGGER
 from tools import jsrun, shared
 from runner import RunnerCore, path_from_root, core_test_modes, get_bullet_library, get_freetype_library, get_poppler_library
-from runner import skip_if, no_wasm_backend, needs_dlfcn, no_windows, env_modify, with_env_modify
+from runner import skip_if, no_wasm_backend, needs_dlfcn, no_windows, env_modify, with_env_modify, is_slow_test
 
 # decorators for limiting which modes a test can run in
 
@@ -1878,6 +1878,7 @@ int main(int argc, char **argv) {
 ''', args=['34962', '26214', '35040', str(0xbf4)])
 
   @no_emterpreter
+  @is_slow_test
   def test_biggerswitch(self):
     num_cases = 20000
     switch_case = run_process([PYTHON, path_from_root('tests', 'gen_large_switchcase.py'), str(num_cases)], stdout=PIPE, stderr=PIPE).stdout
@@ -2393,14 +2394,14 @@ The current type of b is: 9
       self.do_run(src, '*16,0,4,8,8,12|20,0,4,4,8,12,12,16|24,0,20,0,4,4,8,12,12,16*\n*0,0,0,1,2,64,68,69,72*\n*2*')
 
   def prep_dlfcn_lib(self):
-    self.set_setting('MAIN_MODULE', 0)
-    self.set_setting('SIDE_MODULE', 1)
-    self.set_setting('EXPORT_ALL', 1)
+    self.clear_setting('MAIN_MODULE')
+    self.set_setting('SIDE_MODULE')
+    self.set_setting('EXPORT_ALL')
 
   def prep_dlfcn_main(self):
-    self.set_setting('MAIN_MODULE', 1)
-    self.set_setting('SIDE_MODULE', 0)
-    self.set_setting('EXPORT_ALL', 1)
+    self.set_setting('MAIN_MODULE')
+    self.clear_setting('SIDE_MODULE')
+    self.set_setting('EXPORT_ALL')
 
     with open('lib_so_pre.js', 'w') as f:
       f.write('''
@@ -3318,9 +3319,9 @@ ok
     self.build_dlfcn_lib(libecho % {'libname': 'b'}, dirname, indir('b.cpp'))
     shutil.move(indir('liblib.so'), indir('libb.so'))
 
-    self.set_setting('MAIN_MODULE', 1)
-    self.set_setting('SIDE_MODULE', 0)
-    self.set_setting('EXPORT_ALL', 1)
+    self.set_setting('MAIN_MODULE')
+    self.clear_setting('SIDE_MODULE')
+    self.set_setting('EXPORT_ALL')
     self.emcc_args += ['--embed-file', '.@/']
 
     # XXX in wasm each lib load currently takes 5MB; default TOTAL_MEMORY=16MB is thus not enough
@@ -3361,8 +3362,8 @@ ok
     old_args = self.emcc_args[:]
 
     # side settings
-    self.set_setting('MAIN_MODULE', 0)
-    self.set_setting('SIDE_MODULE', 1)
+    self.clear_setting('MAIN_MODULE')
+    self.set_setting('SIDE_MODULE')
     print(self.is_wasm())
     side_suffix = 'wasm' if self.is_wasm() else 'js'
     if isinstance(side, list):
@@ -3382,8 +3383,8 @@ ok
     shutil.move('liblib.cpp.o.' + side_suffix, 'liblib.so')
 
     # main settings
-    self.set_setting('MAIN_MODULE', 1)
-    self.set_setting('SIDE_MODULE', 0)
+    self.set_setting('MAIN_MODULE')
+    self.clear_setting('SIDE_MODULE')
     if auto_load:
       self.set_setting('RUNTIME_LINKED_LIBS', ['liblib.so'])
       self.emcc_args += main_emcc_args
@@ -4061,7 +4062,7 @@ ok
         printf("only_in_third_1: %d, %d, %d, %d\n", sidef(), sideg, second_to_third, x);
       }
     ''')
-    run_process([PYTHON, EMCC, 'third.cpp', '-s', 'SIDE_MODULE=1', '-s', 'EXPORT_ALL=1'] + self.get_emcc_args() + ['-o', 'third' + dylib_suffix])
+    run_process([PYTHON, EMCC, 'third.cpp', '-s', 'SIDE_MODULE', '-s', 'EXPORT_ALL'] + self.get_emcc_args() + ['-o', 'third' + dylib_suffix])
 
     self.dylink_test(main=r'''
       #include <stdio.h>
@@ -4831,6 +4832,7 @@ name: .
     self.do_run(src, expected)
 
   @also_with_noderawfs
+  @is_slow_test
   def test_fs_nodefs_rw(self, js_engines=[NODE_JS]):
     self.set_setting('SYSCALL_DEBUG', 1)
     src = open(path_from_root('tests', 'fs', 'test_nodefs_rw.c'), 'r').read()
@@ -5823,6 +5825,7 @@ return malloc(size);
                   output_nicerizer=lambda string, err: (string + err).replace('\n\n', '\n').replace('\n\n', '\n'))
 
   @no_windows('./configure scripts dont to run on windows.')
+  @is_slow_test
   def test_freetype(self):
     assert 'asm2g' in core_test_modes
     if self.run_name == 'asm2g':
@@ -5895,6 +5898,7 @@ return malloc(size);
                 includes=[path_from_root('tests', 'sqlite')],
                 force_c=True)
 
+  @is_slow_test
   def test_zlib(self):
     self.maybe_closure()
 
@@ -5916,6 +5920,7 @@ return malloc(size);
                 includes=[path_from_root('tests', 'zlib'), os.path.join(self.get_dir(), 'building', 'zlib')],
                 force_c=True)
 
+  @is_slow_test
   def test_the_bullet(self): # Called thus so it runs late in the alphabetical cycle... it is long
     self.set_setting('DEAD_FUNCTIONS', ['__ZSt9terminatev'])
 
@@ -5986,6 +5991,7 @@ return malloc(size);
       # Make sure that DFE ends up eliminating more than 200 functions (if we can view source)
       assert (num_original_funcs - self.count_funcs('src.cpp.o.js')) > 200
 
+  @is_slow_test
   def test_openjpeg(self):
     # remove -g, so we have one test without it by default
     Building.COMPILER_TEST_OPTS = [x for x in Building.COMPILER_TEST_OPTS if x != '-g']
@@ -6104,6 +6110,7 @@ return malloc(size);
   # They are only valid enough for us to read for test purposes, not for llvm-as
   # to process.
   @no_wasm_backend("uses bitcode compiled with asmjs, and we don't have unified triples")
+  @is_slow_test
   def test_cases(self):
     if Building.LLVM_OPTS:
       self.skipTest("Our code is not exactly 'normal' llvm assembly")
@@ -6208,6 +6215,7 @@ return malloc(size);
         generated = open('src.cpp.o.js').read() # noqa
         exec(open(src_checker).read())
 
+  @is_slow_test
   def test_fuzz(self):
     Building.COMPILER_TEST_OPTS += ['-I' + path_from_root('tests', 'fuzz', 'include'), '-w']
     # some of these tests - 2.c', '9.c', '19.c', '21.c', '20.cpp' - div or rem i32 by 0, which traps in wasm

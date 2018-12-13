@@ -611,7 +611,9 @@ function lengthBytesUTF8(str) {
 // Given a pointer 'ptr' to a null-terminated UTF16LE-encoded string in the emscripten HEAP, returns
 // a copy of that string as a Javascript String object.
 
+#if TEXTDECODER
 var UTF16Decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-16le') : undefined;
+#endif
 function UTF16ToString(ptr) {
 #if ASSERTIONS
   assert(ptr % 2 == 0, 'Pointer passed to UTF16ToString must be aligned to two bytes!');
@@ -1918,14 +1920,6 @@ function integrateWasmJS() {
       if (exports.memory) mergeMemory(exports.memory);
       Module['asm'] = exports;
       Module["usingWasm"] = true;
-#if WASM_BACKEND
-      // wasm backend stack goes down
-      STACKTOP = STACK_BASE + TOTAL_STACK;
-      STACK_MAX = STACK_BASE;
-      // can't call stackRestore() here since this function can be called
-      // synchronously before stackRestore() is declared.
-      Module["asm"]["stackRestore"](STACKTOP);
-#endif
 #if USE_PTHREADS
       // Keep a reference to the compiled module so we can post it to the workers.
       Module['wasmModule'] = module;

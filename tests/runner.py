@@ -91,6 +91,8 @@ EMTEST_SAVE_DIR = os.getenv('EMTEST_SAVE_DIR', os.getenv('EM_SAVE_DIR'))
 # to force testing on all js engines, good to find js engine bugs
 EMTEST_ALL_ENGINES = os.getenv('EMTEST_ALL_ENGINES')
 
+EMTEST_SKIP_SLOW = os.getenv('EMTEST_SKIP_SLOW')
+
 
 # checks if browser testing is enabled
 def has_browser():
@@ -114,6 +116,15 @@ def needs_dlfcn(func):
   def decorated(self):
     self.check_dlfcn()
     return func(self)
+
+  return decorated
+
+
+def is_slow_test(func):
+  def decorated(self, *args, **kwargs):
+    if EMTEST_SKIP_SLOW:
+      return self.skipTest('skipping slow tests')
+    return func(self, *args, **kwargs)
 
   return decorated
 
@@ -353,13 +364,21 @@ class RunnerCore(unittest.TestCase):
       return self.settings_mods[key]
     return Settings[key]
 
-  def set_setting(self, key, value):
+  def set_setting(self, key, value=1):
+    if value is None:
+      self.clear_setting(key)
     self.settings_mods[key] = value
+
+  def clear_setting(self, key):
+    self.settings_mods.pop(key, None)
 
   def serialize_settings(self):
     ret = []
     for key, value in self.settings_mods.items():
-      ret += ['-s', '{}={}'.format(key, json.dumps(value))]
+      if value == 1:
+        ret += ['-s', key]
+      else:
+        ret += ['-s', '{}={}'.format(key, json.dumps(value))]
     return ret
 
   def get_dir(self):
@@ -842,9 +861,9 @@ class RunnerCore(unittest.TestCase):
 
     # _test_dylink_dso_needed can be potentially called several times by a test.
     # reset dylink-related options first.
-    self.set_setting('MAIN_MODULE', 0)
-    self.set_setting('SIDE_MODULE', 0)
-    self.set_setting('RUNTIME_LINKED_LIBS', [])
+    self.clear_setting('MAIN_MODULE')
+    self.clear_setting('SIDE_MODULE')
+    self.clear_setting('RUNTIME_LINKED_LIBS')
 
     # XXX in wasm each lib load currently takes 5MB; default TOTAL_MEMORY=16MB is thus not enough
     self.set_setting('TOTAL_MEMORY', 32 * 1024 * 1024)
