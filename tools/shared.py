@@ -1266,10 +1266,6 @@ def verify_settings():
       logger.warn('emcc: WASM_BACKEND is not compatible with asmjs (WASM=0), forcing WASM=1')
       Settings.WASM = 1
 
-    if not BINARYEN_ROOT:
-      exit_with_error('emcc: BINARYEN_ROOT must be set in the .emscripten config'
-                      ' when using the LLVM wasm backend')
-
     if Settings.CYBERDWARF:
       exit_with_error('emcc: CYBERDWARF is not supported by the LLVM wasm backend')
 
@@ -2550,6 +2546,7 @@ class Building(object):
     logger.debug('minifying wasm imports and exports')
     # run the pass
     cmd = [os.path.join(Building.get_binaryen_bin(), 'wasm-opt'), '--minify-imports-and-exports', wasm_file, '-o', wasm_file]
+    cmd += Building.get_binaryen_feature_flags()
     if debug_info:
       cmd.append('-g')
     out = check_call(cmd, stdout=PIPE).stdout
@@ -2669,6 +2666,16 @@ class Building(object):
     if 'USE_SDL=2' in link_settings:
       system_js_libraries += ['library_egl.js', 'library_glut.js', 'library_gl.js']
     return [path_from_root('src', x) for x in system_js_libraries]
+
+  @staticmethod
+  def get_binaryen_feature_flags():
+    # start with the MVP features, add the rest as needed
+    ret = ['--mvp-features']
+    if Settings.USE_PTHREADS:
+      ret += ['--enable-threads']
+    if Settings.SIMD:
+      ret += ['--enable-simd']
+    return ret
 
   @staticmethod
   def get_binaryen():
