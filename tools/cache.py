@@ -26,6 +26,8 @@ class Cache(object):
     # figure out the root directory for all caching
     if dirname is None:
       dirname = os.environ.get('EM_CACHE')
+      if dirname:
+        dirname = os.path.normpath(dirname)
     if not dirname:
       dirname = os.path.expanduser(os.path.join('~', '.emscripten_cache'))
     self.root_dirname = dirname
@@ -108,7 +110,7 @@ class Cache(object):
       logger.info(message)
       self.ensure()
       temp = creator()
-      if temp != cachename:
+      if os.path.normcase(temp) != os.path.normcase(cachename):
         mylog.log_copy(temp, cachename)
         shutil.copyfile(temp, cachename)
       logger.info(' - ok')
