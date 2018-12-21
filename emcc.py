@@ -1139,7 +1139,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       forced_stdlibs = []
       if shared.Settings.DEMANGLE_SUPPORT:
         shared.Settings.EXPORTED_FUNCTIONS += ['___cxa_demangle']
-        forced_stdlibs += ['libcxxabi']
+        forced_stdlibs += ['libc++abi']
 
       if not shared.Settings.ONLY_MY_CODE:
         # Always need malloc and free to be kept alive and exported, for internal use and other modules
@@ -1290,6 +1290,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         # we run the optimizer during asm2wasm itself). use it, if not overridden
         if 'BINARYEN_PASSES' not in settings_key_changes:
           passes = []
+          if not shared.Settings.EXIT_RUNTIME:
+            passes += ['--no-exit-runtime']
           if options.opt_level > 0 or options.shrink_level > 0:
             passes += [shared.Building.opt_level_to_str(options.opt_level, options.shrink_level)]
           if options.debug_level < 3:
