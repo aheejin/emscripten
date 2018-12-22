@@ -687,7 +687,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       else:
         raise
 
-  temp_dir = tempfile.mkdtemp(dir=temp_root)
+  if not DEBUG:
+    temp_dir = tempfile.mkdtemp(dir=temp_root)
+  else:
+    temp_dir = shared.get_emscripten_temp_dir()
 
   def in_temp(name):
     return os.path.join(temp_dir, os.path.basename(name))
@@ -1254,6 +1257,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           exit_with_error('-s PROXY_TO_PTHREAD=1 requires -s USE_PTHREADS to work!')
 
       if shared.Settings.OUTLINING_LIMIT:
+        if shared.Settings.WASM_BACKEND:
+          exit_with_error('OUTLINING_LIMIT is not compatible with the LLVM wasm backend')
         if not options.js_opts:
           logger.debug('enabling js opts as optional functionality implemented as a js opt was requested')
           options.js_opts = True
@@ -2136,9 +2141,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
   finally:
     try:
-      #mylog.log_remove(temp_dir)
-      #shutil.rmtree(temp_dir)
-      pass
+      if not DEBUG:
+        #mylog.log_remove(temp_dir)
+        #shutil.rmtree(temp_dir)
+        pass
     except:
       pass
 
