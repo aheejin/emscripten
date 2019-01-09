@@ -394,6 +394,32 @@ var FULL_ES2 = 0;
 // from the output.
 var GL_EMULATE_GLES_VERSION_STRING_FORMAT = 1;
 
+// If true, all GL extensions are advertised in both unprefixed WebGL extension
+// format, but also in desktop/mobile GLES/GL extension format with "GL_" prefix.
+var GL_EXTENSIONS_IN_PREFIXED_FORMAT = 1;
+
+// If true, adds support for automatically enabling all GL extensions for
+// GLES/GL emulation purposes. This takes up code size. If you set this to 0,
+// you will need to manually enable the extensions you need.
+var GL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS = 1;
+
+// If set to 0, Emscripten GLES2->WebGL translation layer does not track the kind
+// of GL errors that exist in GLES2 but do not exist in WebGL. Settings this to 0
+// saves code size. (Good to keep at 1 for development)
+var GL_TRACK_ERRORS = 1;
+
+// If true, GL contexts support the explicitSwapControl context creation flag.
+// Set to 0 to save a little bit of space on projects that do not need it.
+var GL_SUPPORT_EXPLICIT_SWAP_CONTROL = 0;
+
+// If true, calls to glUniform*fv and glUniformMatrix*fv utilize a pool of
+// preallocated temporary buffers for common small sizes to avoid generating
+// temporary garbage for WebGL 1. Disable this to optimize generated size of the
+// GL library a little bit, at the expense of generating garbage in WebGL 1. If
+// you are only using WebGL 2 and do not support WebGL 1, this is not needed and
+// you can turn it off.
+var GL_POOL_TEMP_BUFFERS = 1;
+
 // Some old Android WeChat (Chromium 37?) browser has a WebGL bug that it ignores
 // the offset of a typed array view pointing to an ArrayBuffer. Set this to
 // 1 to enable a polyfill that works around the issue when it appears. This
@@ -945,6 +971,9 @@ var EMTERPRETIFY_SYNCLIST = [];
 // whether js opts will be run, after the main compiler
 var RUNNING_JS_OPTS = 0;
 
+// whether we are emitting JS glue code
+var EMITTING_JS = 1;
+
 // whether we are in the generate struct_info bootstrap phase
 var BOOTSTRAPPING_STRUCT_INFO = 0;
 
@@ -975,7 +1004,7 @@ var WASM_BACKEND = 0;
 var WASM_OBJECT_FILES = 0;
 
 // How we should run WebAssembly code. By default, we run it natively.
-// See binaryen's src/js/wasm.js-post.js for more details and options.
+// See binaryen's src/preamble.js for more details and options.
 var BINARYEN_METHOD = "native-wasm";
 
 // An optional comma-separated list of script hooks to run after binaryen,
@@ -1202,6 +1231,8 @@ var BUNDLED_CD_DEBUG_FILE = "";
 
 // Is enabled, use the JavaScript TextDecoder API for string marshalling.
 // Enabled by default, set this to 0 to disable.
+// If set to 2, we assume TextDecoder is present and usable, and do not emit
+// any JS code to fall back if it is missing.
 var TEXTDECODER = 1;
 
 // Embind specific: If enabled, assume UTF-8 encoded data in std::string binding.
@@ -1285,3 +1316,8 @@ var ENVIRONMENT_MAY_BE_WEB_OR_WORKER = 1;
 // JS -> asm.js import names. Controlled by optimization level, enabled
 // at -O1 and higher, but disabled at -g2 and higher.
 var MINIFY_ASMJS_IMPORT_NAMES = 0;
+
+// if set to 1, then generated WASM files will contain a custom
+// "emscripten_metadata" section that contains information necessary
+// to execute the file without the accompanying JS file.
+var EMIT_EMSCRIPTEN_METADATA = 0;

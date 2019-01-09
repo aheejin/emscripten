@@ -70,7 +70,18 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
 
   def read_symbols(path):
     with open(path) as f:
-      return shared.Building.parse_symbols(f.read()).defs
+      content = f.read()
+
+      # Require that Windows newlines should not be present in a symbols file, if running on Linux or macOS
+      # This kind of mismatch can occur if one copies a zip file of Emscripten cloned on Windows over to
+      # a Linux or macOS system. It will result in Emscripten linker getting confused on stray \r characters,
+      # and be unable to link any library symbols properly. We could harden against this by .strip()ping the
+      # opened files, but it is possible that the mismatching line endings can cause random problems elsewhere
+      # in the toolchain, hence abort execution if so.
+      if os.name != 'nt' and '\r\n' in content:
+        raise Exception('Windows newlines \\r\\n detected in symbols file "' + path + '"! This could happen for example when copying Emscripten checkout from Windows to Linux or macOS. Please use Unix line endings on checkouts of Emscripten on Linux and macOS!')
+
+      return shared.Building.parse_symbols(content).defs
 
   default_opts = []
   #default_opts = ['-Werror']
@@ -504,15 +515,6 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
       filenames=['emscripten_memcpy.c'])
     return create_wasm_rt_lib(libname, math_files + string_files + other_files)
 
-  # Setting this in the environment will avoid checking dependencies and make building big projects a little faster
-  # 1 means include everything; otherwise it can be the name of a lib (libc++, etc.)
-  # You can provide 1 to include everything, or a comma-separated list with the ones you want
-  force = os.environ.get('EMCC_FORCE_STDLIBS')
-  force_all = force == '1'
-  force_include = set((force.split(',') if force else []) + forced)
-  if force_include:
-    logging.debug('forcing stdlibs: ' + str(force_include))
-
   # Set of libraries to include on the link line, as opposed to `force` which
   # is the set of libraries to force include (with --whole-archive).
   always_include = set()
@@ -618,8 +620,20 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
 
   libs_to_link = []
   already_included = set()
-
   system_libs_map = {l.shortname: l for l in system_libs}
+
+  # Setting this in the environment will avoid checking dependencies and make building big projects a little faster
+  # 1 means include everything; otherwise it can be the name of a lib (libc++, etc.)
+  # You can provide 1 to include everything, or a comma-separated list with the ones you want
+  force = os.environ.get('EMCC_FORCE_STDLIBS')
+  if force == '1':
+    force_all = True
+    force = ','.join(system_libs_map.keys())
+  else:
+    force_all = False
+  force_include = set((force.split(',') if force else []) + forced)
+  if force_include:
+    logging.debug('forcing stdlibs: ' + str(force_include))
 
   for lib in always_include:
     assert lib in system_libs_map
