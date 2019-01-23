@@ -31,9 +31,6 @@ from tools.minified_js_name_generator import MinifiedJsNameGenerator
 
 logger = logging.getLogger('emscripten')
 
-if __name__ == '__main__':
-  ToolchainProfiler.record_process_start()
-
 STDERR_FILE = os.environ.get('EMCC_STDERR_FILE')
 if STDERR_FILE:
   STDERR_FILE = os.path.abspath(STDERR_FILE)
@@ -396,6 +393,10 @@ def create_module_asmjs(function_table_sigs, metadata,
   asm_runtime_thread_local_vars = create_asm_runtime_thread_local_vars()
   asm_start = asm_start_pre + '\n' + asm_global_vars + asm_temp_vars + asm_runtime_thread_local_vars + '\n' + asm_global_funcs
 
+  if not (shared.Settings.WASM and shared.Settings.SIDE_MODULE):
+    stack = apply_memory('  var STACKTOP = {{{ STACK_BASE }}};\n  var STACK_MAX = {{{ STACK_MAX }}};\n')
+  else:
+    stack = ''
   temp_float = '  var tempFloat = %s;\n' % ('Math_fround(0)' if provide_fround() else '0.0')
   async_state = '  var asyncState = 0;\n' if shared.Settings.EMTERPRETIFY_ASYNC else ''
   f0_fround = '  const f0 = Math_fround(0);\n' if provide_fround() else ''
@@ -408,6 +409,7 @@ def create_module_asmjs(function_table_sigs, metadata,
 
   module = [
     asm_start,
+    stack,
     temp_float,
     async_state,
     f0_fround,
@@ -621,37 +623,42 @@ def compile_settings(compiler_engine, libraries, temp_files):
   return glue, forwarded_data
 
 
-def apply_memory(pre, metadata):
-  # Apply the statically-at-compile-time computed memory locations.
-  # Note: if RELOCATABLE, then only relative sizes can be computed, and we don't
-  #       actually write out any absolute memory locations ({{{ STACK_BASE }}}
-  #       does not exist, etc.)
+class Memory():
+  def __init__(self):
+    # Note: if RELOCATABLE, then only relative sizes can be computed, and we don't
+    #       actually write out any absolute memory locations ({{{ STACK_BASE }}}
+    #       does not exist, etc.)
 
-  # Memory layout:
-  #  * first the static globals
-  global_start = shared.Settings.GLOBAL_BASE
-  static_bump = shared.Settings.STATIC_BUMP
-  #  * then the stack (up on fastcomp, down on upstream)
-  stack_low = align_memory(global_start + static_bump)
-  stack_high = align_memory(stack_low + shared.Settings.TOTAL_STACK)
-  if shared.Settings.WASM_BACKEND:
-    stack_start = stack_high
-    stack_max = stack_low
-  else:
-    stack_start = stack_low
-    stack_max = stack_high
-  #  * then dynamic memory begins
-  dynamic_start = align_memory(stack_high)
+    # Memory layout:
+    #  * first the static globals
+    self.global_base = shared.Settings.GLOBAL_BASE
+    self.static_bump = shared.Settings.STATIC_BUMP
+    #  * then the stack (up on fastcomp, down on upstream)
+    self.stack_low = align_memory(self.global_base + self.static_bump)
+    self.stack_high = align_memory(self.stack_low + shared.Settings.TOTAL_STACK)
+    if shared.Settings.WASM_BACKEND:
+      self.stack_base = self.stack_high
+      self.stack_max = self.stack_low
+    else:
+      self.stack_base = self.stack_low
+      self.stack_max = self.stack_high
+    #  * then dynamic memory begins
+    self.dynamic_base = align_memory(self.stack_high)
+
+
+def apply_memory(js):
+  # Apply the statically-at-compile-time computed memory locations.
+  memory = Memory()
 
   # Write it all out
-  pre = pre.replace('{{{ STATIC_BUMP }}}', str(static_bump))
-  pre = pre.replace('{{{ STACK_BASE }}}', str(stack_start))
-  pre = pre.replace('{{{ STACK_MAX }}}', str(stack_max))
-  pre = pre.replace('{{{ DYNAMIC_BASE }}}', str(dynamic_start))
+  js = js.replace('{{{ STATIC_BUMP }}}', str(memory.static_bump))
+  js = js.replace('{{{ STACK_BASE }}}', str(memory.stack_base))
+  js = js.replace('{{{ STACK_MAX }}}', str(memory.stack_max))
+  js = js.replace('{{{ DYNAMIC_BASE }}}', str(memory.dynamic_base))
 
-  logger.debug('global_start: %d stack_start: %d, stack_max: %d, dynamic_start: %d, static bump: %d', global_start, stack_start, stack_max, dynamic_start, static_bump)
+  logger.debug('global_base: %d stack_base: %d, stack_max: %d, dynamic_base: %d, static bump: %d', memory.global_base, memory.stack_base, memory.stack_max, memory.dynamic_base, memory.static_bump)
 
-  return pre
+  return js
 
 
 def memory_and_global_initializers(pre, metadata, mem_init):
@@ -665,18 +672,23 @@ def memory_and_global_initializers(pre, metadata, mem_init):
   pthread = ''
   if shared.Settings.USE_PTHREADS:
     pthread = 'if (!ENVIRONMENT_IS_PTHREAD)'
+
+  if len(global_initializers) > 0:
+    global_initializers = '/* global initializers */ {pthread} __ATINIT__.push({global_initializers});'.format(pthread=pthread, global_initializers=global_initializers)
+  else:
+    global_initializers = '/* global initializers */ /*__ATINIT__.push();*/'
+
   pre = pre.replace('STATICTOP = STATIC_BASE + 0;', '''\
 STATICTOP = STATIC_BASE + {staticbump};
-/* global initializers */ {pthread} __ATINIT__.push({global_initializers});
+{global_initializers}
 {mem_init}'''.format(staticbump=staticbump,
-                     pthread=pthread,
                      global_initializers=global_initializers,
                      mem_init=mem_init))
 
   if shared.Settings.SIDE_MODULE:
     pre = pre.replace('GLOBAL_BASE', 'gb')
 
-  pre = apply_memory(pre, metadata)
+  pre = apply_memory(pre)
 
   return pre
 
@@ -1395,7 +1407,7 @@ function ftCall_%s(%s) {%s
 
 
 def create_basic_funcs(function_table_sigs, invoke_function_names):
-  basic_funcs = ['abort', 'assert', 'enlargeMemory', 'getTotalMemory', 'setTempRet0', 'getTempRet0']
+  basic_funcs = ['abort', 'assert', 'setTempRet0', 'getTempRet0']
   if shared.Settings.ABORTING_MALLOC:
     basic_funcs += ['abortOnCannotGrowMemory']
   if shared.Settings.STACK_OVERFLOW_CHECK:
@@ -1425,8 +1437,6 @@ def create_basic_funcs(function_table_sigs, invoke_function_names):
 
 def create_basic_vars(exported_implemented_functions, forwarded_json, metadata):
   basic_vars = ['DYNAMICTOP_PTR', 'tempDoublePtr']
-  if not (shared.Settings.WASM and shared.Settings.SIDE_MODULE):
-    basic_vars += ['STACKTOP', 'STACK_MAX']
   if shared.Settings.RELOCATABLE:
     if not (shared.Settings.WASM and shared.Settings.SIDE_MODULE):
       basic_vars += ['gb', 'fb']
@@ -1531,7 +1541,7 @@ def create_receiving(function_table_data, function_tables_defs, exported_impleme
 #      receiving += ''.join(['var ' + s + ' = asm["' + s + '"];\n' for s in module_exports])
 #      receiving += 'for(var module_exported_function in asm) Module[module_exported_function] = asm[module_exported_function];\n'
     else:
-      receiving += '(function() { for(var i in asm) this[i] = Module[i] = asm[i]; }());\n'
+      receiving += 'for(var i in asm) this[i] = Module[i] = asm[i];\n'
   else:
     receiving += 'Module["asm"] = asm;\n' + ';\n'.join(['var ' + s + ' = Module["' + s + '"] = function() {' + runtime_assertions + '  return Module["asm"]["' + s + '"].apply(null, arguments) }' for s in module_exports])
   receiving += ';\n'
@@ -1752,10 +1762,10 @@ function SAFE_FT_MASK(value, mask) {
 def create_asm_start_pre(asm_setup, the_global, sending, metadata):
   shared_array_buffer = ''
   if shared.Settings.USE_PTHREADS and not shared.Settings.WASM:
-    shared_array_buffer = "Module.asmGlobalArg['Atomics'] = Atomics;"
+    shared_array_buffer = "asmGlobalArg['Atomics'] = Atomics;"
 
   module_get = 'Module{access} = {val};'
-  module_global = module_get.format(access=access_quote('asmGlobalArg'), val=the_global)
+  module_global = 'var asmGlobalArg = ' + the_global
   module_library = module_get.format(access=access_quote('asmLibraryArg'), val=sending)
 
   asm_function_top = ('// EMSCRIPTEN_START_ASM\n'
@@ -1829,8 +1839,8 @@ def create_asm_end(exports):
   return %s;
 })
 // EMSCRIPTEN_END_ASM
-(Module%s, Module%s, buffer);
-''' % (exports, access_quote('asmGlobalArg'), access_quote('asmLibraryArg'))
+(%s, Module%s, buffer);
+''' % (exports, 'asmGlobalArg', access_quote('asmLibraryArg'))
 
 
 def create_first_in_asm():
@@ -1949,7 +1959,7 @@ def emscript_wasm_backend(infile, outfile, memfile, libraries, compiler_engine,
        'if (!ENVIRONMENT_IS_PTHREAD)' if shared.Settings.USE_PTHREADS else '',
        global_initializers))
 
-  pre = apply_memory(pre, metadata)
+  pre = apply_memory(pre)
 
   # merge forwarded data
   shared.Settings.EXPORTED_FUNCTIONS = forwarded_json['EXPORTED_FUNCTIONS']
@@ -2034,6 +2044,8 @@ def finalize_wasm(temp_files, infile, outfile, memfile, DEBUG):
     cmd.append('--output-source-map-url=' + shared.Settings.SOURCE_MAP_BASE + os.path.basename(shared.Settings.WASM_BINARY_FILE) + '.map')
   if not shared.Settings.MEM_INIT_IN_WASM:
     cmd.append('--separate-data-segments=' + memfile)
+  if not shared.Settings.SIDE_MODULE:
+    cmd.append('--initial-stack-pointer=%d' % Memory().stack_base)
   stdout = shared.check_call(cmd, stdout=subprocess.PIPE).stdout
   if write_source_map:
     debug_copy(wasm + '.map', 'post_finalize.map')
@@ -2128,13 +2140,13 @@ def create_em_js(forwarded_json, metadata):
 
 
 def create_sending_wasm(invoke_funcs, jscall_sigs, forwarded_json, metadata):
-  basic_funcs = ['assert', 'enlargeMemory', 'getTotalMemory']
+  basic_funcs = ['assert']
   if shared.Settings.ABORTING_MALLOC:
     basic_funcs += ['abortOnCannotGrowMemory']
   if shared.Settings.SAFE_HEAP:
     basic_funcs += ['segfault', 'alignfault']
 
-  basic_vars = ['STACKTOP', 'STACK_MAX', 'DYNAMICTOP_PTR']
+  basic_vars = ['DYNAMICTOP_PTR']
 
   if not shared.Settings.RELOCATABLE:
     global_vars = metadata['externs']
@@ -2198,13 +2210,13 @@ def create_module_wasm(sending, receiving, invoke_funcs, jscall_sigs,
   jscall_funcs = create_jscall_funcs(jscall_sigs)
 
   module = []
-  module.append('Module%s = {};\n' % access_quote('asmGlobalArg'))
+  module.append('var asmGlobalArg = {};\n')
   if shared.Settings.USE_PTHREADS and not shared.Settings.WASM:
-    module.append("if (typeof SharedArrayBuffer !== 'undefined') Module.asmGlobalArg['Atomics'] = Atomics;\n")
+    module.append("if (typeof SharedArrayBuffer !== 'undefined') asmGlobalArg['Atomics'] = Atomics;\n")
 
   module.append("Module['wasmTableSize'] = %s;\n" % metadata['tableSize'])
   module.append('Module%s = %s;\n' % (access_quote('asmLibraryArg'), sending))
-  module.append("var asm = Module['asm'](Module%s, Module%s, buffer);\n" % (access_quote('asmGlobalArg'), access_quote('asmLibraryArg')))
+  module.append("var asm = Module['asm'](%s, Module%s, buffer);\n" % ('asmGlobalArg', access_quote('asmLibraryArg')))
 
   module.append(receiving)
   module.append(invoke_wrappers)
@@ -2302,7 +2314,7 @@ def normalize_line_endings(text):
   return text
 
 
-def main(infile, outfile, memfile, libraries):
+def run(infile, outfile, memfile, libraries):
   temp_files = get_configuration().get_temp_files()
   infile, outfile = substitute_response_files([infile, outfile])
 

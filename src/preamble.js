@@ -458,36 +458,27 @@ function UTF8ArrayToString(u8Array, idx) {
     return UTF8Decoder.decode(u8Array.subarray(idx, endPtr));
   } else {
 #endif // TEXTDECODER
-    var u0, u1, u2, u3, u4, u5;
-
     var str = '';
     while (1) {
       // For UTF8 byte structure, see:
       // http://en.wikipedia.org/wiki/UTF-8#Description
       // https://www.ietf.org/rfc/rfc2279.txt
       // https://tools.ietf.org/html/rfc3629
-      u0 = u8Array[idx++];
+      var u0 = u8Array[idx++];
       if (!u0) return str;
       if (!(u0 & 0x80)) { str += String.fromCharCode(u0); continue; }
-      u1 = u8Array[idx++] & 63;
+      var u1 = u8Array[idx++] & 63;
       if ((u0 & 0xE0) == 0xC0) { str += String.fromCharCode(((u0 & 31) << 6) | u1); continue; }
-      u2 = u8Array[idx++] & 63;
+      var u2 = u8Array[idx++] & 63;
       if ((u0 & 0xF0) == 0xE0) {
         u0 = ((u0 & 15) << 12) | (u1 << 6) | u2;
       } else {
-        u3 = u8Array[idx++] & 63;
-        if ((u0 & 0xF8) == 0xF0) {
-          u0 = ((u0 & 7) << 18) | (u1 << 12) | (u2 << 6) | u3;
-        } else {
-          u4 = u8Array[idx++] & 63;
-          if ((u0 & 0xFC) == 0xF8) {
-            u0 = ((u0 & 3) << 24) | (u1 << 18) | (u2 << 12) | (u3 << 6) | u4;
-          } else {
-            u5 = u8Array[idx++] & 63;
-            u0 = ((u0 & 1) << 30) | (u1 << 24) | (u2 << 18) | (u3 << 12) | (u4 << 6) | u5;
-          }
-        }
+#if ASSERTIONS
+        if ((u0 & 0xF8) != 0xF0) warnOnce('Invalid UTF-8 leading byte 0x' + u0.toString(16) + ' encountered when deserializing a UTF-8 string on the asm.js/wasm heap to a JS string!');
+#endif
+        u0 = ((u0 & 7) << 18) | (u1 << 12) | (u2 << 6) | (u8Array[idx++] & 63);
       }
+
       if (u0 < 0x10000) {
         str += String.fromCharCode(u0);
       } else {
@@ -548,24 +539,12 @@ function stringToUTF8Array(str, outU8Array, outIdx, maxBytesToWrite) {
       outU8Array[outIdx++] = 0xE0 | (u >> 12);
       outU8Array[outIdx++] = 0x80 | ((u >> 6) & 63);
       outU8Array[outIdx++] = 0x80 | (u & 63);
-    } else if (u <= 0x1FFFFF) {
-      if (outIdx + 3 >= endIdx) break;
-      outU8Array[outIdx++] = 0xF0 | (u >> 18);
-      outU8Array[outIdx++] = 0x80 | ((u >> 12) & 63);
-      outU8Array[outIdx++] = 0x80 | ((u >> 6) & 63);
-      outU8Array[outIdx++] = 0x80 | (u & 63);
-    } else if (u <= 0x3FFFFFF) {
-      if (outIdx + 4 >= endIdx) break;
-      outU8Array[outIdx++] = 0xF8 | (u >> 24);
-      outU8Array[outIdx++] = 0x80 | ((u >> 18) & 63);
-      outU8Array[outIdx++] = 0x80 | ((u >> 12) & 63);
-      outU8Array[outIdx++] = 0x80 | ((u >> 6) & 63);
-      outU8Array[outIdx++] = 0x80 | (u & 63);
     } else {
-      if (outIdx + 5 >= endIdx) break;
-      outU8Array[outIdx++] = 0xFC | (u >> 30);
-      outU8Array[outIdx++] = 0x80 | ((u >> 24) & 63);
-      outU8Array[outIdx++] = 0x80 | ((u >> 18) & 63);
+      if (outIdx + 3 >= endIdx) break;
+#if ASSERTIONS
+      if (u >= 0x200000) warnOnce('Invalid Unicode code point 0x' + u.toString(16) + ' encountered when serializing a JS string to an UTF-8 string on the asm.js/wasm heap! (Valid unicode code points should be in range 0-0x1FFFFF).');
+#endif
+      outU8Array[outIdx++] = 0xF0 | (u >> 18);
       outU8Array[outIdx++] = 0x80 | ((u >> 12) & 63);
       outU8Array[outIdx++] = 0x80 | ((u >> 6) & 63);
       outU8Array[outIdx++] = 0x80 | (u & 63);
@@ -852,7 +831,6 @@ function stackTrace() {
 var PAGE_SIZE = 16384;
 var WASM_PAGE_SIZE = {{{ WASM_PAGE_SIZE }}};
 var ASMJS_PAGE_SIZE = {{{ ASMJS_PAGE_SIZE }}};
-var MIN_TOTAL_MEMORY = 16777216;
 
 function alignUp(x, multiple) {
   if (x % multiple > 0) {
@@ -979,110 +957,6 @@ if (!Module['reallocBuffer']) Module['reallocBuffer'] = function(size) {
 };
 #endif // ALLOW_MEMORY_GROWTH
 #endif // WASM == 0
-
-function enlargeMemory() {
-#if USE_PTHREADS
-  abort('Cannot enlarge memory arrays, since compiling with pthreads support enabled (-s USE_PTHREADS=1).');
-#else
-#if ALLOW_MEMORY_GROWTH == 0
-#if ABORTING_MALLOC
-  abortOnCannotGrowMemory();
-#else
-  return false; // malloc will report failure
-#endif
-#else
-  // TOTAL_MEMORY is the current size of the actual array, and DYNAMICTOP is the new top.
-#if ASSERTIONS
-  assert(HEAP32[DYNAMICTOP_PTR>>2] > TOTAL_MEMORY); // This function should only ever be called after the ceiling of the dynamic heap has already been bumped to exceed the current total size of the asm.js heap.
-#endif
-
-#if EMSCRIPTEN_TRACING
-  // Report old layout one last time
-  _emscripten_trace_report_memory_layout();
-#endif
-
-  var PAGE_MULTIPLE = {{{ getPageSize() }}};
-  var LIMIT = 2147483648 - PAGE_MULTIPLE; // We can do one page short of 2GB as theoretical maximum.
-
-  if (HEAP32[DYNAMICTOP_PTR>>2] > LIMIT) {
-#if ASSERTIONS
-    err('Cannot enlarge memory, asked to go up to ' + HEAP32[DYNAMICTOP_PTR>>2] + ' bytes, but the limit is ' + LIMIT + ' bytes!');
-#endif
-    return false;
-  }
-
-  var OLD_TOTAL_MEMORY = TOTAL_MEMORY;
-  TOTAL_MEMORY = Math.max(TOTAL_MEMORY, MIN_TOTAL_MEMORY); // So the loop below will not be infinite, and minimum asm.js memory size is 16MB.
-
-  while (TOTAL_MEMORY < HEAP32[DYNAMICTOP_PTR>>2]) { // Keep incrementing the heap size as long as it's less than what is requested.
-    if (TOTAL_MEMORY <= 536870912) {
-      TOTAL_MEMORY = alignUp(2 * TOTAL_MEMORY, PAGE_MULTIPLE); // Simple heuristic: double until 1GB...
-    } else {
-      // ..., but after that, add smaller increments towards 2GB, which we cannot reach
-      TOTAL_MEMORY = Math.min(alignUp((3 * TOTAL_MEMORY + 2147483648) / 4, PAGE_MULTIPLE), LIMIT);
-#if ASSERTIONS
-      if (TOTAL_MEMORY === OLD_TOTAL_MEMORY) {
-        warnOnce('Cannot ask for more memory since we reached the practical limit in browsers (which is just below 2GB), so the request would have failed. Requesting only ' + TOTAL_MEMORY);
-      }
-#endif
-    }
-  }
-
-#if WASM_MEM_MAX != -1
-  // A limit was set for how much we can grow. We should not exceed that
-  // (the wasm binary specifies it, so if we tried, we'd fail anyhow). That is,
-  // if we are at say 64MB, and the max is 100MB, then we should *not* try to
-  // grow 64->128MB which is the default behavior (doubling), as 128MB will
-  // fail because of the max limit. Instead, we should only try to grow
-  // 64->100MB in this example, which has a chance of succeeding (but may
-  // still fail for another reason, of actually running out of memory).
-  TOTAL_MEMORY = Math.min(TOTAL_MEMORY, {{{ WASM_MEM_MAX }}});
-  if (TOTAL_MEMORY == OLD_TOTAL_MEMORY) {
-#if ASSERTIONS
-    err('Failed to grow the heap from ' + OLD_TOTAL_MEMORY + ', as we reached the WASM_MEM_MAX limit (' + {{{ WASM_MEM_MAX }}} + ') set during compilation');
-#endif
-    // restore the state to before this call, we failed
-    TOTAL_MEMORY = OLD_TOTAL_MEMORY;
-    return false;
-  }
-#endif
-
-#if ASSERTIONS
-  var start = Date.now();
-#endif
-
-  var replacement = Module['reallocBuffer'](TOTAL_MEMORY);
-  if (!replacement || replacement.byteLength != TOTAL_MEMORY) {
-#if ASSERTIONS
-    err('Failed to grow the heap from ' + OLD_TOTAL_MEMORY + ' bytes to ' + TOTAL_MEMORY + ' bytes, not enough memory!');
-    if (replacement) {
-      err('Expected to get back a buffer of size ' + TOTAL_MEMORY + ' bytes, but instead got back a buffer of size ' + replacement.byteLength);
-    }
-#endif
-    // restore the state to before this call, we failed
-    TOTAL_MEMORY = OLD_TOTAL_MEMORY;
-    return false;
-  }
-
-  // everything worked
-
-  updateGlobalBuffer(replacement);
-  updateGlobalBufferViews();
-
-#if ASSERTIONS && !WASM
-  err('Warning: Enlarging memory arrays, this is not fast! ' + [OLD_TOTAL_MEMORY, TOTAL_MEMORY]);
-#endif
-
-#if EMSCRIPTEN_TRACING
-  _emscripten_trace_js_log_message("Emscripten", "Enlarging memory arrays from " + OLD_TOTAL_MEMORY + " to " + TOTAL_MEMORY);
-  // And now report the new layout
-  _emscripten_trace_report_memory_layout();
-#endif
-
-  return true;
-#endif // ALLOW_MEMORY_GROWTH
-#endif // USE_PTHREADS
-}
 
 #if ALLOW_MEMORY_GROWTH
 var byteLength;
@@ -1246,10 +1120,6 @@ HEAP32[DYNAMICTOP_PTR>>2] = DYNAMIC_BASE;
 #if USE_PTHREADS
 }
 #endif
-
-function getTotalMemory() {
-  return TOTAL_MEMORY;
-}
 
 // Endianness check (note: assumes compiler arch was little-endian)
 #if STACK_OVERFLOW_CHECK
@@ -1740,287 +1610,279 @@ var cyberDWARFFile = '{{{ BUNDLED_CD_DEBUG_FILE }}}';
 #include "URIUtils.js"
 
 #if WASM
-function integrateWasmJS() {
-  var wasmBinaryFile = '{{{ WASM_BINARY_FILE }}}';
-  if (!isDataURI(wasmBinaryFile)) {
-    wasmBinaryFile = locateFile(wasmBinaryFile);
+var wasmBinaryFile = '{{{ WASM_BINARY_FILE }}}';
+if (!isDataURI(wasmBinaryFile)) {
+  wasmBinaryFile = locateFile(wasmBinaryFile);
+}
+
+function mergeMemory(newBuffer) {
+  // The wasm instance creates its memory. But static init code might have written to
+  // buffer already, including the mem init file, and we must copy it over in a proper merge.
+  // TODO: avoid this copy, by avoiding such static init writes
+  // TODO: in shorter term, just copy up to the last static init write
+  var oldBuffer = Module['buffer'];
+  if (newBuffer.byteLength < oldBuffer.byteLength) {
+    err('the new buffer in mergeMemory is smaller than the previous one. in native wasm, we should grow memory here');
   }
+  var oldView = new Int8Array(oldBuffer);
+  var newView = new Int8Array(newBuffer);
 
-  // utilities
+#if MEM_INIT_IN_WASM == 0
+  // If we have a mem init file, do not trample it
+  if (!memoryInitializer) {
+    oldView.set(newView.subarray(Module['STATIC_BASE'], Module['STATIC_BASE'] + Module['STATIC_BUMP']), Module['STATIC_BASE']);
+  }
+#endif
 
-  var wasmPageSize = 64*1024;
+  newView.set(oldView);
+  updateGlobalBuffer(newBuffer);
+  updateGlobalBufferViews();
+}
 
+function getBinary() {
+  try {
+    if (Module['wasmBinary']) {
+      return new Uint8Array(Module['wasmBinary']);
+    }
+#if SUPPORT_BASE64_EMBEDDING
+    var binary = tryParseAsDataURI(wasmBinaryFile);
+    if (binary) {
+      return binary;
+    }
+#endif
+    if (Module['readBinary']) {
+      return Module['readBinary'](wasmBinaryFile);
+    } else {
+#if BINARYEN_ASYNC_COMPILATION
+      throw "both async and sync fetching of the wasm failed";
+#else
+      throw "sync fetching of the wasm failed: you can preload it to Module['wasmBinary'] manually, or emcc.py will do that for you when generating HTML (but not JS)";
+#endif
+    }
+  }
+  catch (err) {
+    abort(err);
+  }
+}
+
+function getBinaryPromise() {
+  // if we don't have the binary yet, and have the Fetch api, use that
+  // in some environments, like Electron's render process, Fetch api may be present, but have a different context than expected, let's only use it on the Web
+  if (!Module['wasmBinary'] && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) && typeof fetch === 'function') {
+    return fetch(wasmBinaryFile, { credentials: 'same-origin' }).then(function(response) {
+      if (!response['ok']) {
+        throw "failed to load wasm binary file at '" + wasmBinaryFile + "'";
+      }
+      return response['arrayBuffer']();
+    }).catch(function () {
+      return getBinary();
+    });
+  }
+  // Otherwise, getBinary should be able to get it synchronously
+  return new Promise(function(resolve, reject) {
+    resolve(getBinary());
+  });
+}
+
+// Create the wasm instance.
+// Receives the wasm imports, returns the exports.
+function createWasm(env) {
+  if (typeof WebAssembly !== 'object') {
+#if ASSERTIONS
+    abort('No WebAssembly support found. Build with -s WASM=0 to target JavaScript instead.');
+#endif
+    err('no native wasm support detected');
+    return false;
+  }
+  // prepare imports
+  if (!(Module['wasmMemory'] instanceof WebAssembly.Memory)) {
+    err('no native wasm Memory in use');
+    return false;
+  }
+  env['memory'] = Module['wasmMemory'];
   var info = {
-    'global': null,
-    'env': null,
+    'global': {
+      'NaN': NaN,
+      'Infinity': Infinity
+    },
+#if WASM_BACKEND == 0
+    'global.Math': Math,
+#endif
+    'env': env,
     'asm2wasm': asm2wasmImports,
     'parent': Module // Module inside wasm-js.cpp refers to wasm-js.cpp; this allows access to the outside program.
   };
-
-  var exports = null;
-
-  function mergeMemory(newBuffer) {
-    // The wasm instance creates its memory. But static init code might have written to
-    // buffer already, including the mem init file, and we must copy it over in a proper merge.
-    // TODO: avoid this copy, by avoiding such static init writes
-    // TODO: in shorter term, just copy up to the last static init write
-    var oldBuffer = Module['buffer'];
-    if (newBuffer.byteLength < oldBuffer.byteLength) {
-      err('the new buffer in mergeMemory is smaller than the previous one. in native wasm, we should grow memory here');
-    }
-    var oldView = new Int8Array(oldBuffer);
-    var newView = new Int8Array(newBuffer);
-
-#if MEM_INIT_IN_WASM == 0
-    // If we have a mem init file, do not trample it
-    if (!memoryInitializer) {
-      oldView.set(newView.subarray(Module['STATIC_BASE'], Module['STATIC_BASE'] + Module['STATIC_BUMP']), Module['STATIC_BASE']);
-    }
+  // Load the wasm module and create an instance of using native support in the JS engine.
+  // handle a generated wasm instance, receiving its exports and
+  // performing other necessary setup
+  function receiveInstance(instance, module) {
+    var exports = instance.exports;
+    if (exports.memory) mergeMemory(exports.memory);
+    Module['asm'] = exports;
+#if USE_PTHREADS
+    // Keep a reference to the compiled module so we can post it to the workers.
+    Module['wasmModule'] = module;
+    // Instantiation is synchronous in pthreads and we assert on run dependencies.
+    if (!ENVIRONMENT_IS_PTHREAD) removeRunDependency('wasm-instantiate');
+#else
+    removeRunDependency('wasm-instantiate');
+#endif
+  }
+#if USE_PTHREADS
+  if (!ENVIRONMENT_IS_PTHREAD) {
+    addRunDependency('wasm-instantiate'); // we can't run yet (except in a pthread, where we have a custom sync instantiator)
+  }
+#else
+  addRunDependency('wasm-instantiate');
 #endif
 
-    newView.set(oldView);
-    updateGlobalBuffer(newBuffer);
-    updateGlobalBufferViews();
-  }
-
-  function getBinary() {
+  // User shell pages can write their own Module.instantiateWasm = function(imports, successCallback) callback
+  // to manually instantiate the Wasm module themselves. This allows pages to run the instantiation parallel
+  // to any other async startup actions they are performing.
+  if (Module['instantiateWasm']) {
     try {
-      if (Module['wasmBinary']) {
-        return new Uint8Array(Module['wasmBinary']);
-      }
-#if SUPPORT_BASE64_EMBEDDING
-      var binary = tryParseAsDataURI(wasmBinaryFile);
-      if (binary) {
-        return binary;
-      }
-#endif
-      if (Module['readBinary']) {
-        return Module['readBinary'](wasmBinaryFile);
-      } else {
-#if BINARYEN_ASYNC_COMPILATION
-        throw "both async and sync fetching of the wasm failed";
-#else
-        throw "sync fetching of the wasm failed: you can preload it to Module['wasmBinary'] manually, or emcc.py will do that for you when generating HTML (but not JS)";
-#endif
-      }
-    }
-    catch (err) {
-      abort(err);
-    }
-  }
-
-  function getBinaryPromise() {
-    // if we don't have the binary yet, and have the Fetch api, use that
-    // in some environments, like Electron's render process, Fetch api may be present, but have a different context than expected, let's only use it on the Web
-    if (!Module['wasmBinary'] && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) && typeof fetch === 'function') {
-      return fetch(wasmBinaryFile, { credentials: 'same-origin' }).then(function(response) {
-        if (!response['ok']) {
-          throw "failed to load wasm binary file at '" + wasmBinaryFile + "'";
-        }
-        return response['arrayBuffer']();
-      }).catch(function () {
-        return getBinary();
-      });
-    }
-    // Otherwise, getBinary should be able to get it synchronously
-    return new Promise(function(resolve, reject) {
-      resolve(getBinary());
-    });
-  }
-
-  // Create the wasm instance.
-  // Receives the wasm imports, returns the exports.
-  function createWasm(global, env, providedBuffer) {
-    if (typeof WebAssembly !== 'object') {
-#if ASSERTIONS
-      abort('No WebAssembly support found. Build with -s WASM=0 to target JavaScript instead.');
-#endif
-      err('no native wasm support detected');
+      return Module['instantiateWasm'](info, receiveInstance);
+    } catch(e) {
+      err('Module.instantiateWasm callback failed with error: ' + e);
       return false;
     }
-    // prepare memory import
-    if (!(Module['wasmMemory'] instanceof WebAssembly.Memory)) {
-      err('no native wasm Memory in use');
-      return false;
-    }
-    env['memory'] = Module['wasmMemory'];
-    // Load the wasm module and create an instance of using native support in the JS engine.
-    info['global'] = {
-      'NaN': NaN,
-      'Infinity': Infinity
-    };
-    info['global.Math'] = Math;
-    info['env'] = env;
-    // handle a generated wasm instance, receiving its exports and
-    // performing other necessary setup
-    function receiveInstance(instance, module) {
-      exports = instance.exports;
-      if (exports.memory) mergeMemory(exports.memory);
-      Module['asm'] = exports;
-#if USE_PTHREADS
-      // Keep a reference to the compiled module so we can post it to the workers.
-      Module['wasmModule'] = module;
-      // Instantiation is synchronous in pthreads and we assert on run dependencies.
-      if (!ENVIRONMENT_IS_PTHREAD) removeRunDependency('wasm-instantiate');
-#else
-      removeRunDependency('wasm-instantiate');
-#endif
-    }
-#if USE_PTHREADS
-    if (!ENVIRONMENT_IS_PTHREAD) {
-      addRunDependency('wasm-instantiate'); // we can't run yet (except in a pthread, where we have a custom sync instantiator)
-    }
-#else
-    addRunDependency('wasm-instantiate');
-#endif
-
-    // User shell pages can write their own Module.instantiateWasm = function(imports, successCallback) callback
-    // to manually instantiate the Wasm module themselves. This allows pages to run the instantiation parallel
-    // to any other async startup actions they are performing.
-    if (Module['instantiateWasm']) {
-      try {
-        return Module['instantiateWasm'](info, receiveInstance);
-      } catch(e) {
-        err('Module.instantiateWasm callback failed with error: ' + e);
-        return false;
-      }
-    }
+  }
 
 #if BINARYEN_ASYNC_COMPILATION
 #if RUNTIME_LOGGING
-    err('asynchronously preparing wasm');
+  err('asynchronously preparing wasm');
 #endif
 #if ASSERTIONS
-    // Async compilation can be confusing when an error on the page overwrites Module
-    // (for example, if the order of elements is wrong, and the one defining Module is
-    // later), so we save Module and check it later.
-    var trueModule = Module;
+  // Async compilation can be confusing when an error on the page overwrites Module
+  // (for example, if the order of elements is wrong, and the one defining Module is
+  // later), so we save Module and check it later.
+  var trueModule = Module;
 #endif
-    function receiveInstantiatedSource(output) {
-      // 'output' is a WebAssemblyInstantiatedSource object which has both the module and instance.
-      // receiveInstance() will swap in the exports (to Module.asm) so they can be called
+  function receiveInstantiatedSource(output) {
+    // 'output' is a WebAssemblyInstantiatedSource object which has both the module and instance.
+    // receiveInstance() will swap in the exports (to Module.asm) so they can be called
 #if ASSERTIONS
-      assert(Module === trueModule, 'the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?');
-      trueModule = null;
+    assert(Module === trueModule, 'the Module object should not be replaced during async compilation - perhaps the order of HTML elements is wrong?');
+    trueModule = null;
 #endif
-      receiveInstance(output['instance'], output['module']);
-    }
-    function instantiateArrayBuffer(receiver) {
-      getBinaryPromise().then(function(binary) {
-        return WebAssembly.instantiate(binary, info);
-      }).then(receiver, function(reason) {
-        err('failed to asynchronously prepare wasm: ' + reason);
-        abort(reason);
-      });
-    }
-    // Prefer streaming instantiation if available.
-    if (!Module['wasmBinary'] &&
-        typeof WebAssembly.instantiateStreaming === 'function' &&
-        !isDataURI(wasmBinaryFile) &&
-        typeof fetch === 'function') {
-      WebAssembly.instantiateStreaming(fetch(wasmBinaryFile, { credentials: 'same-origin' }), info)
-        .then(receiveInstantiatedSource, function(reason) {
-          // We expect the most common failure cause to be a bad MIME type for the binary,
-          // in which case falling back to ArrayBuffer instantiation should work.
-          err('wasm streaming compile failed: ' + reason);
-          err('falling back to ArrayBuffer instantiation');
-          instantiateArrayBuffer(receiveInstantiatedSource);
-        });
-    } else {
-      instantiateArrayBuffer(receiveInstantiatedSource);
-    }
-    return {}; // no exports yet; we'll fill them in later
+#if USE_PTHREADS
+    receiveInstance(output['instance'], output['module']);
 #else
-    var instance;
-    var module;
-    try {
-      module = new WebAssembly.Module(getBinary());
-      instance = new WebAssembly.Instance(module, info)
-    } catch (e) {
-      err('failed to compile wasm module: ' + e);
-      if (e.toString().indexOf('imported Memory with incompatible size') >= 0) {
-        err('Memory size incompatibility issues may be due to changing TOTAL_MEMORY at runtime to something too large. Use ALLOW_MEMORY_GROWTH to allow any size memory (and also make sure not to set TOTAL_MEMORY at runtime to something smaller than it was at compile time).');
-      }
-      return false;
-    }
-    receiveInstance(instance, module);
-    return exports;
+      // TODO: Due to Closure regression https://github.com/google/closure-compiler/issues/3193, the above line no longer optimizes out down to the following line.
+      // When the regression is fixed, can restore the above USE_PTHREADS-enabled path.
+    receiveInstance(output['instance']);
 #endif
   }
-
-  // We may have a preloaded value in Module.asm, save it
-  Module['asmPreload'] = Module['asm'];
-
-  // Memory growth integration code
-
-  var wasmReallocBuffer = function(size) {
-    var PAGE_MULTIPLE = {{{ getPageSize() }}};
-    size = alignUp(size, PAGE_MULTIPLE); // round up to wasm page size
-    var old = Module['buffer'];
-    var oldSize = old.byteLength;
-    // native wasm support
-    try {
-      var result = Module['wasmMemory'].grow((size - oldSize) / wasmPageSize); // .grow() takes a delta compared to the previous size
-      if (result !== (-1 | 0)) {
-        // success in native wasm memory growth, get the buffer from the memory
-        return Module['buffer'] = Module['wasmMemory'].buffer;
-      } else {
-        return null;
-      }
-    } catch(e) {
-#if ASSERTIONS
-      console.error('Module.reallocBuffer: Attempted to grow from ' + oldSize  + ' bytes to ' + size + ' bytes, but got error: ' + e);
+  function instantiateArrayBuffer(receiver) {
+    getBinaryPromise().then(function(binary) {
+      return WebAssembly.instantiate(binary, info);
+    }).then(receiver, function(reason) {
+      err('failed to asynchronously prepare wasm: ' + reason);
+      abort(reason);
+    });
+  }
+  // Prefer streaming instantiation if available.
+  if (!Module['wasmBinary'] &&
+      typeof WebAssembly.instantiateStreaming === 'function' &&
+      !isDataURI(wasmBinaryFile) &&
+      typeof fetch === 'function') {
+    WebAssembly.instantiateStreaming(fetch(wasmBinaryFile, { credentials: 'same-origin' }), info)
+      .then(receiveInstantiatedSource, function(reason) {
+        // We expect the most common failure cause to be a bad MIME type for the binary,
+        // in which case falling back to ArrayBuffer instantiation should work.
+        err('wasm streaming compile failed: ' + reason);
+        err('falling back to ArrayBuffer instantiation');
+        instantiateArrayBuffer(receiveInstantiatedSource);
+      });
+  } else {
+    instantiateArrayBuffer(receiveInstantiatedSource);
+  }
+  return {}; // no exports yet; we'll fill them in later
+#else
+  var instance;
+  var module;
+  try {
+    module = new WebAssembly.Module(getBinary());
+    instance = new WebAssembly.Instance(module, info)
+  } catch (e) {
+    err('failed to compile wasm module: ' + e);
+    if (e.toString().indexOf('imported Memory with incompatible size') >= 0) {
+      err('Memory size incompatibility issues may be due to changing TOTAL_MEMORY at runtime to something too large. Use ALLOW_MEMORY_GROWTH to allow any size memory (and also make sure not to set TOTAL_MEMORY at runtime to something smaller than it was at compile time).');
+    }
+    return false;
+  }
+  receiveInstance(instance, module);
+  return Module['asm']; // exports were assigned here
 #endif
-      return null;
-    }
-  };
-
-  Module['reallocBuffer'] = function(size) {
-    return wasmReallocBuffer(size);
-  };
-
-  // Provide an "asm.js function" for the application, called to "link" the asm.js module. We instantiate
-  // the wasm module at that time, and it receives imports and provides exports and so forth, the app
-  // doesn't need to care that it is wasm or asm.js.
-
-  Module['asm'] = function(global, env, providedBuffer) {
-    // import table
-    if (!env['table']) {
-#if ASSERTIONS
-     assert(Module['wasmTableSize'] !== undefined);
-#endif
-      var TABLE_SIZE = Module['wasmTableSize'];
-      var MAX_TABLE_SIZE = Module['wasmMaxTableSize'];
-      if (typeof WebAssembly === 'object' && typeof WebAssembly.Table === 'function') {
-        if (MAX_TABLE_SIZE !== undefined) {
-          env['table'] = new WebAssembly.Table({ 'initial': TABLE_SIZE, 'maximum': MAX_TABLE_SIZE, 'element': 'anyfunc' });
-        } else {
-          env['table'] = new WebAssembly.Table({ 'initial': TABLE_SIZE, element: 'anyfunc' });
-        }
-      } else {
-        env['table'] = new Array(TABLE_SIZE); // works in binaryen interpreter at least
-      }
-      Module['wasmTable'] = env['table'];
-    }
-
-    if (!env['__memory_base']) {
-      env['__memory_base'] = Module['STATIC_BASE']; // tell the memory segments where to place themselves
-    }
-    if (!env['__table_base']) {
-      env['__table_base'] = 0; // table starts at 0 by default, in dynamic linking this will change
-    }
-
-    var exports = createWasm(global, env, providedBuffer);
-
-#if ASSERTIONS
-    assert(exports, 'binaryen setup failed (no wasm support?)');
-#endif
-
-    return exports;
-  };
 }
 
-integrateWasmJS();
+// Memory growth integration code
+
+var wasmReallocBuffer = function(size) {
+  var PAGE_MULTIPLE = {{{ getPageSize() }}};
+  size = alignUp(size, PAGE_MULTIPLE); // round up to wasm page size
+  var old = Module['buffer'];
+  var oldSize = old.byteLength;
+  // native wasm support
+  try {
+    var result = Module['wasmMemory'].grow((size - oldSize) / {{{ WASM_PAGE_SIZE }}}); // .grow() takes a delta compared to the previous size
+    if (result !== (-1 | 0)) {
+      // success in native wasm memory growth, get the buffer from the memory
+      return Module['buffer'] = Module['wasmMemory'].buffer;
+    } else {
+      return null;
+    }
+  } catch(e) {
+#if ASSERTIONS
+    console.error('Module.reallocBuffer: Attempted to grow from ' + oldSize  + ' bytes to ' + size + ' bytes, but got error: ' + e);
+#endif
+    return null;
+  }
+};
+
+Module['reallocBuffer'] = function(size) {
+  return wasmReallocBuffer(size);
+};
+
+// Provide an "asm.js function" for the application, called to "link" the asm.js module. We instantiate
+// the wasm module at that time, and it receives imports and provides exports and so forth, the app
+// doesn't need to care that it is wasm or asm.js.
+
+Module['asm'] = function(global, env, providedBuffer) {
+  // import table
+  if (!env['table']) {
+#if ASSERTIONS
+   assert(Module['wasmTableSize'] !== undefined);
+#endif
+    var TABLE_SIZE = Module['wasmTableSize'];
+    var MAX_TABLE_SIZE = Module['wasmMaxTableSize'];
+    if (typeof WebAssembly === 'object' && typeof WebAssembly.Table === 'function') {
+      if (MAX_TABLE_SIZE !== undefined) {
+        env['table'] = new WebAssembly.Table({ 'initial': TABLE_SIZE, 'maximum': MAX_TABLE_SIZE, 'element': 'anyfunc' });
+      } else {
+        env['table'] = new WebAssembly.Table({ 'initial': TABLE_SIZE, element: 'anyfunc' });
+      }
+    } else {
+      env['table'] = new Array(TABLE_SIZE); // works in binaryen interpreter at least
+    }
+    Module['wasmTable'] = env['table'];
+  }
+
+  if (!env['__memory_base']) {
+    env['__memory_base'] = Module['STATIC_BASE']; // tell the memory segments where to place themselves
+  }
+  if (!env['__table_base']) {
+    env['__table_base'] = 0; // table starts at 0 by default, in dynamic linking this will change
+  }
+
+  var exports = createWasm(env);
+
+#if ASSERTIONS
+  assert(exports, 'binaryen setup failed (no wasm support?)');
+#endif
+
+  return exports;
+};
 #endif
 
 // === Body ===

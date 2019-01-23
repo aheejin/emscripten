@@ -385,7 +385,7 @@ actual_clang_version = None
 
 def expected_llvm_version():
   if get_llvm_target() == WASM_TARGET:
-    return "8.0"
+    return "9.0"
   else:
     return "6.0"
 
@@ -522,7 +522,7 @@ EMSCRIPTEN_VERSION_MAJOR, EMSCRIPTEN_VERSION_MINOR, EMSCRIPTEN_VERSION_TINY = pa
 # change, increment EMSCRIPTEN_ABI_MINOR if EMSCRIPTEN_ABI_MAJOR == 0
 # or the ABI change is backwards compatible, otherwise increment
 # EMSCRIPTEN_ABI_MAJOR and set EMSCRIPTEN_ABI_MINOR = 0
-(EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR) = (0, 0)
+(EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR) = (0, 1)
 
 
 def generate_sanity():
@@ -1246,6 +1246,10 @@ class SettingsManager(object):
     def __getitem__(self, key):
       return self.attrs[key]
 
+    @classmethod
+    def target_environment_may_be(self, environment):
+      return self.attrs['ENVIRONMENT'] == '' or environment in self.attrs['ENVIRONMENT'].split(',')
+
   __instance = None
 
   @staticmethod
@@ -1423,13 +1427,13 @@ class Building(object):
       # actually spawn any new subprocesses. Very useful for internal debugging.
       if cores == 1:
         class FakeMultiprocessor(object):
-          def map(self, func, tasks):
+          def map(self, func, tasks, *args, **kwargs):
             results = []
             for t in tasks:
               results += [func(t)]
             return results
 
-          def map_async(self, func, tasks, **kwargs):
+          def map_async(self, func, tasks, *args, **kwargs):
             class Result:
               def __init__(self, func, tasks):
                 self.func = func
@@ -2087,18 +2091,21 @@ class Building(object):
 
       link_args = ["@" + response_file]
 
-      response_fh = open(response_file, 'w')
-      for arg in actual_files:
-        # Starting from LLVM 3.9.0 trunk around July 2016, LLVM escapes backslashes in response files, so Windows paths
-        # "c:\path\to\file.txt" with single slashes no longer work. LLVM upstream dev 3.9.0 from January 2016 still treated
-        # backslashes without escaping. To preserve compatibility with both versions of llvm-link, don't pass backslash
-        # path delimiters at all to response files, but always use forward slashes.
-        if WINDOWS:
-          arg = arg.replace('\\', '/')
+      with open(response_file, 'w') as f:
+        for arg in actual_files:
+          # Starting from LLVM 3.9.0 trunk around July 2016, LLVM escapes
+          # backslashes in response files, so Windows paths
+          # "c:\path\to\file.txt" with single slashes no longer work. LLVM
+          # upstream dev 3.9.0 from January 2016 still treated backslashes
+          # without escaping. To preserve compatibility with both versions of
+          # llvm-link, don't pass backslash path delimiters at all to response
+          # files, but always use forward slashes.
+          if WINDOWS:
+            arg = arg.replace('\\', '/')
 
-        # escaped double quotes allows 'space' characters in pathname the response file can use
-        response_fh.write("\"" + arg + "\"\n")
-      response_fh.close()
+          # escaped double quotes allows 'space' characters in pathname the
+          # response file can use
+          f.write("\"" + arg + "\"\n")
 
     if not just_calculate:
       logger.debug('emcc: llvm-linking: %s to %s', actual_files, target)
@@ -2258,7 +2265,7 @@ class Building(object):
     # Run Emscripten
     outfile = infile + '.o.js'
     with ToolchainProfiler.profile_block('emscripten.py'):
-      emscripten.main(infile, outfile, memfile, js_libraries)
+      emscripten.run(infile, outfile, memfile, js_libraries)
 
     # Detect compilation crashes and errors
     assert os.path.exists(outfile), 'Emscripten failed to generate .js'
@@ -2296,7 +2303,7 @@ class Building(object):
       # if the JS optimizer runs, it must run on valid asm.js
       return False
     if Settings.RELOCATABLE and Settings.EMULATED_FUNCTION_POINTERS:
-      # FIXME(https://github.com/kripken/emscripten/issues/5370)
+      # FIXME(https://github.com/emscripten-core/emscripten/issues/5370)
       # emulation function pointers work properly, but calling between
       # modules as wasm-only needs more work
       return False
@@ -2318,9 +2325,8 @@ class Building(object):
       logger.debug('using response file for EXPORTED_FUNCTIONS in internalize')
       finalized_exports = '\n'.join([exp[1:] for exp in exps])
       internalize_list_file = configuration.get_temp_files().get(suffix='.response').name
-      internalize_list_fh = open(internalize_list_file, 'w')
-      internalize_list_fh.write(finalized_exports)
-      internalize_list_fh.close()
+      with open(internalize_list_file, 'w') as f:
+        f.write(finalized_exports)
       internalize_public_api += 'file=' + internalize_list_file
     else:
       internalize_public_api += 'list=' + internalize_list
@@ -2444,11 +2450,28 @@ class Building(object):
         logger.error('Cannot run closure compiler')
         raise Exception('closure compiler check failed')
 
+      # Closure annotations file contains suppressions and annotations to different symbols
+      CLOSURE_ANNOTATIONS = ['--js', path_from_root('src', 'closure-annotations.js')]
+
+      if not Settings.ASMFS:
+        # If we have filesystem disabled, tell Closure not to bark when there are syscalls emitted that still reference the nonexisting FS object.
+        if not Settings.FILESYSTEM:
+          CLOSURE_ANNOTATIONS += ['--js', path_from_root('src', 'closure-undefined-fs-annotation.js')]
+
+        # If we do have filesystem enabled, tell Closure not to bark when FS references different libraries that might not exist.
+        if Settings.FILESYSTEM and not Settings.ASMFS:
+          CLOSURE_ANNOTATIONS += ['--js', path_from_root('src', 'closure-defined-fs-annotation.js')]
+
+      # Closure externs file contains known symbols to be extern to the minification, Closure
+      # should not minify these symbol names.
       CLOSURE_EXTERNS = path_from_root('src', 'closure-externs.js')
       NODE_EXTERNS_BASE = path_from_root('third_party', 'closure-compiler', 'node-externs')
       NODE_EXTERNS = os.listdir(NODE_EXTERNS_BASE)
       NODE_EXTERNS = [os.path.join(NODE_EXTERNS_BASE, name) for name in NODE_EXTERNS
                       if name.endswith('.js')]
+      NODE_EXTERNS = [path_from_root('src', 'node-externs.js')] + NODE_EXTERNS
+      V8_EXTERNS = [path_from_root('src', 'v8-externs.js')]
+      SPIDERMONKEY_EXTERNS = [path_from_root('src', 'spidermonkey-externs.js')]
       BROWSER_EXTERNS_BASE = path_from_root('third_party', 'closure-compiler', 'browser-externs')
       BROWSER_EXTERNS = os.listdir(BROWSER_EXTERNS_BASE)
       BROWSER_EXTERNS = [os.path.join(BROWSER_EXTERNS_BASE, name) for name in BROWSER_EXTERNS
@@ -2461,27 +2484,34 @@ class Building(object):
               '-Xmx' + (os.environ.get('JAVA_HEAP_SIZE') or '1024m'), # if you need a larger Java heap, use this environment variable
               '-jar', CLOSURE_COMPILER,
               '--compilation_level', 'ADVANCED_OPTIMIZATIONS',
-              '--language_in', 'ECMASCRIPT5',
-              '--externs', CLOSURE_EXTERNS,
-              # '--variable_map_output_file', filename + '.vars',
-              '--js', filename, '--js_output_file', outfile]
-      for extern in NODE_EXTERNS:
-        args.append('--externs')
-        args.append(extern)
-      for extern in BROWSER_EXTERNS:
-        args.append('--externs')
-        args.append(extern)
+              '--language_in', 'ECMASCRIPT5']
+      args += CLOSURE_ANNOTATIONS
+      args += ['--externs', CLOSURE_EXTERNS,
+               '--js_output_file', outfile]
+
+      if Settings.target_environment_may_be('node'):
+        for extern in NODE_EXTERNS:
+          args.append('--externs')
+          args.append(extern)
+      if Settings.target_environment_may_be('shell'):
+        for extern in V8_EXTERNS + SPIDERMONKEY_EXTERNS:
+          args.append('--externs')
+          args.append(extern)
+      if Settings.target_environment_may_be('web') or Settings.target_environment_may_be('worker'):
+        for extern in BROWSER_EXTERNS:
+          args.append('--externs')
+          args.append(extern)
       # Closure compiler needs to know about all exports that come from the asm.js/wasm module, because to optimize for small code size,
       # the exported symbols are added to global scope via a foreach loop in a way that evades Closure's static analysis. With an explicit
       # externs file for the exports, Closure is able to reason about the exports.
-      if Settings.MODULE_EXPORTS:
+      if Settings.MODULE_EXPORTS and not Settings.DECLARE_ASM_MODULE_EXPORTS:
         # Generate an exports file that records all the exported symbols from asm.js/wasm module.
         module_exports_suppressions = '\n'.join(['/**\n * @suppress {duplicate, undefinedVars}\n */\nvar %s;\n' % i for i in Settings.MODULE_EXPORTS])
         exports_file = configuration.get_temp_files().get('_module_exports.js')
         exports_file.write(module_exports_suppressions.encode())
         exports_file.close()
 
-        args.append('--externs')
+        args.append('--js')
         args.append(exports_file.name)
       if Settings.IGNORE_CLOSURE_COMPILER_ERRORS:
         args.append('--jscomp_off=*')
@@ -2489,6 +2519,7 @@ class Building(object):
         args += ['--formatting', 'PRETTY_PRINT']
       if os.environ.get('EMCC_CLOSURE_ARGS'):
         args += shlex.split(os.environ.get('EMCC_CLOSURE_ARGS'))
+      args += ['--js', filename]
       logger.debug('closure compiler: ' + ' '.join(args))
       proc = run_process(args, stderr=PIPE, check=False)
       if proc.returncode != 0:
@@ -2700,10 +2731,6 @@ class Building(object):
       if len(js_system_libraries[library_name]):
         library_files += [js_system_libraries[library_name]]
 
-        # TODO: This is unintentional due to historical reasons. Improve EGL to use HTML5 API to avoid depending on GLUT.
-        if library_name == 'EGL':
-          library_files += ['library_glut.js']
-
     elif library_name.endswith('.js') and os.path.isfile(path_from_root('src', 'library_' + library_name)):
       library_files += ['library_' + library_name]
     else:
@@ -2728,7 +2755,7 @@ class Building(object):
     if 'USE_SDL=1' in link_settings:
       system_js_libraries += ['library_sdl.js']
     if 'USE_SDL=2' in link_settings:
-      system_js_libraries += ['library_egl.js', 'library_glut.js', 'library_gl.js']
+      system_js_libraries += ['library_egl.js', 'library_gl.js']
     return [path_from_root('src', x) for x in system_js_libraries]
 
   @staticmethod
@@ -2775,12 +2802,12 @@ class FilenameReplacementStrings:
 
 
 class JS(object):
-  memory_initializer_pattern = '/\* memory initializer \*/ allocate\(\[([\d, ]*)\], "i8", ALLOC_NONE, ([\d+\.GLOBAL_BASEHgb]+)\);'
-  no_memory_initializer_pattern = '/\* no memory initializer \*/'
+  memory_initializer_pattern = r'/\* memory initializer \*/ allocate\(\[([\d, ]*)\], "i8", ALLOC_NONE, ([\d+\.GLOBAL_BASEHgb]+)\);'
+  no_memory_initializer_pattern = r'/\* no memory initializer \*/'
 
-  memory_staticbump_pattern = 'STATICTOP = STATIC_BASE \+ (\d+);'
+  memory_staticbump_pattern = r'STATICTOP = STATIC_BASE \+ (\d+);'
 
-  global_initializers_pattern = '/\* global initializers \*/ __ATINIT__.push\((.+)\);'
+  global_initializers_pattern = r'/\* global initializers \*/ __ATINIT__.push\((.+)\);'
 
   module_export_name_substitution_pattern = '"__EMSCRIPTEN_PRIVATE_MODULE_EXPORT_NAME_SUBSTITUTION__"'
 
@@ -3026,12 +3053,12 @@ class WebAssembly(object):
   @staticmethod
   def get_js_data(js_file, shared=False):
     js = open(js_file).read()
-    m = re.search("var STATIC_BUMP = (\d+);", js)
+    m = re.search(r"var STATIC_BUMP = (\d+);", js)
     mem_size = int(m.group(1))
-    m = re.search("Module\['wasmTableSize'\] = (\d+);", js)
+    m = re.search(r"Module\['wasmTableSize'\] = (\d+);", js)
     table_size = int(m.group(1))
     if shared:
-      m = re.search('gb = alignMemory\(getMemory\(\d+ \+ (\d+)\), (\d+) \|\| 1\);', js)
+      m = re.search(r'gb = alignMemory\(getMemory\(\d+ \+ (\d+)\), (\d+) \|\| 1\);', js)
       assert m.group(1) == m.group(2), 'js must contain a clear alignment for the wasm shared library'
       mem_align = int(m.group(1))
     else:
@@ -3151,11 +3178,6 @@ def asbytes(s):
   return s.encode('utf-8')
 
 
-def suffix(name):
-  """Return the file extension *not* including the '.'."""
-  return os.path.splitext(name)[1][1:]
-
-
 def unsuffixed(name):
   """Return the filename without the extention.
 
@@ -3231,7 +3253,7 @@ def read_and_preprocess(filename):
 # worker in -s ASMFS=1 mode.
 def make_fetch_worker(source_file, output_file):
   src = open(source_file, 'r').read()
-  funcs_to_import = ['alignUp', 'getTotalMemory', 'stringToUTF8', 'intArrayFromString', 'lengthBytesUTF8', 'stringToUTF8Array', '_emscripten_is_main_runtime_thread', '_emscripten_futex_wait']
+  funcs_to_import = ['alignUp', '_emscripten_get_heap_size', '_emscripten_resize_heap', 'stringToUTF8', 'intArrayFromString', 'lengthBytesUTF8', 'stringToUTF8Array', '_emscripten_is_main_runtime_thread', '_emscripten_futex_wait']
   asm_funcs_to_import = ['_malloc', '_free', '_sbrk', '___pthread_mutex_lock', '___pthread_mutex_unlock']
   function_prologue = '''this.onerror = function(e) {
   console.error(e);
