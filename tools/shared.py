@@ -156,8 +156,12 @@ def run_process(cmd, check=True, input=None, universal_newlines=True, *args, **k
   mylog.log_cmd(cmd)
   kw.setdefault('universal_newlines', True)
 
+  debug_text = '%sexecuted %s' % ('successfully ' if check else '', ' '.join(cmd))
+
   if hasattr(subprocess, "run"):
-    return subprocess.run(cmd, check=check, input=input, *args, **kw)
+    ret = subprocess.run(cmd, check=check, input=input, *args, **kw)
+    logger.debug(debug_text)
+    return ret
 
   # Python 2 compatibility: Introduce Python 3 subprocess.run-like behavior
   if input is not None:
@@ -167,9 +171,7 @@ def run_process(cmd, check=True, input=None, universal_newlines=True, *args, **k
   result = Py2CompletedProcess(cmd, proc.returncode, stdout, stderr)
   if check:
     result.check_returncode()
-    logger.debug('Successfully executed %s' % ' '.join(cmd))
-  else:
-    logger.debug('Executed %s' % ' '.join(cmd))
+  logger.debug(debug_text)
   return result
 
 
@@ -2137,7 +2139,6 @@ class Building(object):
     else:
       opts += ['-force-vector-width=4']
 
-    logger.debug('emcc: LLVM opts: ' + ' '.join(opts) + '  [num inputs: ' + str(len(inputs)) + ']')
     target = out or (filename + '.opt.bc')
     try:
       run_process([LLVM_OPT] + inputs + opts + ['-o', target], stdout=PIPE)
