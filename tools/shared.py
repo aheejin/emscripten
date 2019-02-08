@@ -1905,7 +1905,6 @@ class Building(object):
     args = [a for a in args if a not in ('--start-group', '--end-group')]
     cmd = [
         WASM_LD,
-        '--export-dynamic',
         '-z',
         'stack-size=%s' % Settings.TOTAL_STACK,
         '--global-base=%s' % Settings.GLOBAL_BASE,
@@ -3234,7 +3233,7 @@ def clang_preprocess(filename):
   return run_process([CLANG_CC, '-DFETCH_DEBUG=1', '-E', '-P', '-C', '-x', 'c', filename], check=True, stdout=subprocess.PIPE).stdout
 
 
-def read_and_preprocess(filename):
+def read_and_preprocess(filename, expand_macros=False):
   temp_dir = get_emscripten_temp_dir()
   # Create a settings file with the current settings to pass to the JS preprocessor
   # Note: Settings.serialize returns an array of -s options i.e. ['-s', '<setting1>', '-s', '<setting2>', ...]
@@ -3252,6 +3251,8 @@ def read_and_preprocess(filename):
     path = None
   stdout = os.path.join(temp_dir, 'stdout')
   args = [settings_file, file]
+  if expand_macros:
+    args += ['--expandMacros']
 
   run_js(path_from_root('tools/preprocessor.js'), NODE_JS, args, True, stdout=open(stdout, 'w'), cwd=path)
   out = open(stdout, 'r').read()

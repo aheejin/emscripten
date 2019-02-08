@@ -57,8 +57,6 @@ function assert(condition, text) {
   }
 }
 
-var globalScope = this;
-
 // Returns the C function with a specified identifier (for C++, you need to do manual name mangling)
 function getCFunc(ident) {
   var func = Module['_' + ident]; // closure exported function
@@ -355,14 +353,6 @@ assert(DYNAMIC_BASE % 16 === 0, 'heap must start aligned');
 #endif
 
 #if USE_PTHREADS
-}
-#endif
-
-#if USE_PTHREADS
-if (ENVIRONMENT_IS_PTHREAD) {
-#if SEPARATE_ASM != 0
-  importScripts('{{{ SEPARATE_ASM }}}'); // load the separated-out asm.js
-#endif
 }
 #endif
 
@@ -1028,7 +1018,13 @@ function createWasm(env) {
 
 Module['asm'] = function(global, env, providedBuffer) {
   // memory was already allocated (so js could use the buffer)
-  env['memory'] = wasmMemory;
+  env['memory'] = wasmMemory
+#if MODULARIZE && USE_PTHREADS
+  // Pthreads assign wasmMemory in their worker startup. In MODULARIZE mode, they cannot assign inside the
+  // Module scope, so lookup via Module as well.
+  || Module['wasmMemory']
+#endif
+  ;
   // import table
   env['table'] = wasmTable = new WebAssembly.Table({
     'initial': {{{ getQuoted('WASM_TABLE_SIZE') }}},
