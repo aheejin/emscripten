@@ -15,6 +15,12 @@ full changeset diff at the end of each section.
 
 Current Trunk
 -------------
+ - Normalize mouse wheel delta in `library_browser.js`. This changes the scroll
+   amount in SDL, GLFW, and GLUT. (#7968)
+
+v1.38.27: 02/10/2019
+--------------------
+ - Change how EMCC_LOCAL_PORTS works, to be more usable. See #7963
  - Remove deprecated Pointer_stringify (use UTF8ToString instead). See #8011
  - Added a new option -s DISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=1 that
    changes the lookup semantics of DOM elements in html5.h event handler
