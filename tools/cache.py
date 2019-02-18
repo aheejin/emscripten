@@ -5,15 +5,17 @@
 
 from __future__ import print_function
 from .toolchain_profiler import ToolchainProfiler
-import os.path, sys, shutil, time, logging
+import os
+import shutil
+import logging
 from . import tempfiles, filelock
 from . import mylog
 
 logger = logging.getLogger('emscripten')
 
+
 # Permanent cache for dlmalloc and stdlibc++
 class Cache(object):
-
   # If EM_EXCLUSIVE_CACHE_ACCESS is true, this process is allowed to have direct access to
   # the Emscripten cache without having to obtain an interprocess lock for it. Generally this
   # is false, and this is used in the case that Emscripten process recursively calls to itself
@@ -72,8 +74,10 @@ class Cache(object):
     self.acquired_count -= 1
     assert self.acquired_count >= 0, "Called release more times than acquire"
     if not self.EM_EXCLUSIVE_CACHE_ACCESS and self.acquired_count == 0:
-      if self.prev_EM_EXCLUSIVE_CACHE_ACCESS: os.environ['EM_EXCLUSIVE_CACHE_ACCESS'] = self.prev_EM_EXCLUSIVE_CACHE_ACCESS
-      else: del os.environ['EM_EXCLUSIVE_CACHE_ACCESS']
+      if self.prev_EM_EXCLUSIVE_CACHE_ACCESS:
+        os.environ['EM_EXCLUSIVE_CACHE_ACCESS'] = self.prev_EM_EXCLUSIVE_CACHE_ACCESS
+      else:
+        del os.environ['EM_EXCLUSIVE_CACHE_ACCESS']
       self.filelock.release()
       logger.debug('Cache: PID %s released multiprocess file lock to Emscripten cache at %s' % (str(os.getpid()), self.dirname))
 
@@ -96,7 +100,8 @@ class Cache(object):
   # Request a cached file. If it isn't in the cache, it will be created with
   # the given creator function
   def get(self, shortname, creator, extension='.bc', what=None, force=False):
-    if not shortname.endswith(extension): shortname += extension
+    if not shortname.endswith(extension):
+      shortname += extension
     cachename = os.path.abspath(os.path.join(self.dirname, shortname))
 
     self.acquire_cache_lock()
@@ -104,8 +109,10 @@ class Cache(object):
       if os.path.exists(cachename) and not force:
         return cachename
       if what is None:
-        if shortname.endswith(('.bc', '.so', '.a')): what = 'system library'
-        else: what = 'system asset'
+        if shortname.endswith(('.bc', '.so', '.a')):
+          what = 'system library'
+        else:
+          what = 'system asset'
       message = 'generating ' + what + ': ' + shortname + '... (this will be cached in "' + cachename + '" for subsequent builds)'
       logger.info(message)
       self.ensure()
@@ -118,6 +125,7 @@ class Cache(object):
       self.release_cache_lock()
 
     return cachename
+
 
 # Given a set of functions of form (ident, text), and a preferred chunk size,
 # generates a set of chunks for parallel processing and caching.
@@ -140,7 +148,8 @@ def chunkify(funcs, chunk_size, DEBUG=False):
     if curr:
       chunks.append(curr)
       curr = None
-    return [''.join([func[1] for func in chunk]) for chunk in chunks] # remove function names
+    return [''.join(func[1] for func in chunk) for chunk in chunks] # remove function names
+
 
 try:
   from . import shared

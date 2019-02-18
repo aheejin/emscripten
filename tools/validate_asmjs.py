@@ -16,12 +16,17 @@
 # This script depends on the SpiderMonkey JS engine, which must be present in PATH in order for this script to function.
 
 from __future__ import print_function
-import subprocess, sys, re, tempfile, os, time
+import os
+import re
+import subprocess
+import sys
+import tempfile
 
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools import shared
 from tools import mylog
+
 
 # Given a .js file, returns True/False depending on if that file is valid asm.js
 def validate_asmjs_jsfile(filename, muteOutput):
@@ -48,6 +53,7 @@ def validate_asmjs_jsfile(filename, muteOutput):
     return True
   else:
     return False
+
 
 # This tool takes as input a file built with Emscripten (either .html or .js) and validates it for asm.js.
 # Returns True/False denoting whether the file was valid asm.js. In case of a .html file, all <script>content</script> tags are searched,
@@ -81,6 +87,7 @@ def validate_asmjs(filename, muteOutput):
   else:
     return validate_asmjs_jsfile(filename, muteOutput)
 
+
 def main():
   if len(sys.argv) < 2:
     print('Usage: validate_asmjs <filename>')
@@ -91,6 +98,7 @@ def main():
   else:
     print("FAIL: File '" + sys.argv[1] + "' is not valid asm.js")
     return 1
+
 
 if __name__ == '__main__':
   sys.exit(main())
