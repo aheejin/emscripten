@@ -624,7 +624,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
   CC = shared.to_cc(CXX)
 
-  # If we got here from a redirection through emmakenxx.py, then force a C++ compiler here
+  # If we got here from a redirection through em++.py, then force a C++ compiler here
   if EMCC_CXX:
     CC = CXX
 
@@ -1022,17 +1022,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     # Use settings
 
-    try:
-      assert shared.Settings.ASM_JS > 0, 'ASM_JS must be enabled in fastcomp'
-      assert shared.Settings.SAFE_HEAP in [0, 1], 'safe heap must be 0 or 1 in fastcomp'
-      assert shared.Settings.UNALIGNED_MEMORY == 0, 'forced unaligned memory not supported in fastcomp'
-      assert shared.Settings.FORCE_ALIGNED_MEMORY == 0, 'forced aligned memory is not supported in fastcomp'
-      assert shared.Settings.PGO == 0, 'pgo not supported in fastcomp'
-      assert shared.Settings.QUANTUM_SIZE == 4, 'altering the QUANTUM_SIZE is not supported'
-    except Exception as e:
-      logger.error('Compiler settings error: {}'.format(e))
-      exit_with_error('Very old compiler settings (pre-fastcomp) are no longer supported.')
-
     if options.debug_level > 1 and options.use_closure_compiler:
       logger.warning('disabling closure because debug info was requested')
       options.use_closure_compiler = False
@@ -1294,11 +1283,19 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.DECLARE_ASM_MODULE_EXPORTS = 1
       logger.warning('Enabling -s DECLARE_ASM_MODULE_EXPORTS=1, since MODULARIZE currently requires declaring asm.js/wasm module exports in full')
 
+    # In MINIMAL_RUNTIME when modularizing, by default output asm.js module under the same name as the JS module. This allows code to share same loading function for both JS and asm.js modules,
+    # to save code size. The intent is that loader code captures the function variable from global scope to XHR loader local scope when it finishes loading, to avoid polluting global JS scope with
+    # variables. This provides safety via encapsulation. See src/shell_minimal_runtime.html for an example.
+    if shared.Settings.MINIMAL_RUNTIME and not shared.Settings.SEPARATE_ASM_MODULE_NAME and not shared.Settings.WASM and shared.Settings.MODULARIZE:
+      shared.Settings.SEPARATE_ASM_MODULE_NAME = 'var ' + shared.Settings.EXPORT_NAME
+
     if shared.Settings.MODULARIZE and shared.Settings.SEPARATE_ASM and not shared.Settings.WASM and not shared.Settings.SEPARATE_ASM_MODULE_NAME:
       exit_with_error('Targeting asm.js with --separate-asm and -s MODULARIZE=1 requires specifying the target variable name to which the asm.js module is loaded into. See https://github.com/emscripten-core/emscripten/pull/7949 for details')
     # Apply default option if no custom name is provided
     if not shared.Settings.SEPARATE_ASM_MODULE_NAME:
       shared.Settings.SEPARATE_ASM_MODULE_NAME = 'Module["asm"]'
+    elif shared.Settings.WASM:
+      exit_with_error('-s SEPARATE_ASM_MODULE_NAME option only applies to when targeting asm.js, not with WebAssembly!')
 
     if shared.Settings.MINIMAL_RUNTIME:
       # Minimal runtime uses a different default shell file
@@ -1317,6 +1314,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       # In asm.js always use memory init file to get the best code size, other modes are not currently supported.
       if not shared.Settings.WASM:
         options.memory_init_file = True
+
+    if shared.Settings.MODULARIZE and not shared.Settings.MODULARIZE_INSTANCE and shared.Settings.EXPORT_NAME == 'Module' and final_suffix == '.html' and \
+       (options.shell_path == shared.path_from_root('src', 'shell.html') or options.shell_path == shared.path_from_root('src', 'shell_minimal.html')):
+      exit_with_error('Due to collision in variable name "Module", the shell file "' + options.shell_path + '" is not compatible with build options "-s MODULARIZE=1 -s EXPORT_NAME=Module". Either provide your own shell file, change the name of the export to something else to avoid the name collision. (see https://github.com/emscripten-core/emscripten/issues/7950 for details)')
 
     if shared.Settings.WASM:
       if shared.Settings.SINGLE_FILE:
@@ -1446,6 +1447,12 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if shared.Settings.USE_PTHREADS:
         exit_with_error('-s USE_PTHREADS=1 is not yet supported with -s MINIMAL_RUNTIME=1')
 
+      if shared.Settings.PRECISE_F32 == 2:
+        exit_with_error('-s PRECISE_F32=2 is not supported with -s MINIMAL_RUNTIME=1')
+
+      if shared.Settings.SINGLE_FILE:
+        exit_with_error('-s SINGLE_FILE=1 is not supported with -s MINIMAL_RUNTIME=1')
+
     if shared.Settings.ALLOW_MEMORY_GROWTH and shared.Settings.ASM_JS == 1:
       # this is an issue in asm.js, but not wasm
       if not shared.Settings.WASM:
@@ -1528,7 +1535,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         headers = [header for _, header in input_files]
         for header in headers:
           assert header.endswith(HEADER_ENDINGS), 'if you have one header input, we assume you want to precompile headers, and cannot have source files or other inputs as well: ' + str(headers) + ' : ' + header
-        args = newargs + shared.EMSDK_CXX_OPTS + headers
+        args = newargs + headers
         if specified_target:
           args += ['-o', specified_target]
         args = system_libs.process_args(args, shared.Settings)
@@ -1560,10 +1567,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # Bitcode args generation code
       def get_clang_args(input_files):
-        file_ending = get_file_suffix(input_files[0])
         args = [call] + newargs + input_files
-        if file_ending.endswith(CXX_ENDINGS):
-          args += shared.EMSDK_CXX_OPTS
         if not shared.Building.can_inline():
           args.append('-fno-inline-functions')
         # For fastcomp backend, no LLVM IR functions should ever be annotated
@@ -2711,33 +2715,42 @@ def modularize():
   logger.debug('Modularizing, assigning to var ' + shared.Settings.EXPORT_NAME)
   src = open(final).read()
 
+  # TODO: exports object generation for MINIMAL_RUNTIME
+  exports_object = '{}' if shared.Settings.MINIMAL_RUNTIME else shared.Settings.EXPORT_NAME
+
   src = '''
 function(%(EXPORT_NAME)s) {
   %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
 
 %(src)s
 
-  return %(EXPORT_NAME)s;
+  return %(exports_object)s
 }
 ''' % {
     'EXPORT_NAME': shared.Settings.EXPORT_NAME,
-    'src': src
+    'src': src,
+    'exports_object': exports_object
   }
 
   if not shared.Settings.MODULARIZE_INSTANCE:
-    # When MODULARIZE this JS may be executed later,
-    # after document.currentScript is gone, so we save it.
-    # (when MODULARIZE_INSTANCE, an instance is created
-    # immediately anyhow, like in non-modularize mode)
-    src = '''
+    if shared.Settings.MINIMAL_RUNTIME and not shared.Settings.USE_PTHREADS:
+      # Single threaded MINIMAL_RUNTIME programs do not need access to
+      # document.currentScript, so a simple export declaration is enough.
+      src = 'var %s=%s' % (shared.Settings.EXPORT_NAME, src)
+    else:
+      # When MODULARIZE this JS may be executed later,
+      # after document.currentScript is gone, so we save it.
+      # (when MODULARIZE_INSTANCE, an instance is created
+      # immediately anyhow, like in non-modularize mode)
+      src = '''
 var %(EXPORT_NAME)s = (function() {
   var _scriptDir = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
   return (%(src)s);
 })();
 ''' % {
-      'EXPORT_NAME': shared.Settings.EXPORT_NAME,
-      'src': src
-    }
+        'EXPORT_NAME': shared.Settings.EXPORT_NAME,
+        'src': src
+      }
   else:
     # Create the MODULARIZE_INSTANCE instance
     # Note that we notice the global Module object, just like in normal
@@ -2756,9 +2769,10 @@ var %(EXPORT_NAME)s = (%(src)s)(typeof %(EXPORT_NAME)s === 'object' ? %(EXPORT_N
     f.write(src)
 
     # Export using a UMD style export, or ES6 exports if selected
+
     if shared.Settings.EXPORT_ES6:
       f.write('''export default %s;''' % shared.Settings.EXPORT_NAME)
-    else:
+    elif not shared.Settings.MINIMAL_RUNTIME:
       f.write('''if (typeof exports === 'object' && typeof module === 'object')
       module.exports = %(EXPORT_NAME)s;
     else if (typeof define === 'function' && define['amd'])
@@ -2801,10 +2815,11 @@ def generate_minimal_runtime_html(target, options, js_target, target_basename,
   if re.search('{{{\s*SCRIPT\s*}}}', shell):
     exit_with_error('--shell-file "' + options.shell_path + '": MINIMAL_RUNTIME uses a different kind of HTML page shell file than the traditional runtime! Please see $EMSCRIPTEN/src/shell_minimal_runtime.html for a template to use as a basis.')
 
-  html_contents = shell.replace('{{{ TARGET_BASENAME }}}', target_basename)
-  html_contents = tools.line_endings.convert_line_endings(html_contents, '\n', options.output_eol)
+  shell = shell.replace('{{{ TARGET_BASENAME }}}', target_basename)
+  shell = shell.replace('{{{ EXPORT_NAME }}}', shared.Settings.EXPORT_NAME)
+  shell = tools.line_endings.convert_line_endings(shell, '\n', options.output_eol)
   with open(target, 'wb') as f:
-    f.write(asbytes(html_contents))
+    f.write(asbytes(shell))
 
 
 def generate_traditional_runtime_html(target, options, js_target, target_basename,
