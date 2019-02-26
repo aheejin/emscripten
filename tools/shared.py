@@ -2833,19 +2833,14 @@ class Building(object):
     return ret
 
   @staticmethod
-  def get_binaryen():
-    # fetch the port, so we have binaryen set up. indicate we need binaryen
-    # using the settings
-    from . import system_libs
-    old = Settings.WASM
-    Settings.WASM = 1
-    system_libs.get_port('binaryen', Settings)
-    Settings.WASM = old
-
-  @staticmethod
   def get_binaryen_bin():
-    Building.get_binaryen()
-    return os.path.join(Settings.BINARYEN_ROOT, 'bin')
+    assert Settings.WASM, 'non wasm builds should not ask for binaryen'
+    if not BINARYEN_ROOT:
+      # ensure we have the port available if needed.
+      from . import system_libs
+      system_libs.get_port('binaryen', Settings)
+      assert os.path.exists(BINARYEN_ROOT)
+    return os.path.join(BINARYEN_ROOT, 'bin')
 
 
 # compatibility with existing emcc, etc. scripts
@@ -3291,11 +3286,6 @@ def safe_copy(src, dst):
   shutil.copyfile(src, dst)
 
 
-def clang_preprocess(filename):
-  # TODO: REMOVE HACK AND PASS PREPROCESSOR FLAGS TO CLANG.
-  return run_process([CLANG_CC, '-DFETCH_DEBUG=1', '-E', '-P', '-C', '-x', 'c', filename], check=True, stdout=subprocess.PIPE).stdout
-
-
 def read_and_preprocess(filename, expand_macros=False):
   temp_dir = get_emscripten_temp_dir()
   # Create a settings file with the current settings to pass to the JS preprocessor
@@ -3352,5 +3342,5 @@ def make_fetch_worker(source_file, output_file):
     func_code = src[loc:end_loc]
     function_prologue = function_prologue + '\n' + func_code
 
-  fetch_worker_src = function_prologue + '\n' + clang_preprocess(path_from_root('src', 'fetch-worker.js'))
+  fetch_worker_src = function_prologue + '\n' + read_and_preprocess(path_from_root('src', 'fetch-worker.js'), expand_macros=True)
   open(output_file, 'w').write(fetch_worker_src)

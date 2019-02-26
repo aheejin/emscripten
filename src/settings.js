@@ -1078,10 +1078,6 @@ var WASM_MEM_MAX = -1;
 // smallest modules to run in V8
 var BINARYEN_ASYNC_COMPILATION = 1;
 
-// Directory where we can find Binaryen. Will be automatically set for you, but
-// you can set it to override if you are a Binaryen developer.
-var BINARYEN_ROOT = "";
-
 // WebAssembly defines a "producers section" which compilers and tools can
 // annotate themselves in. Emscripten does not emit this by default, as it
 // increases code size, and some users may not want information about their tools
@@ -1295,6 +1291,10 @@ var OFFSCREENCANVAS_SUPPORT = 0;
 // time, and allows one to utilize OffscreenCanvas where available, and to fall
 // back to Offscreen Framebuffer otherwise.
 var OFFSCREEN_FRAMEBUFFER = 0;
+
+// If nonzero, Fetch API (and hence ASMFS) supports backing to IndexedDB. If 0, IndexedDB is not utilized. Set to 0 if
+// IndexedDB support is not interesting for target application, to save a few kBytes.
+var FETCH_SUPPORT_INDEXEDDB = 1;
 
 // If nonzero, prints out debugging information in library_fetch.js
 var FETCH_DEBUG = 0;
