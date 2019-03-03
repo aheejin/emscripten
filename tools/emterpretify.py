@@ -16,6 +16,7 @@ import os, sys, re, json, shutil, fnmatch
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools import asm_module, shared
+from tools import mylog
 
 # params
 
@@ -783,7 +784,7 @@ if __name__ == '__main__':
 
   if DEBUG or SWAPPABLE:
     orig = infile + '.orig.js'
-    shared.logging.debug('saving original (non-emterpreted) code to ' + orig)
+    shared.logger.debug('saving original (non-emterpreted) code to ' + orig)
     mylog.log_copy(infile, orig)
     shutil.copyfile(infile, orig)
 

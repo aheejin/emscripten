@@ -1020,13 +1020,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.WASM_OBJECT_FILES = 0
 
     if not shared.Settings.STRICT:
-      # The preprocessor define EMSCRIPTEN is deprecated. Don't pass it to code in strict mode. Code should use the define __EMSCRIPTEN__ instead.
+      # The preprocessor define EMSCRIPTEN is deprecated. Don't pass it to code
+      # in strict mode. Code should use the define __EMSCRIPTEN__ instead.
       shared.COMPILER_OPTS += ['-DEMSCRIPTEN']
-
-      # The system include path system/include/emscripten/ is deprecated, i.e. instead of #include <emscripten.h>, one should pass in #include <emscripten/emscripten.h>.
-      # This path is not available in Emscripten strict mode.
-      if shared.USE_EMSDK:
-        shared.C_INCLUDE_PATHS += [shared.path_from_root('system', 'include', 'emscripten')]
 
     # Use settings
 
@@ -1404,8 +1400,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             passes += ['--no-exit-runtime']
           if options.opt_level > 0 or options.shrink_level > 0:
             passes += [shared.Building.opt_level_to_str(options.opt_level, options.shrink_level)]
+          passes += ['--post-emscripten']
           if shared.Settings.GLOBAL_BASE >= 1024: # hardcoded value in the binaryen pass
-            passes += ['--post-emscripten']
+            passes += ['--low-memory-unused']
           if options.debug_level < 3:
             passes += ['--strip-debug']
           if not shared.Settings.EMIT_PRODUCERS_SECTION:

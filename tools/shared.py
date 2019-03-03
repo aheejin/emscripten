@@ -980,10 +980,10 @@ def check_vanilla():
       open(saved_file, 'w').write(('1' if check_vanilla() else '0') + ':' + LLVM_ROOT)
       return saved_file
 
-    is_vanilla_file = temp_cache.get('is_vanilla', get_vanilla_file, extension='.txt')
+    is_vanilla_file = temp_cache.get('is_vanilla.txt', get_vanilla_file)
     if CONFIG_FILE and os.path.getmtime(CONFIG_FILE) > os.path.getmtime(is_vanilla_file):
       logger.debug('config file changed since we checked vanilla; re-checking')
-      is_vanilla_file = temp_cache.get('is_vanilla', get_vanilla_file, extension='.txt', force=True)
+      is_vanilla_file = temp_cache.get('is_vanilla.txt', get_vanilla_file, force=True)
     try:
       contents = open(is_vanilla_file).read()
       middle = contents.index(':')
@@ -991,7 +991,7 @@ def check_vanilla():
       llvm_used = contents[middle + 1:]
       if llvm_used != LLVM_ROOT:
         logger.debug('regenerating vanilla check since other llvm')
-        temp_cache.get('is_vanilla', get_vanilla_file, extension='.txt', force=True)
+        temp_cache.get('is_vanilla.txt', get_vanilla_file, force=True)
         is_vanilla = check_vanilla()
     except Exception as e:
       logger.debug('failed to use vanilla file, will re-check: ' + str(e))
@@ -1038,12 +1038,15 @@ if get_llvm_target() == WASM_TARGET:
 #   -Wno-implicit-function-declaration
 COMPILER_OPTS += ['-Werror=implicit-function-declaration']
 
-USE_EMSDK = not os.environ.get('EMMAKEN_NO_SDK')
 
-if USE_EMSDK:
-  # Disable system C and C++ include directories, and add our own (using -idirafter so they are last, like system dirs, which
-  # allows projects to override them)
-  C_INCLUDE_PATHS = [
+def emsdk_opts():
+  if os.environ.get('EMMAKEN_NO_SDK'):
+    return []
+
+  # Disable system C and C++ include directories, and add our own (using
+  # -idirafter so they are last, like system dirs, which allows projects to
+  # override them)
+  c_include_paths = [
     path_from_root('system', 'include', 'compat'),
     path_from_root('system', 'include'),
     path_from_root('system', 'include', 'SSE'),
@@ -1052,12 +1055,12 @@ if USE_EMSDK:
     path_from_root('system', 'local', 'include')
   ]
 
-  CXX_INCLUDE_PATHS = [
+  cxx_include_paths = [
     path_from_root('system', 'include', 'libcxx'),
     path_from_root('system', 'lib', 'libcxxabi', 'include')
   ]
 
-  C_OPTS = ['-nostdinc', '-Xclang', '-nobuiltininc', '-Xclang', '-nostdsysteminc']
+  c_opts = ['-nostdinc', '-Xclang', '-nobuiltininc', '-Xclang', '-nostdsysteminc']
 
   def include_directive(paths):
     result = []
@@ -1066,35 +1069,24 @@ if USE_EMSDK:
     return result
 
   # libcxx include paths must be defined before libc's include paths otherwise libcxx will not build
-  EMSDK_OPTS = C_OPTS + include_directive(CXX_INCLUDE_PATHS) + include_directive(C_INCLUDE_PATHS)
+  return c_opts + include_directive(cxx_include_paths) + include_directive(c_include_paths)
 
-  COMPILER_OPTS += EMSDK_OPTS
-else:
-  EMSDK_OPTS = []
 
+EMSDK_OPTS = emsdk_opts()
+COMPILER_OPTS += EMSDK_OPTS
 # HACK (aheejin): Disable optnone
-if 'fastcomp' not in CLANG_CC:
-  COMPILER_OPTS += ['-Xclang', '-disable-O0-optnone']
+#if 'fastcomp' not in CLANG_CC:
+#  COMPILER_OPTS += ['-Xclang', '-disable-O0-optnone']
 
 # Engine tweaks
-
-try:
-  if SPIDERMONKEY_ENGINE:
-    new_spidermonkey = SPIDERMONKEY_ENGINE
-    if '-w' not in str(new_spidermonkey):
-      new_spidermonkey += ['-w']
-    SPIDERMONKEY_ENGINE = fix_js_engine(SPIDERMONKEY_ENGINE, new_spidermonkey)
-except NameError:
-  pass
+if SPIDERMONKEY_ENGINE:
+  new_spidermonkey = SPIDERMONKEY_ENGINE
+  if '-w' not in str(new_spidermonkey):
+    new_spidermonkey += ['-w']
+  SPIDERMONKEY_ENGINE = fix_js_engine(SPIDERMONKEY_ENGINE, new_spidermonkey)
 
 
 # Utilities
-def make_js_command(filename, engine=None, *args):
-  if engine is None:
-    engine = JS_ENGINES[0]
-  return jsrun.make_command(filename, engine, *args)
-
-
 def run_js(filename, engine=None, *args, **kw):
   if engine is None:
     engine = JS_ENGINES[0]
@@ -1241,7 +1233,7 @@ class SettingsManager(object):
           if value not in fixed_values:
             exit_with_error('Invalid command line option -s ' + attr + '=' + str(value) + ': ' + error_message)
           else:
-            logging.debug('Option -s ' + attr + '=' + str(value) + ' has been removed from the codebase. (' + error_message + ')')
+            logger.debug('Option -s ' + attr + '=' + str(value) + ' has been removed from the codebase. (' + error_message + ')')
 
       if attr not in self.attrs:
         logger.error('Assigning a non-existent settings attribute "%s"' % attr)
@@ -1405,10 +1397,16 @@ def print_compiler_stage(cmd):
     print(' "%s" %s' % (cmd[0], ' '.join(cmd[1:])), file=sys.stderr)
 
 
+def static_library_name(name):
+  if Settings.WASM_BACKEND and Settings.WASM_OBJECT_FILES:
+    return name + '.a'
+  else:
+    return name + '.bc'
+
+
 #  Building
 class Building(object):
   COMPILER = CLANG
-  LLVM_OPTS = False
   COMPILER_TEST_OPTS = [] # For use of the test runner
   JS_ENGINE_OVERRIDE = None # Used to pass the JS engine override from runner.py -> test_benchmark.py
   multiprocessing_pool = None
@@ -1926,8 +1924,6 @@ class Building(object):
       Building.link_lld(linker_inputs, target, ['--relocatable'])
     else:
       Building.link(linker_inputs, target)
-    assert os.path.exists(target)
-    return target
 
   @staticmethod
   def link_llvm(linker_inputs, target):
@@ -2199,16 +2195,6 @@ class Building(object):
       mylog.log_move(filename + '.opt.bc', filename)
       shutil.move(filename + '.opt.bc', filename)
     return target
-
-  @staticmethod
-  def llvm_opts(filename): # deprecated version, only for test runner. TODO: remove
-    if Building.LLVM_OPTS:
-      mylog.log_move(filename + '.o', filename + '.o.pre')
-      shutil.move(filename + '.o', filename + '.o.pre')
-      cmd = [LLVM_OPT, filename + '.o.pre'] + Building.LLVM_OPT_OPTS + ['-o', filename + '.o']
-      print_compiler_stage(cmd)
-      output = run_process(cmd, stdout=PIPE).stdout
-      assert os.path.exists(filename + '.o'), 'Failed to run llvm optimizations: ' + output
 
   @staticmethod
   def llvm_dis(input_filename, output_filename=None):

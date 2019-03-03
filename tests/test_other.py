@@ -1359,6 +1359,11 @@ int f() {
     self.assertContained('libf1\nlibf2\n', run_js('a.out.js'))
 
   def test_stdin(self):
+    def make_js_command(filename, engine):
+      if engine is None:
+        engine = tools.shared.JS_ENGINES[0]
+      return jsrun.make_command(filename, engine)
+
     def _test():
       for engine in JS_ENGINES:
         if engine == V8_ENGINE:
@@ -1368,7 +1373,7 @@ int f() {
         # work around a bug in python's subprocess module
         # (we'd use run_js() normally)
         try_delete('out.txt')
-        jscommand = shared.make_js_command(os.path.normpath(exe), engine)
+        jscommand = make_js_command(os.path.normpath(exe), engine)
         if WINDOWS:
           os.system('type "in.txt" | {} >out.txt'.format(' '.join(Building.doublequote_spaces(jscommand))))
         else: # posix
@@ -3175,7 +3180,7 @@ myreade(){
     run_process([PYTHON, EMCC, 'a.c', '-MMD', '-MF', 'test.d', '-c', '-o', 'obj/test.o'])
     self.assertContained(open('test.d').read(), 'obj/test.o: a.c\n')
 
-  def test_quoted_js_lib_key(self):
+  def test_js_lib_quoted_key(self):
     create_test_file('lib.js', r'''
 mergeInto(LibraryManager.library, {
    __internal_data:{
@@ -3189,7 +3194,7 @@ mergeInto(LibraryManager.library, {
     run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.cpp'), '--js-library', 'lib.js'])
     self.assertContained('hello, world!', run_js('a.out.js'))
 
-  def test_exported_js_lib(self):
+  def test_js_lib_exported(self):
     create_test_file('lib.js', r'''
 mergeInto(LibraryManager.library, {
  jslibfunc: function(x) { return 2 * x }
@@ -3208,6 +3213,28 @@ int main() {
 ''')
     run_process([PYTHON, EMCC, 'src.cpp', '--js-library', 'lib.js', '-s', 'EXPORTED_FUNCTIONS=["_main", "_jslibfunc"]'])
     self.assertContained('c calling: 12\njs calling: 10.', run_js('a.out.js'))
+
+  def test_js_lib_primitive_dep(self):
+    # Verify that primitive dependencies aren't generated in the output JS.
+
+    create_test_file('lib.js', r'''
+mergeInto(LibraryManager.library, {
+  foo__deps: ['Int8Array', 'NonPrimitive'],
+  foo: function() {},
+});
+''')
+    create_test_file('main.c', r'''
+void foo(void);
+
+int main(int argc, char** argv) {
+  foo();
+  return 0;
+}
+''')
+    run_process([PYTHON, EMCC, '-O0', 'main.c', '--js-library', 'lib.js', '-s', 'WARN_ON_UNDEFINED_SYMBOLS=0'])
+    generated = open('a.out.js').read()
+    self.assertContained('var _NonPrimitive=', generated)
+    self.assertNotContained('var _Int8Array=', generated)
 
   def test_js_lib_using_asm_lib(self):
     create_test_file('lib.js', r'''
@@ -7867,42 +7894,41 @@ int main() {
         sizes.append(os.path.getsize('a.out.wasm'))
     print('sizes:', sizes)
 
-  def run_metadce_tests(self, filename, expectations):
+  def run_metadce_test(self, filename, args, expected_sent, expected_exists, expected_not_exists, expected_size, expected_imports, expected_exports, expected_funcs):
     size_slack = 0.05
 
     # in -Os, -Oz, we remove imports wasm doesn't need
-    for args, expected_sent, expected_exists, expected_not_exists, expected_size, expected_imports, expected_exports, expected_funcs in expectations:
-      print('Running metadce test:', args, expected_sent, expected_exists, expected_not_exists, expected_size, expected_imports, expected_exports, expected_funcs)
-      run_process([PYTHON, EMCC, filename, '-g2'] + args)
-      # find the imports we send from JS
-      js = open('a.out.js').read()
-      start = js.find('asmLibraryArg = ')
-      end = js.find('}', start) + 1
-      start = js.find('{', start)
-      relevant = js[start + 2:end - 2]
-      relevant = relevant.replace(' ', '').replace('"', '').replace("'", '').split(',')
-      sent = [x.split(':')[0].strip() for x in relevant]
-      sent = [x for x in sent if x]
-      sent.sort()
-      print('   sent: ' + str(sent))
-      for exists in expected_exists:
-        self.assertIn(exists, sent)
-      for not_exists in expected_not_exists:
-        self.assertNotIn(not_exists, sent)
-      self.assertEqual(len(sent), expected_sent)
-      wasm_size = os.path.getsize('a.out.wasm')
-      if expected_size is not None:
-        ratio = abs(wasm_size - expected_size) / float(expected_size)
-        print('  seen wasm size: %d (expected: %d), ratio to expected: %f' % (wasm_size, expected_size, ratio))
-      self.assertLess(ratio, size_slack)
-      wast = run_process([os.path.join(Building.get_binaryen_bin(), 'wasm-dis'), 'a.out.wasm'], stdout=PIPE).stdout
-      imports = wast.count('(import ')
-      exports = wast.count('(export ')
-      funcs = wast.count('\n (func ')
-      self.assertEqual(imports, expected_imports)
-      self.assertEqual(exports, expected_exports)
-      if expected_funcs is not None:
-        self.assertEqual(funcs, expected_funcs)
+    print('Running metadce test:', args, expected_sent, expected_exists, expected_not_exists, expected_size, expected_imports, expected_exports, expected_funcs)
+    run_process([PYTHON, EMCC, filename, '-g2'] + args)
+    # find the imports we send from JS
+    js = open('a.out.js').read()
+    start = js.find('asmLibraryArg = ')
+    end = js.find('}', start) + 1
+    start = js.find('{', start)
+    relevant = js[start + 2:end - 2]
+    relevant = relevant.replace(' ', '').replace('"', '').replace("'", '').split(',')
+    sent = [x.split(':')[0].strip() for x in relevant]
+    sent = [x for x in sent if x]
+    sent.sort()
+    print('   sent: ' + str(sent))
+    for exists in expected_exists:
+      self.assertIn(exists, sent)
+    for not_exists in expected_not_exists:
+      self.assertNotIn(not_exists, sent)
+    self.assertEqual(len(sent), expected_sent)
+    wasm_size = os.path.getsize('a.out.wasm')
+    if expected_size is not None:
+      ratio = abs(wasm_size - expected_size) / float(expected_size)
+      print('  seen wasm size: %d (expected: %d), ratio to expected: %f' % (wasm_size, expected_size, ratio))
+    self.assertLess(ratio, size_slack)
+    wast = run_process([os.path.join(Building.get_binaryen_bin(), 'wasm-dis'), 'a.out.wasm'], stdout=PIPE).stdout
+    imports = wast.count('(import ')
+    exports = wast.count('(export ')
+    funcs = wast.count('\n (func ')
+    self.assertEqual(imports, expected_imports)
+    self.assertEqual(exports, expected_exports)
+    if expected_funcs is not None:
+      self.assertEqual(funcs, expected_funcs)
 
   def test_binaryen_metadce_minimal(self):
     create_test_file('minimal.c', '''
@@ -7914,70 +7940,67 @@ int main() {
       }
       ''')
 
+    def run(*args):
+      self.run_metadce_test('minimal.c', *args)
+
     if self.is_wasm_backend():
-      self.run_metadce_tests('minimal.c', [
-        ([],      11, [], ['waka'],  9336,  5, 13, 16), # noqa
-        (['-O1'],  9, [], ['waka'],  8095,  2, 12, 10), # noqa
-        (['-O2'],  9, [], ['waka'],  8077,  2, 12, 10), # noqa
-        # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
-        (['-O3'],  0, [], [],          61,  0,  1,  1), # noqa
-        (['-Os'],  0, [], [],          61,  0,  1,  1), # noqa
-        (['-Oz'],  0, [], [],           8,  0,  0,  0), # noqa
-      ])
+      run([],      11, [], ['waka'],  9336,  5, 13, 16) # noqa
+      run(['-O1'],  9, [], ['waka'],  8095,  2, 12, 10) # noqa
+      run(['-O2'],  9, [], ['waka'],  8077,  2, 12, 10) # noqa
+      # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
+      run(['-O3'],  0, [], [],          85,  0,  2,  2) # noqa
+      run(['-Os'],  0, [], [],          85,  0,  2,  2) # noqa
+      run(['-Oz'],  0, [], [],          54,  0,  1,  1) # noqa
     else:
-      self.run_metadce_tests('minimal.c', [
-        ([],      20, ['abort'], ['waka'], 22712, 20, 14, 27), # noqa
-        (['-O1'], 10, ['abort'], ['waka'], 10450,  7, 11, 11), # noqa
-        (['-O2'], 10, ['abort'], ['waka'], 10440,  7, 11, 11), # noqa
-        # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
-        (['-O3'],  0, [],        [],          55,  0,  1, 1), # noqa
-        (['-Os'],  0, [],        [],          55,  0,  1, 1), # noqa
-        (['-Oz'],  0, [],        [],          55,  0,  1, 1), # noqa
-      ])
+      run([],      20, ['abort'], ['waka'], 22712, 20, 14, 27) # noqa
+      run(['-O1'], 10, ['abort'], ['waka'], 10450,  7, 11, 11) # noqa
+      run(['-O2'], 10, ['abort'], ['waka'], 10440,  7, 11, 11) # noqa
+      # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
+      run(['-O3'],  0, [],        [],          55,  0,  1, 1) # noqa
+      run(['-Os'],  0, [],        [],          55,  0,  1, 1) # noqa
+      run(['-Oz'],  0, [],        [],          55,  0,  1, 1) # noqa
 
   def test_binaryen_metadce_cxx(self):
+    def run(*args):
+      self.run_metadce_test(path_from_root('tests', 'hello_libcxx.cpp'), *args)
+
     # test on libc++: see effects of emulated function pointers
     if self.is_wasm_backend():
-      self.run_metadce_tests(path_from_root('tests', 'hello_libcxx.cpp'), [
-        (['-O2'], 32, [], ['waka'], 226582,  20,  33, 564), # noqa
-        (['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
-                  32, [], ['waka'], 226582,  20,  33, 564), # noqa
-      ]) # noqa
+      run(['-O2'], 32, [], ['waka'], 226582,  20,  33, 562) # noqa
+      run(['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
+                  32, [], ['waka'], 226582,  20,  33, 562) # noqa
     else:
-      self.run_metadce_tests(path_from_root('tests', 'hello_libcxx.cpp'), [
-        (['-O2'], 34, ['abort'], ['waka'], 196709,  28,   36, 653), # noqa
-        (['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
-                  34, ['abort'], ['waka'], 196709,  28,   37, 635), # noqa
-      ]) # noqa
+      run(['-O2'], 34, ['abort'], ['waka'], 186423,  28,   36, 534) # noqa
+      run(['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
+                  34, ['abort'], ['waka'], 186423,  28,   37, 516) # noqa
 
   def test_binaryen_metadce_hello(self):
+    def run(*args):
+      self.run_metadce_test(path_from_root('tests', 'hello_world.cpp'), *args)
+
     if self.is_wasm_backend():
-      self.run_metadce_tests(path_from_root('tests', 'hello_world.cpp'), [
-        ([],      16, [], ['waka'], 26641, 10,  15, 62), # noqa
-        (['-O1'], 14, [], ['waka'], 10668,  8,  14, 29), # noqa
-        (['-O2'], 14, [], ['waka'], 10490,  8,  14, 24), # noqa
-        (['-O3'],  5, [], [],        2453,  7,   3, 14), # noqa; in -O3, -Os and -Oz we metadce
-        (['-Os'],  5, [], [],        2408,  7,   3, 15), # noqa
-        (['-Oz'],  5, [], [],        2367,  7,   2, 14), # noqa
-        # finally, check what happens when we export nothing. wasm should be almost empty
-        (['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
-                   0, [], [],          61,  0,   1,  1), # noqa
-      ]) # noqa
+      run([],      16, [], ['waka'], 26641, 10,  15, 62) # noqa
+      run(['-O1'], 14, [], ['waka'], 10668,  8,  14, 29) # noqa
+      run(['-O2'], 14, [], ['waka'], 10490,  8,  14, 24) # noqa
+      run(['-O3'],  5, [], [],        2453,  7,   3, 14) # noqa; in -O3, -Os and -Oz we metadce
+      run(['-Os'],  5, [], [],        2408,  7,   3, 15) # noqa
+      run(['-Oz'],  5, [], [],        2367,  7,   2, 14) # noqa
+      # finally, check what happens when we export nothing. wasm should be almost empty
+      run(['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
+                   0, [], [],          61,  0,   1,  1) # noqa
     else:
-      self.run_metadce_tests(path_from_root('tests', 'hello_world.cpp'), [
-        ([],      20, ['abort'], ['waka'], 42701,  20,   14, 49), # noqa
-        (['-O1'], 15, ['abort'], ['waka'], 12630,  14,   13, 30), # noqa
-        (['-O2'], 15, ['abort'], ['waka'], 12616,  14,   13, 30), # noqa
-        (['-O3'],  6, [],        [],        2690,   9,    2, 21), # noqa; in -O3, -Os and -Oz we metadce
-        (['-Os'],  6, [],        [],        2690,   9,    2, 21), # noqa
-        (['-Oz'],  6, [],        [],        2690,   9,    2, 21), # noqa
-        # finally, check what happens when we export nothing. wasm should be almost empty
-        (['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
-                   0, [],        [],           8,   0,    0,  0), # noqa; totally empty!
-        # we don't metadce with linkable code! other modules may want stuff
-        (['-O3', '-s', 'MAIN_MODULE=1'],
-                1533, [],        [],      226403,  28,   93, None), # noqa; don't compare the # of functions in a main module, which changes a lot
-      ]) # noqa
+      run([],      20, ['abort'], ['waka'], 42701,  20,   14, 49) # noqa
+      run(['-O1'], 15, ['abort'], ['waka'], 12630,  14,   13, 30) # noqa
+      run(['-O2'], 15, ['abort'], ['waka'], 12616,  14,   13, 26) # noqa
+      run(['-O3'],  6, [],        [],        2515,   9,    2, 15) # noqa; in -O3, -Os and -Oz we metadce
+      run(['-Os'],  6, [],        [],        2515,   9,    2, 16) # noqa
+      run(['-Oz'],  6, [],        [],        2515,   9,    2, 16) # noqa
+      # finally, check what happens when we export nothing. wasm should be almost empty
+      run(['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
+                   0, [],        [],           8,   0,    0,  0) # noqa; totally empty!
+      # we don't metadce with linkable code! other modules may want stuff
+      run(['-O3', '-s', 'MAIN_MODULE=1'],
+                1533, [],        [],      226403,  28,   93, None) # noqa; don't compare the # of functions in a main module, which changes a lot
 
   # ensures runtime exports work, even with metadce
   def test_extra_runtime_exports(self):
@@ -7991,8 +8014,8 @@ int main() {
     # test disabling of JS FFI legalization
     wasm_dis = os.path.join(Building.get_binaryen_bin(), 'wasm-dis')
     for (args, js_ffi) in [
-        (['-s', 'LEGALIZE_JS_FFI=1', '-s', 'SIDE_MODULE=1', '-O2', '-s', 'EXPORT_ALL=1'], True),
-        (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O2', '-s', 'EXPORT_ALL=1'], False),
+        (['-s', 'LEGALIZE_JS_FFI=1', '-s', 'SIDE_MODULE=1', '-O1', '-s', 'EXPORT_ALL=1'], True),
+        (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O1', '-s', 'EXPORT_ALL=1'], False),
         (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'SIDE_MODULE=1', '-O0', '-s', 'EXPORT_ALL=1'], False),
         (['-s', 'LEGALIZE_JS_FFI=0', '-s', 'WARN_ON_UNDEFINED_SYMBOLS=0', '-O0'], False),
       ]:
@@ -9021,8 +9044,8 @@ int main () {
       (asmjs + opts, hello_world_sources, {'a.html': 985, 'a.js': 289, 'a.asm.js': 113, 'a.mem': 6}),
       (opts, hello_world_sources, {'a.html': 972, 'a.js': 624, 'a.wasm': 86}),
       (asmjs + opts, hello_webgl_sources, {'a.html': 885, 'a.js': 4980, 'a.asm.js': 10972, 'a.mem': 321}),
-      (opts, hello_webgl_sources, {'a.html': 861, 'a.js': 5046, 'a.wasm': 8978}),
-      (opts, hello_webgl2_sources, {'a.html': 861, 'a.js': 6182, 'a.wasm': 8978}) # Compare how WebGL2 sizes stack up with WebGL 1
+      (opts, hello_webgl_sources, {'a.html': 861, 'a.js': 5046, 'a.wasm': 8842}),
+      (opts, hello_webgl2_sources, {'a.html': 861, 'a.js': 6182, 'a.wasm': 8842}) # Compare how WebGL2 sizes stack up with WebGL 1
     ]
 
     success = True
