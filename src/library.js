@@ -638,7 +638,6 @@ LibraryManager.library = {
     updateGlobalBufferViews();
 
     TOTAL_MEMORY = newSize;
-    HEAPU32[DYNAMICTOP_PTR>>2] = requestedSize;
 
 #if ASSERTIONS && !WASM
     err('Warning: Enlarging memory arrays, this is not fast! ' + [oldSize, newSize]);
@@ -754,14 +753,13 @@ LibraryManager.library = {
     }
 
     totalMemory = _emscripten_get_heap_size()|0;
-    if ((newDynamicTop|0) <= (totalMemory|0)) {
-      HEAP32[DYNAMICTOP_PTR>>2] = newDynamicTop|0;
-    } else {
+    if ((newDynamicTop|0) > (totalMemory|0)) {
       if ((_emscripten_resize_heap(newDynamicTop|0)|0) == 0) {
         ___setErrNo({{{ cDefine('ENOMEM') }}});
         return -1;
       }
     }
+    HEAP32[DYNAMICTOP_PTR>>2] = newDynamicTop|0;
 #endif
     return oldDynamicTop|0;
   },
@@ -799,14 +797,13 @@ LibraryManager.library = {
     }
 
     totalMemory = _emscripten_get_heap_size()|0;
-    if ((newDynamicTop|0) <= (totalMemory|0)) {
-      HEAP32[DYNAMICTOP_PTR>>2] = newDynamicTop|0;
-    } else {
+    if ((newDynamicTop|0) > (totalMemory|0)) {
       if ((_emscripten_resize_heap(newDynamicTop|0)|0) == 0) {
         ___setErrNo({{{ cDefine('ENOMEM') }}});
         return -1;
       }
     }
+    HEAP32[DYNAMICTOP_PTR>>2] = newDynamicTop|0;
 #endif
     return 0;
   },
@@ -2215,7 +2212,7 @@ LibraryManager.library = {
     // Insert the function into the wasm table.  Since we know the function
     // comes directly from the loaded wasm module we can insert it directly
     // into the table, avoiding any JS interaction.
-    return addWasmFunction(result);
+    return addFunctionWasm(result);
 #else
     // convert the exported function into a function pointer using our generic
     // JS mechanism.
@@ -2248,9 +2245,9 @@ LibraryManager.library = {
     // report all function pointers as coming from this program itself XXX not really correct in any way
     var fname = stringToNewUTF8(Module['thisProgram'] || './this.program'); // XXX leak
     {{{ makeSetValue('info', 0, 'fname', 'i32') }}};
-    {{{ makeSetValue('info', QUANTUM_SIZE, '0', 'i32') }}};
-    {{{ makeSetValue('info', QUANTUM_SIZE*2, '0', 'i32') }}};
-    {{{ makeSetValue('info', QUANTUM_SIZE*3, '0', 'i32') }}};
+    {{{ makeSetValue('info', Runtime.QUANTUM_SIZE, '0', 'i32') }}};
+    {{{ makeSetValue('info', Runtime.QUANTUM_SIZE*2, '0', 'i32') }}};
+    {{{ makeSetValue('info', Runtime.QUANTUM_SIZE*3, '0', 'i32') }}};
     return 1;
   },
 #endif // MAIN_MODULE != 0
@@ -4408,9 +4405,7 @@ LibraryManager.library = {
 #endif
                                "if (typeof dateNow !== 'undefined') {\n" +
                                "  _emscripten_get_now = dateNow;\n" +
-                               "} else if (typeof self === 'object' && self['performance'] && typeof self['performance']['now'] === 'function') {\n" +
-                               "  _emscripten_get_now = function() { return self['performance']['now'](); };\n" +
-                               "} else if (typeof performance === 'object' && typeof performance['now'] === 'function') {\n" +
+                               "} else if (typeof performance === 'object' && performance && typeof performance['now'] === 'function') {\n" +
                                "  _emscripten_get_now = function() { return performance['now'](); };\n" +
                                "} else {\n" +
                                "  _emscripten_get_now = Date.now;\n" +
@@ -4422,13 +4417,14 @@ LibraryManager.library = {
       return 1; // nanoseconds
     } else
 #endif
-#if ENVIRONMENT_MAY_BE_WEB || ENVIRONMENT_MAY_BE_WORKER
-    if (typeof dateNow !== 'undefined' ||
-               ((ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) && self['performance'] && self['performance']['now'])) {
+#if ENVIRONMENT_MAY_BE_SHELL
+    if (typeof dateNow !== 'undefined') {
       return 1000; // microseconds (1/1000 of a millisecond)
     } else
 #endif
-    {
+    if (typeof performance === 'object' && performance && typeof performance['now'] === 'function') {
+      return 1000; // microseconds (1/1000 of a millisecond)
+    } else {
       return 1000*1000; // milliseconds
     }
   },
@@ -4445,7 +4441,7 @@ LibraryManager.library = {
       || (typeof dateNow !== 'undefined')
 #endif
 #if ENVIRONMENT_MAY_BE_WEB || ENVIRONMENT_MAY_BE_WORKER
-      || ((ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) && self['performance'] && self['performance']['now'])
+      || (typeof performance === 'object' && performance && typeof performance['now'] === 'function')
 #endif
       );
   },
