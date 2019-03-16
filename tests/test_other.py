@@ -4737,7 +4737,7 @@ main()
     with env_modify({'EMCC_FORCE_STDLIBS': 'libc'}):
       test('partial list, but ok since we grab them as needed')
 
-    with env_modify({'EMCC_FORCE_STDLIBS': 'libc', 'EMCC_ONLY_FORCED_STDLIBS': '1'}):
+    with env_modify({'EMCC_FORCE_STDLIBS': 'libc++', 'EMCC_ONLY_FORCED_STDLIBS': '1'}):
       test('fail! not enough stdlibs', fail=True)
 
     with env_modify({'EMCC_FORCE_STDLIBS': 'libc,libc++abi,libc++,libpthreads_stub', 'EMCC_ONLY_FORCED_STDLIBS': '1'}):
@@ -7993,9 +7993,9 @@ int main() {
       run([],      20, ['abort'], ['waka'], 42701,  20,   14, 49) # noqa
       run(['-O1'], 15, ['abort'], ['waka'], 12630,  14,   13, 30) # noqa
       run(['-O2'], 15, ['abort'], ['waka'], 12616,  14,   13, 26) # noqa
-      run(['-O3'],  6, [],        [],        2515,   9,    2, 15) # noqa; in -O3, -Os and -Oz we metadce
-      run(['-Os'],  6, [],        [],        2515,   9,    2, 16) # noqa
-      run(['-Oz'],  6, [],        [],        2515,   9,    2, 16) # noqa
+      run(['-O3'],  6, [],        [],        2443,   9,    2, 14) # noqa; in -O3, -Os and -Oz we metadce
+      run(['-Os'],  6, [],        [],        2412,   9,    2, 16) # noqa
+      run(['-Oz'],  6, [],        [],        2389,   9,    2, 15) # noqa
       # finally, check what happens when we export nothing. wasm should be almost empty
       run(['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
                    0, [],        [],           8,   0,    0,  0) # noqa; totally empty!
