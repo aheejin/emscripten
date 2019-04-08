@@ -687,6 +687,7 @@ def update_settings_glue(metadata):
 
   if shared.Settings.WASM_BACKEND:
     shared.Settings.WASM_TABLE_SIZE = metadata['tableSize']
+    shared.Settings.BINARYEN_FEATURES = metadata['features']
 
 
 # static code hooks
@@ -754,6 +755,9 @@ class Memory():
       self.stack_max = self.stack_high
     #  * then dynamic memory begins
     self.dynamic_base = align_memory(self.stack_high)
+
+    if self.dynamic_base >= shared.Settings.TOTAL_MEMORY:
+     exit_with_error('Memory is not large enough for static data (%d) plus the stack (%d), please increase TOTAL_MEMORY (%d) to at least %d' % (self.static_bump, shared.Settings.TOTAL_STACK, shared.Settings.TOTAL_MEMORY, self.dynamic_base))
 
 
 def apply_memory(js):
@@ -2133,6 +2137,9 @@ def emscript_wasm_backend(infile, outfile, memfile, libraries, compiler_engine,
   pre = apply_memory(pre)
   pre = apply_static_code_hooks(pre)
 
+  if shared.Settings.RELOCATABLE and not shared.Settings.SIDE_MODULE:
+    pre += 'var gb = GLOBAL_BASE, fb = 0;\n'
+
   # merge forwarded data
   shared.Settings.EXPORTED_FUNCTIONS = forwarded_json['EXPORTED_FUNCTIONS']
 
@@ -2201,6 +2208,9 @@ def finalize_wasm(temp_files, infile, outfile, memfile, DEBUG):
 
   cmd = [wasm_emscripten_finalize, base_wasm, '-o', wasm,
          '--global-base=%s' % shared.Settings.GLOBAL_BASE]
+  # tell binaryen to look at the features section, and if there isn't one, to use MVP
+  # (which matches what llvm+lld has given us)
+  cmd += ['--detect-features']
   if shared.Settings.DEBUG_LEVEL >= 2 or shared.Settings.PROFILING_FUNCS:
     cmd.append('-g')
   if shared.Settings.LEGALIZE_JS_FFI != 1:
@@ -2354,7 +2364,7 @@ return real_%(mangled)s.apply(null, arguments);
 
 def create_module_wasm(sending, receiving, invoke_funcs, metadata):
   invoke_wrappers = create_invoke_wrappers(invoke_funcs)
-
+  receiving += create_named_globals(metadata)
   module = []
   module.append('var asmGlobalArg = {};\n')
   if shared.Settings.USE_PTHREADS and not shared.Settings.WASM:
@@ -2376,6 +2386,7 @@ def load_metadata_wasm(metadata_raw, DEBUG):
     raise
 
   metadata = {
+    'aliases': {},
     'declares': [],
     'implementedFunctions': [],
     'externs': [],
@@ -2385,9 +2396,11 @@ def load_metadata_wasm(metadata_raw, DEBUG):
     'tableSize': 0,
     'initializers': [],
     'exports': [],
+    'namedGlobals': {},
     'emJsFuncs': {},
     'asmConsts': {},
     'invokeFuncs': [],
+    'features': [],
   }
 
   assert 'tableSize' in metadata_json.keys()

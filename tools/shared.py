@@ -955,7 +955,7 @@ if JAVA is None:
 
 # Target choice.
 ASM_JS_TARGET = 'asmjs-unknown-emscripten'
-WASM_TARGET = 'wasm32-unknown-unknown-wasm'
+WASM_TARGET = 'wasm32-unknown-emscripten'
 
 
 def check_vanilla():
@@ -1028,8 +1028,7 @@ COMPILER_OPTS += [# '-fno-threadsafe-statics', # disabled due to issue 1289
 
 if get_llvm_target() == WASM_TARGET:
   # wasm target does not automatically define emscripten stuff, so do it here.
-  COMPILER_OPTS += ['-D__EMSCRIPTEN__',
-                    '-Dunix',
+  COMPILER_OPTS += ['-Dunix',
                     '-D__unix',
                     '-D__unix__']
 
@@ -1283,6 +1282,9 @@ def verify_settings():
 
     if Settings.SIDE_MODULE or Settings.MAIN_MODULE:
       exit_with_error('emcc: MAIN_MODULE and SIDE_MODULE are not yet supported by the LLVM wasm backend')
+
+    if Settings.EMULATED_FUNCTION_POINTERS:
+      exit_with_error('emcc: EMULATED_FUNCTION_POINTERS is not meaningful with the wasm backend')
 
 
 Settings = SettingsManager()
@@ -2449,7 +2451,10 @@ class Building(object):
       proc = run_process(args, stderr=PIPE, check=False)
       if proc.returncode != 0:
         sys.stderr.write(proc.stderr)
-        exit_with_error('closure compiler failed (rc: %d)', proc.returncode)
+        hint = ''
+        if not pretty:
+          hint = ' the error message may be clearer with -g1'
+        exit_with_error('closure compiler failed (rc: %d.%s)', proc.returncode, hint)
 
       return outfile
 
@@ -2690,6 +2695,7 @@ class Building(object):
       ret += ['--enable-threads']
     if Settings.SIMD:
       ret += ['--enable-simd']
+    ret += Settings.BINARYEN_FEATURES
     return ret
 
   @staticmethod
