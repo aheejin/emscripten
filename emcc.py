@@ -1134,6 +1134,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       newargs.append('-D__EMSCRIPTEN_ASMFS__=1')
       next_arg_index += 1
       shared.Settings.FILESYSTEM = 0
+      shared.Settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
       shared.Settings.FETCH = 1
       options.js_libraries.append(shared.path_from_root('src', 'library_asmfs.js'))
 
@@ -2677,7 +2678,7 @@ def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
     shared.check_call(cmd)
 
     if not target_binary:
-      cmd = [os.path.join(binaryen_bin, 'wasm-as'), wasm_text_target, '-o', wasm_binary_target]
+      cmd = [os.path.join(binaryen_bin, 'wasm-as'), wasm_text_target, '-o', wasm_binary_target, '--all-features', '--disable-bulk-memory']
       if debug_info:
         cmd += ['-g']
         if use_source_map(options):
