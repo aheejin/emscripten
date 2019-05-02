@@ -462,7 +462,6 @@ function loadWebAssemblyModule(binary, flags) {
           var fp = 0;
           return obj[prop] = function() {
             if (!fp) {
-              console.log("geting function address: " + name);
               var f = resolveSymbol(name, 'function');
               fp = addFunctionWasm(f, sig);
             }
@@ -504,9 +503,6 @@ function loadWebAssemblyModule(binary, flags) {
       // the table should be unchanged
       assert(table === originalTable);
       assert(table === wasmTable);
-      if (instance.exports['table']) {
-        assert(table === instance.exports['table']);
-      }
       // the old part of the table should be unchanged
       for (var i = 0; i < tableBase; i++) {
         assert(table.get(i) === oldTable[i], 'old table entries must remain the same');

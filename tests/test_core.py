@@ -3372,45 +3372,62 @@ ok
       }
     ''', 'hello from main\nhello from side\n')
 
+  # Verify that a function pointer can be passed back and forth and invoked
+  # on both sides.
   @needs_dlfcn
   def test_dylink_funcpointer(self):
-    self.dylink_test(r'''
+    self.dylink_test(
+      main=r'''
       #include <stdio.h>
+      #include <assert.h>
       #include "header.h"
-      voidfunc sidey(voidfunc f);
-      void a() { printf("hello from funcptr\n"); }
+      intfunc sidey(intfunc f);
+      void a(int arg) { printf("hello from funcptr: %d\n", arg); }
       int main() {
-        sidey(a)();
+        intfunc b = sidey(a);
+        assert(a == b);
+        b(0);
         return 0;
       }
-    ''', '''
+      ''',
+      side='''
       #include "header.h"
-      voidfunc sidey(voidfunc f) { return f; }
-    ''', 'hello from funcptr\n', header='typedef void (*voidfunc)();')
+      intfunc sidey(intfunc f) { f(1); return f; }
+      ''',
+      expected='hello from funcptr: 1\nhello from funcptr: 0\n',
+      header='typedef void (*intfunc)(int );')
 
   @needs_dlfcn
-  def test_dylink_funcpointers(self):
-    self.dylink_test(r'''
+  # test dynamic linking of a module with multiple function pointers, stored
+  # statically
+  def test_dylink_static_funcpointers(self):
+    self.dylink_test(
+      main=r'''
       #include <stdio.h>
       #include "header.h"
-      int sidey(voidfunc f);
       void areturn0() { printf("hello 0\n"); }
       void areturn1() { printf("hello 1\n"); }
       void areturn2() { printf("hello 2\n"); }
+      voidfunc func_ptrs[3] = { areturn0, areturn1, areturn2 };
       int main(int argc, char **argv) {
-        voidfunc table[3] = { areturn0, areturn1, areturn2 };
-        table[sidey(NULL)]();
+        sidey(func_ptrs[0]);
+        sidey(func_ptrs[1]);
+        sidey(func_ptrs[2]);
         return 0;
       }
-    ''', '''
+      ''',
+      side='''
       #include "header.h"
-      int sidey(voidfunc f) { if (f) f(); return 1; }
-    ''', 'hello 1\n', header='typedef void (*voidfunc)();')
+      void sidey(voidfunc f) { f(); }
+      ''',
+      expected='hello 0\nhello 1\nhello 2\n',
+      header='typedef void (*voidfunc)(); void sidey(voidfunc f);')
 
   @no_wasm('uses function tables in an asm.js specific way')
   @needs_dlfcn
-  def test_dylink_funcpointers2(self):
-    self.dylink_test(r'''
+  def test_dylink_asmjs_funcpointers(self):
+    self.dylink_test(
+      main=r'''
       #include "header.h"
       #include <emscripten.h>
       void left1() { printf("left1\n"); }
@@ -3441,7 +3458,8 @@ ok
         second();
         return 0;
       }
-    ''', r'''
+      ''',
+      side=r'''
       #include "header.h"
       void right1() { printf("right1\n"); }
       void right2() { printf("right2\n"); }
@@ -3459,7 +3477,9 @@ ok
         f = (volatilevoidfunc)right2;
         f();
       }
-    ''', 'main\nleft1\nleft2\nright1\nright2\nsecond\nleft1\nleft2\nright1\nright2\n', header='''
+      ''',
+      expected='main\nleft1\nleft2\nright1\nright2\nsecond\nleft1\nleft2\nright1\nright2\n',
+      header='''
       #include <stdio.h>
       typedef void (*voidfunc)();
       typedef volatile voidfunc volatilevoidfunc;
@@ -3468,51 +3488,56 @@ ok
       voidfunc getright1();
       voidfunc getright2();
       void second();
-    ''', need_reverse=False, auto_load=False)
+      ''', need_reverse=False, auto_load=False)
 
   @needs_dlfcn
   def test_dylink_funcpointers_wrapper(self):
-    self.dylink_test(r'''
+    self.dylink_test(
+      main=r'''\
       #include <stdio.h>
       #include "header.h"
       int main(int argc, char **argv) {
-        volatile charfunc f = emscripten_run_script;
-        f("out('one')");
-        f = get();
-        f("out('two')");
+        charfunc f1 = emscripten_run_script;
+        f1("out('one')");
+        charfunc f2 = get();
+        f2("out('two')");
         return 0;
       }
-    ''', '''
+      ''',
+      side='''\
       #include "header.h"
       charfunc get() {
         return emscripten_run_script;
       }
-    ''', 'one\ntwo\n', header='''
+      ''',
+      expected='one\ntwo\n',
+      header='''\
       #include <emscripten.h>
       typedef void (*charfunc)(const char*);
       extern charfunc get();
-    ''')
+      ''')
 
   @needs_dlfcn
-  def test_dylink_funcpointers_float(self):
-    # avoid using asm2wasm imports, which don't work in side modules yet (should they?)
-    self.set_setting('BINARYEN_TRAP_MODE', 'clamp')
-    self.dylink_test(r'''
+  def test_dylink_static_funcpointer_float(self):
+    self.dylink_test(
+      main=r'''\
       #include <stdio.h>
       #include "header.h"
       int sidey(floatfunc f);
-      float areturn0(float f) { printf("hello 0: %f\n", f); return 0; }
-      float areturn1(float f) { printf("hello 1: %f\n", f); return 1; }
-      float areturn2(float f) { printf("hello 2: %f\n", f); return 2; }
+      float func1(float f) { printf("hello 1: %f\n", f); return 0; }
+      floatfunc f1 = &func1;
       int main(int argc, char **argv) {
-        volatile floatfunc table[3] = { areturn0, areturn1, areturn2 };
-        printf("got: %d\n", (int)table[sidey(NULL)](12.34));
+        printf("got: %d\n", sidey(f1));
+        f1(12.34);
         return 0;
       }
-    ''', '''
+      ''',
+      side='''\
       #include "header.h"
-      int sidey(floatfunc f) { if (f) f(56.78); return 1; }
-    ''', 'hello 1: 12.340000\ngot: 1\n', header='typedef float (*floatfunc)(float);')
+      int sidey(floatfunc f) { f(56.78); return 1; }
+      ''',
+      expected='hello 1: 56.779999\ngot: 1\nhello 1: 12.340000\n',
+      header='typedef float (*floatfunc)(float);')
 
   @needs_dlfcn
   def test_dylink_global_init(self):
@@ -4117,7 +4142,7 @@ ok
   #                              open(path_from_root('tests', 'bullet', 'output3.txt')).read()])
 
   @needs_dlfcn
-  @no_wasm_backend('current fails in __dynamic_cast')
+  @no_fastcomp('https://github.com/emscripten-core/emscripten/issues/8376')
   def test_dylink_rtti(self):
     # Verify that objects created in one module and be dynamic_cast<> correctly
     # in the another module.
@@ -4162,12 +4187,10 @@ ok
     }
     '''
 
-    # TODO(sbc): This tests should instead return zero.  Update expectations
-    # once we fix https://github.com/emscripten-core/emscripten/issues/8376
     self.dylink_test(main=main,
                      side=side,
                      header=header,
-                     expected='failure')
+                     expected='success')
 
   def test_random(self):
     src = r'''#include <stdlib.h>
@@ -4734,7 +4757,6 @@ name: .
     Building.COMPILER_TEST_OPTS += ['--embed-file', path_from_root('tests/utf16_corpus.txt') + '@/utf16_corpus.txt']
     self.do_run(open(path_from_root('tests', 'benchmark_utf16.cpp')).read(), 'OK.')
 
-  @no_wasm_backend('printf is incorrectly handling float values')
   def test_wprintf(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_wprintf')
 
@@ -5112,7 +5134,6 @@ PORT: 3979
     expected = open(path_from_root('tests', 'netinet', 'in.out')).read()
     self.do_run(src, expected)
 
-  @no_wasm_backend('No dynamic linking support in wasm backend path')
   def test_main_module_static_align(self):
     if self.get_setting('ALLOW_MEMORY_GROWTH'):
       self.skipTest('no shared modules with memory growth')
