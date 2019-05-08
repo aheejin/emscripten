@@ -4276,12 +4276,12 @@ int main(int argc, char **argv) {
 1:
   make /: -1
   open /: 1
-  proc, 4
-  dev, 4
-  home, 4
-  tmp, 4
-  .., 4
   ., 4
+  .., 4
+  tmp, 4
+  home, 4
+  dev, 4
+  proc, 4
 ''', run_js('a.out.js', args=['/']))
     # cannot create empty name, cannot open
     self.assertContained(r'''
@@ -4294,21 +4294,21 @@ int main(int argc, char **argv) {
 1:
   make /a//: 0
   open /a//: 1
-  .., 4
   ., 4
+  .., 4
 ''', run_js('a.out.js', args=['/a//']))
     # can create child unnormalized
     self.assertContained(r'''
 1:
   make /a: 0
   open /a: 1
-  .., 4
   ., 4
+  .., 4
 2:
   make /a//b//: 0
   open /a//b//: 1
-  .., 4
   ., 4
+  .., 4
 ''', run_js('a.out.js', args=['/a', '/a//b//']))
 
   def test_stat_silly(self):
@@ -4500,17 +4500,17 @@ int main()
     # cannot symlink nonexistents
     self.assertContained(r'''Before:
 dir
-  e
-  d
-  c
-  b
   a
+  b
+  c
+  d
+  e
 
-Unlinking e
-Unlinking d
-Unlinking c
-Unlinking b
 Unlinking a
+Unlinking b
+Unlinking c
+Unlinking d
+Unlinking e
 After:
 dir
 ''', run_js('a.out.js', args=['', 'abc']))
@@ -8019,7 +8019,15 @@ int main() {
       run(['-Oz'],  5, [], [],        2272,  7,   2, 14) # noqa
       # finally, check what happens when we export nothing. wasm should be almost empty
       run(['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
-                   0, [], [],          61,  0,   1,  1) # noqa
+                    0, [], [],          61,  0,   1,  1) # noqa
+      # we don't metadce with linkable code! other modules may want stuff
+      # don't compare the # of functions in a main module, which changes a lot
+      # TODO(sbc): Investivate why the number of exports is order of magnitude
+      # larger for wasm backend.
+      run(['-O3', '-s', 'MAIN_MODULE=1'],
+                 1576, [],        [],      517336, 167,1484, None) # noqa
+      run(['-O3', '-s', 'MAIN_MODULE=2'],
+                 13,   [],        [],      10770,   16,  13, None) # noqa
     else:
       run([],      23, ['abort'], ['waka'], 42701,  24,   17, 57) # noqa
       run(['-O1'], 15, ['abort'], ['waka'], 13199,  15,   14, 33) # noqa
@@ -8029,10 +8037,13 @@ int main() {
       run(['-Oz'],  6, [],        [],        2389,   9,    2, 16) # noqa
       # finally, check what happens when we export nothing. wasm should be almost empty
       run(['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],
-                   0, [],        [],           8,   0,    0,  0) # noqa; totally empty!
+                    0, [],        [],           8,   0,    0,  0) # noqa; totally empty!
       # we don't metadce with linkable code! other modules may want stuff
+      # don't compare the # of functions in a main module, which changes a lot
       run(['-O3', '-s', 'MAIN_MODULE=1'],
-                1543, [],        [],      226403,  30,   95, None) # noqa; don't compare the # of functions in a main module, which changes a lot
+                 1543, [],        [],      226403,  30,   95, None) # noqa
+      run(['-O3', '-s', 'MAIN_MODULE=2'],
+                   15, [],        [],       10571,  19,    9, 21) # noqa
 
   # ensures runtime exports work, even with metadce
   def test_extra_runtime_exports(self):
@@ -8122,26 +8133,20 @@ int main() {
       assert e_legalstub_i32, 'legal stub not generated for dyncall'
 
   def test_export_aliasee(self):
-    # test aliasee is exported when alias is exported
-    if self.is_wasm_backend():
-      self.skipTest('not testing export aliasee and wasm backend')
+    # build side module
+    args = ['-s', 'SIDE_MODULE=1']
+    cmd = [PYTHON, EMCC, path_from_root('tests', 'other', 'alias', 'side.c'), '-g', '-o', 'side.wasm'] + args
+    print(' '.join(cmd))
+    run_process(cmd)
 
-    with env_modify({'EMCC_FORCE_STDLIBS': 'libc++'}):
-      # build side module
-      args = ['-s', 'EXPORT_ALL=0', '-s', 'SIDE_MODULE=1', '-O3', '-s', 'DISABLE_EXCEPTION_CATCHING=0']
-      print(args)
-      cmd = [PYTHON, EMCC, path_from_root('tests', 'other', 'alias', 'side.cpp'), '-g', '-o', 'side.wasm'] + args
-      print(' '.join(cmd))
-      run_process(cmd)
+    # build main module
+    args = ['-s', 'EXPORT_ALL=0', '-s', 'EXPORTED_FUNCTIONS=["_main", "_foo"]', '-s', 'MAIN_MODULE=2', '-s', 'EXIT_RUNTIME=1']
+    cmd = [PYTHON, EMCC, path_from_root('tests', 'other', 'alias', 'main.c'), '-o', 'main.js'] + args
+    print(' '.join(cmd))
+    run_process(cmd)
 
-      # build main module
-      args = ['-s', 'EXPORT_ALL=0', '-s', 'EXPORTED_FUNCTIONS=["_main", "_wprintf","__ZTVSt12length_error","__ZNSt12length_errorD1Ev","__ZNSt11logic_errorC2EPKc"]', '-s', 'MAIN_MODULE=2', '-O3', '-s', 'DISABLE_EXCEPTION_CATCHING=0']
-      cmd = [PYTHON, EMCC, path_from_root('tests', 'other', 'alias', 'main.cpp'), '-g', '-o', 'main.out.js'] + args
-      print(' '.join(cmd))
-      run_process(cmd)
-      # run the program
-      ret = run_process(NODE_JS + ['main.out.js'], stdout=PIPE, stderr=PIPE).stdout
-      self.assertContained('success', ret)
+    # run the program
+    self.assertContained('success', run_js('main.js'))
 
   def test_sysconf_phys_pages(self):
     def run(args, expected):

@@ -1842,9 +1842,7 @@ class Building(object):
     #   cmd.append('--strip-debug')
 
     export_all = False
-    if Settings.MAIN_MODULE:
-      export_all = True
-    elif Settings.EXPORT_ALL:
+    if Settings.MAIN_MODULE == 1 or Settings.EXPORT_ALL:
       export_all = True
 
     if Settings.RELOCATABLE:
@@ -2102,28 +2100,18 @@ class Building(object):
     return target
 
   @staticmethod
-  def llvm_dis(input_filename, output_filename=None):
+  def llvm_dis(input_filename, output_filename):
     # LLVM binary ==> LLVM assembly
-    if output_filename is None:
-      # use test runner conventions
-      output_filename = input_filename + '.o.ll'
-      input_filename = input_filename + '.o'
     try_delete(output_filename)
     output = run_process([LLVM_DIS, input_filename, '-o', output_filename], stdout=PIPE).stdout
     assert os.path.exists(output_filename), 'Could not create .ll file: ' + output
-    return output_filename
 
   @staticmethod
-  def llvm_as(input_filename, output_filename=None):
+  def llvm_as(input_filename, output_filename):
     # LLVM assembly ==> LLVM binary
-    if output_filename is None:
-      # use test runner conventions
-      output_filename = input_filename + '.o'
-      input_filename = input_filename + '.o.ll'
     try_delete(output_filename)
     output = run_process([LLVM_AS, input_filename, '-o', output_filename], stdout=PIPE).stdout
     assert os.path.exists(output_filename), 'Could not create bc file: ' + output
-    return output_filename
 
   @staticmethod
   def parse_symbols(output, include_internal=False):
