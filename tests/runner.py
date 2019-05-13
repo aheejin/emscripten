@@ -249,6 +249,12 @@ core_test_modes = [
   'wasm3',
   'wasms',
   'wasmz',
+  'wasm2js0',
+  'wasm2js1',
+  'wasm2js2',
+  'wasm2js3',
+  'wasm2jss',
+  'wasm2jsz',
   'asmi',
   'asm2i',
 ]
@@ -263,6 +269,7 @@ non_core_test_modes = [
   'sanity',
   'sockets',
   'interactive',
+  'benchmark',
 ]
 
 test_index = 0
@@ -299,15 +306,18 @@ class RunnerCore(unittest.TestCase):
   def check_dlfcn(self):
     if self.get_setting('ALLOW_MEMORY_GROWTH') == 1 and not self.is_wasm():
       self.skipTest('no dlfcn with memory growth (without wasm)')
+    if self.get_setting('WASM_BACKEND') and not self.get_setting('WASM'):
+      self.skipTest('no dynamic library support in wasm2js yet')
 
   def uses_memory_init_file(self):
-    if self.get_setting('SIDE_MODULE') or self.get_setting('WASM'):
+    if self.get_setting('SIDE_MODULE') or \
+      (self.get_setting('WASM') and not self.get_setting('WASM2JS')):
       return False
     elif '--memory-init-file' in self.emcc_args:
       return int(self.emcc_args[self.emcc_args.index('--memory-init-file') + 1])
     else:
       # side modules handle memory differently; binaryen puts the memory in the wasm module
-      opt_supports = any(opt in self.emcc_args for opt in ('-O2', '-O3', '-Oz'))
+      opt_supports = any(opt in self.emcc_args for opt in ('-O2', '-O3', '-Os', '-Oz'))
       return opt_supports
 
   def set_temp_dir(self, temp_dir):
@@ -693,22 +703,25 @@ class RunnerCore(unittest.TestCase):
     path2 = path2.replace('\\', '/')
     return self.assertIdentical(path1, path2)
 
-  # Tests that the given two multiline text content are identical, modulo line ending differences (\r\n on Windows, \n on Unix).
-  def assertTextDataIdentical(self, text1, text2):
+  # Tests that the given two multiline text content are identical, modulo line
+  # ending differences (\r\n on Windows, \n on Unix).
+  def assertTextDataIdentical(self, text1, text2, msg=None):
     text1 = text1.replace('\r\n', '\n')
     text2 = text2.replace('\r\n', '\n')
-    return self.assertIdentical(text1, text2)
+    return self.assertIdentical(text1, text2, msg)
 
-  def assertIdentical(self, values, y):
+  def assertIdentical(self, values, y, msg=None):
     if type(values) not in [list, tuple]:
       values = [values]
     for x in values:
       if x == y:
         return # success
-    self.fail("Expected to have '%s' == '%s', diff:\n\n%s" % (
-      limit_size(values[0]), limit_size(y),
-      limit_size(''.join([a.rstrip() + '\n' for a in difflib.unified_diff(x.split('\n'), y.split('\n'), fromfile='expected', tofile='actual')]))
-    ))
+    diff_lines = difflib.unified_diff(x.split('\n'), y.split('\n'), fromfile='expected', tofile='actual')
+    diff = ''.join([a.rstrip() + '\n' for a in diff_lines])
+    fail_message = "Expected to have '%s' == '%s', diff:\n\n%s" % (limit_size(values[0]), limit_size(y), limit_size(diff))
+    if msg:
+      fail_message += '\n' + msg
+    self.fail(fail_message)
 
   def assertTextDataContained(self, text1, text2):
     text1 = text1.replace('\r\n', '\n')
