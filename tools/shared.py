@@ -406,6 +406,8 @@ def expected_llvm_version():
 def get_clang_version():
   global actual_clang_version
   if actual_clang_version is None:
+    if not os.path.exists(CLANG):
+      exit_with_error('clang executable not found at `%s`' % CLANG)
     proc = check_call([CLANG, '--version'], stdout=PIPE)
     m = re.search(r'[Vv]ersion\s+(\d+\.\d+)', proc.stdout)
     actual_clang_version = m and m.group(1)
@@ -422,6 +424,8 @@ def check_llvm_version():
 
 
 def get_llc_targets():
+  if not os.path.exists(LLVM_COMPILER):
+    exit_with_error('llc exectuable not found at `%s`' % LLVM_COMPILER)
   try:
     llc_version_info = run_process([LLVM_COMPILER, '--version'], stdout=PIPE).stdout
   except Exception as e:
