@@ -219,7 +219,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # -dumpversion
       output = run_process([PYTHON, compiler, '-dumpversion'], stdout=PIPE, stderr=PIPE)
-      self.assertEqual(shared.EMSCRIPTEN_VERSION + os.linesep, output.stdout, 'results should be identical')
+      self.assertEqual(shared.EMSCRIPTEN_VERSION, output.stdout.strip(), 'results should be identical')
 
       # emcc src.cpp ==> writes a.out.js and a.out.wasm
       self.clear()
@@ -3686,7 +3686,11 @@ int main()
     # compile a minimal program, with as few dependencies as possible, as
     # native building on CI may not always work well
     create_test_file('minimal.cpp', 'int main() { return 0; }')
-    run_process([CLANG, 'minimal.cpp', '-c', '-emit-llvm', '-o', 'a.bc'] + shared.get_clang_native_args(), env=shared.get_clang_native_env())
+    try:
+      vs_env = shared.get_clang_native_env()
+    except:
+      self.skipTest('Native clang env not found')
+    run_process([CLANG, 'minimal.cpp', '-c', '-emit-llvm', '-o', 'a.bc'] + shared.get_clang_native_args(), env=vs_env)
     err = run_process([PYTHON, EMCC, 'a.bc'], stdout=PIPE, stderr=PIPE, check=False).stderr
     if self.is_wasm_backend():
       self.assertContained('machine type must be wasm32', err)
@@ -5065,6 +5069,26 @@ main(const int argc, const char * const * const argv)
     self.assertContained('locale set to waka: waka;waka;waka;waka;waka;waka',
                          run_js('a.out.js', args=['waka']))
 
+  def test_browser_language_detection(self):
+    # Test HTTP Accept-Language parsing by simulating navigator.languages #8751
+    run_process([PYTHON, EMCC,
+                 path_from_root('tests', 'test_browser_language_detection.c')])
+    self.assertContained('C.UTF-8', run_js('a.out.js'))
+
+    # Accept-Language: fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3
+    create_test_file('preamble.js', r'''navigator = {};
+      navigator.languages = [ "fr", "fr-FR", "en-US", "en" ];''')
+    run_process([PYTHON, EMCC, '--pre-js', 'preamble.js',
+                 path_from_root('tests', 'test_browser_language_detection.c')])
+    self.assertContained('fr.UTF-8', run_js('a.out.js'))
+
+    # Accept-Language: fr-FR,fr;q=0.8,en-US;q=0.5,en;q=0.3
+    create_test_file('preamble.js', r'''navigator = {};
+      navigator.languages = [ "fr-FR", "fr", "en-US", "en" ];''')
+    run_process([PYTHON, EMCC, '--pre-js', 'preamble.js',
+                 path_from_root('tests', 'test_browser_language_detection.c')])
+    self.assertContained('fr_FR.UTF-8', run_js('a.out.js'))
+
   def test_js_main(self):
     # try to add a main() from JS, at runtime. this is not supported (the
     # compiler needs to know at compile time about main).
@@ -5995,6 +6019,7 @@ print(os.environ.get('NM'))
 ''')
     check('emconfigure', [PYTHON, 'test.py'], expect=shared.LLVM_NM)
 
+  @no_windows('This test is broken, https://github.com/emscripten-core/emscripten/issues/8872')
   def test_emmake_python(self):
     # simulates a configure/make script that looks for things like CC, AR, etc., and which we should
     # not confuse by setting those vars to something containing `python X` as the script checks for
@@ -8270,9 +8295,9 @@ int main() {
 
   # Tests that if user accidentally attempts to link native object code, we show an error
   def test_native_link_error_message(self):
-    run_process([CLANG, '-c', path_from_root('tests', 'hello_world.cpp'), '-o', 'hello_world.o'])
-    err = self.expect_fail([PYTHON, EMCC, 'hello_world.o', '-o', 'hello_world.js'])
-    self.assertContained('hello_world.o is not a valid input', err)
+    run_process([CLANG_CC, '-c', path_from_root('tests', 'hello_123.c'), '-o', 'hello_123.o'])
+    err = self.expect_fail([PYTHON, EMCC, 'hello_123.o', '-o', 'hello_123.js'])
+    self.assertContained('hello_123.o is not a valid input', err)
 
   # Tests that we should give a clear error on TOTAL_MEMORY not being enough for static initialization + stack
   def test_clear_error_on_massive_static_data(self):
@@ -9330,3 +9355,10 @@ int main () {
 
   def test_llvm_includes(self):
     self.build('#include <stdatomic.h>', self.get_dir(), 'atomics.c')
+
+  def test_mmap_and_munmap(self):
+    emcc_args = []
+    for f in ['data_ro.dat', 'data_rw.dat']:
+        create_test_file(f, 'Test file')
+        emcc_args.extend(['--embed-file', f])
+    self.do_other_test('mmap_and_munmap', emcc_args)
