@@ -338,6 +338,7 @@ class TestCoreBase(RunnerCore):
     shutil.copyfile(path_from_root('tests', 'cube2md5.txt'), 'cube2md5.txt')
     self.do_run(open(path_from_root('tests', 'cube2md5.cpp')).read(), open(path_from_root('tests', 'cube2md5.ok')).read())
 
+  @needs_make('make')
   def test_cube2hash(self):
     # A good test of i64 math
     self.do_run('', 'Usage: hashstring <seed>',
@@ -750,24 +751,20 @@ base align: 0, 0, 0, 0'''])
   def test_mallocstruct(self):
     self.do_run(self.gen_struct_src.replace('{{gen_struct}}', '(S*)malloc(sizeof(S))').replace('{{del_struct}}', 'free'), '*51,62*')
 
-  def test_emmalloc(self):
+  @parameterized({
+    'normal': [],
+    'debug': ['-DEMMALLOC_DEBUG'],
+    'debug_log': ['-DEMMALLOC_DEBUG', '-DEMMALLOC_DEBUG_LOG', '-DRANDOM_ITERS=130'],
+  })
+  def test_emmalloc(self, *args):
     # in newer clang+llvm, the internal calls to malloc in emmalloc may be optimized under
     # the assumption that they are external, so like in system_libs.py where we build
     # malloc, we need to disable builtin here too
-    self.emcc_args += ['-fno-builtin']
+    self.set_setting('MALLOC', 'none')
+    self.emcc_args += ['-fno-builtin'] + list(args)
 
-    def test():
-      self.do_run(open(path_from_root('system', 'lib', 'emmalloc.cpp')).read() + open(path_from_root('tests', 'core', 'test_emmalloc.cpp')).read(),
-                  open(path_from_root('tests', 'core', 'test_emmalloc.txt')).read())
-    print('normal')
-    test()
-    print('debug')
-    self.emcc_args += ['-DEMMALLOC_DEBUG']
-    test()
-    print('debug log')
-    self.emcc_args += ['-DEMMALLOC_DEBUG_LOG']
-    self.emcc_args += ['-DRANDOM_ITERS=130']
-    test()
+    self.do_run(open(path_from_root('system', 'lib', 'emmalloc.cpp')).read() + open(path_from_root('tests', 'core', 'test_emmalloc.cpp')).read(),
+                open(path_from_root('tests', 'core', 'test_emmalloc.txt')).read())
 
   def test_newstruct(self):
     self.do_run(self.gen_struct_src.replace('{{gen_struct}}', 'new S').replace('{{del_struct}}', 'delete'), '*51,62*')
@@ -2839,7 +2836,7 @@ Var: 42
       self.assertGreater(len(exports), 20)
       # wasm backend includes alias in NAMED_GLOBALS
       if self.is_wasm_backend():
-        self.assertLess(len(exports), 43)
+        self.assertLess(len(exports), 44)
       else:
         self.assertLess(len(exports), 30)
 
@@ -4190,6 +4187,7 @@ ok
     ''', expected=['side init sees 82, 72, -534.\nmain init sees -524, -534, 72.\nmain main sees -524, -534, 72.',
                    'main init sees -524, -534, 72.\nside init sees 82, 72, -534.\nmain main sees -524, -534, 72.'])
 
+  @needs_make('mingw32-make')
   @needs_dlfcn
   def test_dylink_zlib(self):
     self.emcc_args += ['-I' + path_from_root('tests', 'zlib'), '-s', 'RELOCATABLE']
@@ -4928,6 +4926,7 @@ main( int argv, char ** argc ) {
     src = open(path_from_root('tests', 'fs', 'test_64bit.c')).read()
     self.do_run(src, 'success', force_c=True, js_engines=js_engines)
 
+  @no_windows('https://github.com/emscripten-core/emscripten/issues/8882')
   def test_unistd_access(self):
     self.clear()
     orig_compiler_opts = self.emcc_args[:]
@@ -5023,6 +5022,7 @@ main( int argv, char ** argc ) {
     expected = open(path_from_root('tests', 'unistd', 'login.out')).read()
     self.do_run(src, expected)
 
+  @no_windows('https://github.com/emscripten-core/emscripten/issues/8882')
   def test_unistd_unlink(self):
     self.clear()
     orig_compiler_opts = self.emcc_args[:]
@@ -5087,6 +5087,7 @@ main( int argv, char ** argc ) {
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
       self.do_run(src, expected, js_engines=[NODE_JS])
 
+  @no_windows('https://github.com/emscripten-core/emscripten/issues/8882')
   def test_unistd_misc(self):
     orig_compiler_opts = self.emcc_args[:]
     src = open(path_from_root('tests', 'unistd', 'misc.c')).read()
@@ -7767,7 +7768,7 @@ extern "C" {
     ]),
     'g4': ('-g4', [
       "src.cpp:3:12: runtime error: reference binding to null pointer of type 'int'",
-      'in main /',
+      'in main ',
       '/src.cpp:3:8'
     ]),
   })
@@ -7784,7 +7785,7 @@ extern "C" {
     def modify_env(filename):
       with open(filename) as f:
         contents = f.read()
-      contents = re.sub('(?<=ENV=){}', "{'UBSAN_OPTIONS': 'print_stacktrace=1'}", contents)
+      contents = 'Module = {UBSAN_OPTIONS: "print_stacktrace=1"}' + contents
       with open(filename, 'w') as f:
         f.write(contents)
 
@@ -7884,6 +7885,8 @@ wasm2s = make_run('wasm2s', emcc_args=['-O2'], settings={'SAFE_HEAP': 1})
 # emterpreter
 asmi = make_run('asmi', emcc_args=[], settings={'ASM_JS': 2, 'EMTERPRETIFY': 1, 'WASM': 0})
 asm2i = make_run('asm2i', emcc_args=['-O2'], settings={'EMTERPRETIFY': 1, 'WASM': 0})
+
+lsan = make_run('lsan', emcc_args=['-fsanitize=leak'], settings={'ALLOW_MEMORY_GROWTH': 1})
 
 # TestCoreBase is just a shape for the specific subclasses, we don't test it itself
 del TestCoreBase # noqa
