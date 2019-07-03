@@ -1304,6 +1304,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       ]
 
     if shared.Settings.USE_PTHREADS:
+      # To ensure allocated thread stacks are aligned:
+      shared.Settings.EXPORTED_FUNCTIONS += ['_memalign']
+
       if shared.Settings.MODULARIZE:
         # MODULARIZE+USE_PTHREADS mode requires extra exports out to Module so that worker.js
         # can access them:
