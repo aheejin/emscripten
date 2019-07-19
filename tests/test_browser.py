@@ -110,8 +110,6 @@ def requires_threads(f):
   def decorated(self):
     if os.environ.get('EMTEST_LACKS_THREAD_SUPPORT'):
       self.skipTest('EMTEST_LACKS_THREAD_SUPPORT is set')
-    if is_chrome():
-      self.skipTest('Chrome leaks pthreads memory, https://bugs.chromium.org/p/v8/issues/detail?id=9075')
     return f(self)
 
   return decorated
@@ -831,7 +829,7 @@ window.close = function() {
 
   def get_async_args(self):
     if self.is_wasm_backend():
-      return ['-s', 'BYSYNCIFY']
+      return ['-s', 'ASYNCIFY']
     else:
       return ['-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1']
 
@@ -1687,8 +1685,10 @@ keydown(100);keyup(100); // trigger the end
 
     server = multiprocessing.Process(target=test_chunked_synchronous_xhr_server, args=(True, chunkSize, data, checksum, self.port))
     server.start()
-    self.run_browser(main, 'Chunked binary synchronous XHR in Web Workers!', '/report_result?' + str(checksum))
-    server.terminate()
+    try:
+      self.run_browser(main, 'Chunked binary synchronous XHR in Web Workers!', '/report_result?' + str(checksum))
+    finally:
+      server.terminate()
     # Avoid race condition on cleanup, wait a bit so that processes have released file locks so that test tearDown won't
     # attempt to rmdir() files in use.
     if WINDOWS:
@@ -1793,6 +1793,7 @@ keydown(100);keyup(100); // trigger the end
                        '--preload-file', 'basemap.tga', '--preload-file', 'lightmap.tga', '--preload-file', 'smoke.tga'])
 
   @requires_graphics_hardware
+  @flaky
   def test_clientside_vertex_arrays_es3(self):
     # NOTE: Should FULL_ES3=1 imply client-side vertex arrays? The emulation needs FULL_ES2=1 for now.
     self.btest('clientside_vertex_arrays_es3.c', reference='gl_triangle.png', args=['-s', 'USE_WEBGL2=1', '-s', 'FULL_ES2=1', '-s', 'FULL_ES3=1', '-s', 'USE_GLFW=3', '-lglfw', '-lGLESv2'])
@@ -2168,10 +2169,12 @@ void *getBindBuffer() {
     self.btest('tex_nonbyte.c', reference='tex_nonbyte.png', args=['-s', 'LEGACY_GL_EMULATION=1', '-lGL', '-lSDL'])
 
   @requires_graphics_hardware
+  @flaky
   def test_float_tex(self):
     self.btest('float_tex.cpp', reference='float_tex.png', args=['-lGL', '-lglut'])
 
   @requires_graphics_hardware
+  @flaky
   def test_subdata(self):
     self.btest('gl_subdata.cpp', reference='float_tex.png', args=['-lGL', '-lglut'])
 
@@ -2325,19 +2328,19 @@ void *getBindBuffer() {
 
     post_hook = r'''
       function myJSCallback() {
+        // Run on the next event loop, as code may run in a postRun right after main().
+        setTimeout(function() {
+          var xhr = new XMLHttpRequest();
+          assert(Module.noted);
+          xhr.open('GET', 'http://localhost:%s/report_result?' + HEAP32[Module.noted>>2]);
+          xhr.send();
+          setTimeout(function() { window.close() }, 1000);
+        }, 0);
         // called from main, this is an ok time
         doCcall(100);
         doCwrapCall(200);
         doDirectCall(300);
       }
-
-      setTimeout(function() {
-        var xhr = new XMLHttpRequest();
-        assert(Module.noted);
-        xhr.open('GET', 'http://localhost:%s/report_result?' + HEAP32[Module.noted>>2]);
-        xhr.send();
-        setTimeout(function() { window.close() }, 1000);
-      }, 1000);
     ''' % self.port
 
     create_test_file('pre_runtime.js', r'''
@@ -2674,7 +2677,7 @@ Module["preRun"].push(function () {
       print('emterpreter by itself')
       self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1'])
     else:
-      self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'BYSYNCIFY=1'])
+      self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'ASYNCIFY=1'])
 
   def test_wget_data(self):
     create_test_file('test.txt', 'emscripten')
@@ -3299,20 +3302,20 @@ window.close = function() {
     self.btest('browser/async_iostream.cpp', '1', args=self.get_async_args())
 
   # Test an async return value. The value goes through a custom JS library
-  # method that uses bysyncify, and therefore it needs to be declared in
-  # BYSYNCIFY_IMPORTS.
-  # To make the test more precise we also use BYSYNCIFY_IGNORE_INDIRECT here.
+  # method that uses asyncify, and therefore it needs to be declared in
+  # ASYNCIFY_IMPORTS.
+  # To make the test more precise we also use ASYNCIFY_IGNORE_INDIRECT here.
   @parameterized({
-    'normal': (['-s', 'BYSYNCIFY_IMPORTS=["sync_tunnel"]'],), # noqa
+    'normal': (['-s', 'ASYNCIFY_IMPORTS=["sync_tunnel"]'],), # noqa
     'bad': (['-DBAD'],) # noqa
   })
   @no_fastcomp('emterpretify never worked here')
   def test_async_returnvalue(self, args):
-    self.btest('browser/async_returnvalue.cpp', '0', args=['-s', 'BYSYNCIFY', '-s', 'BYSYNCIFY_IGNORE_INDIRECT', '--js-library', path_from_root('tests', 'browser', 'async_returnvalue.js')] + args + ['-s', 'ASSERTIONS=1'])
+    self.btest('browser/async_returnvalue.cpp', '0', args=['-s', 'ASYNCIFY', '-s', 'ASYNCIFY_IGNORE_INDIRECT', '--js-library', path_from_root('tests', 'browser', 'async_returnvalue.js')] + args + ['-s', 'ASSERTIONS=1'])
 
-  @no_fastcomp('bysyncify specific')
+  @no_fastcomp('wasm backend asyncify specific')
   def test_async_stack_overflow(self):
-    self.btest('browser/async_stack_overflow.cpp', '0', args=['-s', 'BYSYNCIFY', '-s', 'BYSYNCIFY_STACK_SIZE=4'])
+    self.btest('browser/async_stack_overflow.cpp', '0', args=['-s', 'ASYNCIFY', '-s', 'ASYNCIFY_STACK_SIZE=4'])
 
   @requires_sync_compilation
   def test_modularize(self):
@@ -3893,6 +3896,18 @@ window.close = function() {
   @requires_threads
   def test_pthread_wake_all(self):
     self.btest(path_from_root('tests', 'pthread', 'test_futex_wake_all.cpp'), expected='0', args=['-O3', '-s', 'USE_PTHREADS=1', '-s', 'TOTAL_MEMORY=64MB', '-s', 'NO_EXIT_RUNTIME=1'], also_asmjs=True)
+
+  # Test that real `thread_local` works.
+  @no_fastcomp('thread_local is only supported on WASM backend')
+  @requires_threads
+  def test_pthread_tls(self):
+    self.btest(path_from_root('tests', 'pthread', 'test_pthread_tls.cpp'), expected='1337', args=['-s', 'PROXY_TO_PTHREAD', '-s', 'USE_PTHREADS', '-std=c++11'])
+
+  # Test that real `thread_local` works in main thread without PROXY_TO_PTHREAD.
+  @no_fastcomp('thread_local is only supported on WASM backend')
+  @requires_threads
+  def test_pthread_tls_main(self):
+    self.btest(path_from_root('tests', 'pthread', 'test_pthread_tls_main.cpp'), expected='1337', args=['-s', 'USE_PTHREADS', '-std=c++11'])
 
   # Tests MAIN_THREAD_EM_ASM_INT() function call signatures.
   @no_wasm_backend('MAIN_THREAD_EM_ASM() not yet implemented in Wasm backend')

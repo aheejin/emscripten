@@ -649,7 +649,7 @@ LibraryManager.library = {
 #endif
     updateGlobalBufferViews();
 
-#if ASSERTIONS && !WASM
+#if ASSERTIONS && (!WASM || WASM2JS)
     err('Warning: Enlarging memory arrays, this is not fast! ' + [oldSize, newSize]);
 #endif
 
@@ -4764,6 +4764,16 @@ LibraryManager.library = {
 
   _Unwind_DeleteException: function(ex) {
     err('TODO: Unwind_DeleteException');
+  },
+
+  // error handling
+
+  $runAndAbortIfError: function(func) {
+    try {
+      return func();
+    } catch (e) {
+      abort(e);
+    }
   },
 
   // autodebugging

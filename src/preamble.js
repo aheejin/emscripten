@@ -970,8 +970,8 @@ function createWasm(env) {
   // performing other necessary setup
   function receiveInstance(instance, module) {
     var exports = instance.exports;
-#if BYSYNCIFY
-    exports = Bysyncify.instrumentWasmExports(exports);
+#if WASM_BACKEND && ASYNCIFY
+    exports = Asyncify.instrumentWasmExports(exports);
 #endif
     Module['asm'] = exports;
 #if USE_PTHREADS
@@ -1082,11 +1082,13 @@ function createWasm(env) {
       module = new WebAssembly.Module(binary);
       instance = new WebAssembly.Instance(module, info);
     } catch (e) {
-      err('failed to compile wasm module: ' + e);
-      if (e.toString().indexOf('imported Memory with incompatible size') >= 0) {
+      var str = e.toString();
+      err('failed to compile wasm module: ' + str);
+      if (str.indexOf('imported Memory') >= 0 ||
+          str.indexOf('memory import') >= 0) {
         err('Memory size incompatibility issues may be due to changing TOTAL_MEMORY at runtime to something too large. Use ALLOW_MEMORY_GROWTH to allow any size memory (and also make sure not to set TOTAL_MEMORY at runtime to something smaller than it was at compile time).');
       }
-      return false;
+      throw e;
     }
 #if LOAD_SOURCE_MAP
     receiveSourceMapJSON(getSourceMap());
@@ -1100,8 +1102,8 @@ function createWasm(env) {
   if (Module['instantiateWasm']) {
     try {
       var exports = Module['instantiateWasm'](info, receiveInstance);
-#if BYSYNCIFY
-      exports = Bysyncify.instrumentWasmExports(exports);
+#if WASM_BACKEND && ASYNCIFY
+      exports = Asyncify.instrumentWasmExports(exports);
 #endif
       return exports;
     } catch(e) {
