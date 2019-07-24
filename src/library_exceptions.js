@@ -11,6 +11,7 @@ var LibraryExceptions = {
   __exception_last: '0',
   __exception_caught: ' []',
   __exception_infos: '{}',
+  __exception_uncaught_count: '0',
 
   __exception_deAdjust__deps: ['__exception_infos'],
   __exception_deAdjust: function(adjusted) {
@@ -118,7 +119,7 @@ var LibraryExceptions = {
   // Here, we throw an exception after recording a couple of values that we need to remember
   // We also remember that it was the last exception thrown as we need to know that later.
   __cxa_throw__sig: 'viii',
-  __cxa_throw__deps: ['__exception_infos', '__exception_last', '_ZSt18uncaught_exceptionv'],
+  __cxa_throw__deps: ['__exception_infos', '__exception_last', '__exception_uncaught_count'],
   __cxa_throw: function(ptr, type, destructor) {
 #if EXCEPTION_DEBUG
     err('Compiled code throwing an exception, ' + [ptr,type,destructor]);
@@ -133,11 +134,7 @@ var LibraryExceptions = {
       rethrown: false
     };
     ___exception_last = ptr;
-    if (!("uncaught_exception" in __ZSt18uncaught_exceptionv)) {
-      __ZSt18uncaught_exceptionv.uncaught_exceptions = 1;
-    } else {
-      __ZSt18uncaught_exceptionv.uncaught_exceptions++;
-    }
+    ___exception_uncaught_count++;
     {{{ makeThrow('ptr') }}}
   },
 
@@ -179,12 +176,12 @@ var LibraryExceptions = {
     return type;
   },
 
-  __cxa_begin_catch__deps: ['__exception_infos', '__exception_caught', '__exception_addRef', '__exception_deAdjust', '_ZSt18uncaught_exceptionv'],
+  __cxa_begin_catch__deps: ['__exception_infos', '__exception_caught', '__exception_addRef', '__exception_deAdjust', '__exception_uncaught_count'],
   __cxa_begin_catch: function(ptr) {
     var info = ___exception_infos[ptr];
     if (info && !info.caught) {
       info.caught = true;
-      __ZSt18uncaught_exceptionv.uncaught_exceptions--;
+      ___exception_uncaught_count--;
     }
     if (info) info.rethrown = false;
     ___exception_caught.push(ptr);
@@ -221,13 +218,16 @@ var LibraryExceptions = {
     return ptr;
   },
 
-  _ZSt18uncaught_exceptionv: function() { // std::uncaught_exception()
-    return __ZSt18uncaught_exceptionv.uncaught_exceptions > 0;
+  __cxa_uncaught_exception__deps: ['__exception_uncaught_count'],
+  __cxa_uncaught_exception: function() {
+    return ___exception_uncaught_count > 0;
   },
 
-  __cxa_uncaught_exceptions__deps: ['_ZSt18uncaught_exceptionv'],
+  _ZSt18uncaught_exceptionv: '__cxa_uncaught_exception', // std::uncaught_exception()
+
+  __cxa_uncaught_exceptions__deps: ['__exception_uncaught_count'],
   __cxa_uncaught_exceptions: function() {
-    return __ZSt18uncaught_exceptionv.uncaught_exceptions;
+    return ___exception_uncaught_count;
   },
 
   __cxa_call_unexpected: function(exception) {
