@@ -1004,18 +1004,35 @@ int main() {
     run_process([PYTHON, EMCC, '-o', 'a.js', 'main.o', 'library.a'])
     self.assertContained('|0|', run_js('a.js'))
 
+  @parameterized({
+    'expand_symlinks': [[]],
+    'no-canonical-prefixes': [['-no-canonical-prefixes']],
+  })
   @no_windows('Windows does not support symlinks')
-  def test_symlink(self):
+  def test_symlink_points_to_bad_suffix(self, flags):
+    """Tests compiling a symlink where foobar.c points to foobar.xxx.
+
+    In this case, we should always successfully compile the code."""
     create_test_file('foobar.xxx', 'int main(){ return 0; }')
     os.symlink('foobar.xxx', 'foobar.c')
-    run_process([PYTHON, EMCC, 'foobar.c', '-o', 'foobar.bc'])
-    try_delete('foobar.bc')
-    try_delete('foobar.xxx')
-    try_delete('foobar.c')
+    run_process([PYTHON, EMCC, 'foobar.c', '-o', 'foobar.bc'] + flags)
 
+  @parameterized({
+    'expand_symlinks': ([], True),
+    'no-canonical-prefixes': (['-no-canonical-prefixes'], False),
+  })
+  @no_windows('Windows does not support symlinks')
+  def test_symlink_has_bad_suffix(self, flags, expect_success):
+    """Tests compiling a symlink where foobar.xxx points to foobar.c.
+
+    In this case, setting -no-canonical-prefixes will result in a build failure
+    due to the inappropriate file suffix on foobar.xxx."""
     create_test_file('foobar.c', 'int main(){ return 0; }')
     os.symlink('foobar.c', 'foobar.xxx')
-    run_process([PYTHON, EMCC, 'foobar.xxx', '-o', 'foobar.bc'])
+    proc = run_process([PYTHON, EMCC, 'foobar.xxx', '-o', 'foobar.bc'] + flags, check=expect_success, stderr=PIPE)
+    if not expect_success:
+      self.assertNotEqual(proc.returncode, 0)
+      self.assertContained("unknown suffix", proc.stderr)
 
   def test_multiply_defined_libsymbols(self):
     lib = "int mult() { return 1; }"
@@ -8572,7 +8589,6 @@ end
     if not self.is_wasm_backend(): # TODO: wasm backend main module
       self.do_other_test(os.path.join('other', 'extern_weak'), emcc_args=['-s', 'MAIN_MODULE=1', '-DLINKABLE'])
 
-  @no_windows('https://github.com/emscripten-core/emscripten/issues/9057')
   def test_js_optimizer_parse_error(self):
     # check we show a proper understandable error for JS parse problems
     create_test_file('src.cpp', r'''
@@ -8591,7 +8607,7 @@ var ASM_CONSTS = [function() { var x = !<->5.; }];
 ''', '''
 var ASM_CONSTS = [function() {var x = !<->5.;}];
                                        ^
-'''), stderr.replace('\r', ''))
+'''), stderr)
 
   def test_EM_ASM_ES6(self):
     # check we show a proper understandable error for JS parse problems
@@ -9477,6 +9493,17 @@ int main () {
     # otherwise in such a trivial program).
     self.assertLess(no, 0.95 * yes)
 
+  @no_fastcomp('not optimized in fastcomp')
+  def test_INCOMING_MODULE_JS_API(self):
+    def test(args):
+      run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-O3'] + args)
+      self.assertContained('hello, world!', run_js('a.out.js'))
+      return os.path.getsize('a.out.js')
+    normal = test([])
+    changed = test(['-s', 'INCOMING_MODULE_JS_API=[]'])
+    # TODO: specific sizes once we stabilize
+    self.assertLess(changed, normal)
+
   def test_llvm_includes(self):
     self.build('#include <stdatomic.h>', self.get_dir(), 'atomics.c')
 
@@ -9509,3 +9536,40 @@ int main () {
         self.assertContained('DISABLE_EXCEPTION_THROWING was set (probably from -fno-exceptions) but is not compatible with enabling exception catching (DISABLE_EXCEPTION_CATCHING=0)', self.expect_fail(cmd))
       else:
         run_process(cmd)
+
+  def test_assertions_on_internal_api_changes(self):
+    create_test_file('src.c', r'''
+      #include <emscripten.h>
+      int main(int argc, char **argv) {
+        EM_ASM({
+          try {
+            Module['read'];
+            out('it should not be there');
+          } catch(e) {
+            out('error: ' + e);
+          }
+        });
+      }
+    ''')
+    run_process([PYTHON, EMCC, 'src.c', '-s', 'ASSERTIONS'])
+    self.assertContained('Module.read has been replaced with plain read', run_js('a.out.js'))
+
+  def test_assertions_on_incoming_module_api_changes(self):
+    create_test_file('pre.js', r'''
+      var Module = {
+        read: function() {}
+      }
+    ''')
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'ASSERTIONS', '--pre-js', 'pre.js'])
+    self.assertContained('Module.read option was removed', run_js('a.out.js', assert_returncode=None, stderr=PIPE))
+
+  def test_em_asm_strict_c(self):
+    create_test_file('src.c', '''
+      #include <emscripten/em_asm.h>
+      int main() {
+        EM_ASM({ console.log('Hello, world!'); });
+      }
+    ''')
+    result = run_process([PYTHON, EMCC, '-std=c11', 'src.c'], stderr=PIPE, check=False)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn('EM_ASM does not work in -std=c* modes, use -std=gnu* modes instead', result.stderr)

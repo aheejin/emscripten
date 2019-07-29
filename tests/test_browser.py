@@ -2666,14 +2666,7 @@ Module["preRun"].push(function () {
 
   def test_wget(self):
     create_test_file('test.txt', 'emscripten')
-    if not self.is_wasm_backend():
-      self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'ASYNCIFY=1'])
-      print('asyncify+emterpreter')
-      self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'ASYNCIFY=1', '-s', 'EMTERPRETIFY=1'])
-      print('emterpreter by itself')
-      self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1'])
-    else:
-      self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=['-s', 'ASYNCIFY=1'])
+    self.btest(path_from_root('tests', 'test_wget.c'), expected='1', args=self.get_async_args())
 
   def test_wget_data(self):
     create_test_file('test.txt', 'emscripten')
@@ -3891,6 +3884,11 @@ window.close = function() {
   @requires_threads
   def test_pthread_wake_all(self):
     self.btest(path_from_root('tests', 'pthread', 'test_futex_wake_all.cpp'), expected='0', args=['-O3', '-s', 'USE_PTHREADS=1', '-s', 'TOTAL_MEMORY=64MB', '-s', 'NO_EXIT_RUNTIME=1'], also_asmjs=True)
+
+  # Test that STACK_BASE and STACK_MAX correctly bound the stack on pthreads.
+  @requires_threads
+  def test_pthread_stack_bounds(self):
+    self.btest(path_from_root('tests', 'pthread', 'test_pthread_stack_bounds.cpp'), expected='1', args=['-s', 'USE_PTHREADS', '-std=c++11'])
 
   # Test that real `thread_local` works.
   @no_fastcomp('thread_local is only supported on WASM backend')
