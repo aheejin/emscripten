@@ -218,6 +218,7 @@ class EmccOptions(object):
     # HACK (aheejin) c++11
     #self.default_cxx_std = '-std=c++11'
     self.use_closure_compiler = None
+    self.closure_args = []
     self.js_transform = None
     self.pre_js = '' # before all js
     self.post_js = '' # after all js
@@ -275,6 +276,7 @@ class JSOptimizer(object):
     self.emit_symbol_map = options.emit_symbol_map
     self.profiling_funcs = options.profiling_funcs
     self.use_closure_compiler = options.use_closure_compiler
+    self.closure_args = options.closure_args
 
     self.js_transform_tempfiles = js_transform_tempfiles
     self.in_temp = in_temp
@@ -345,7 +347,8 @@ class JSOptimizer(object):
     final = shared.Building.js_optimizer(final, passes, use_source_map(self),
                                          self.extra_info, just_split=just_split,
                                          just_concat=just_concat,
-                                         output_filename=self.in_temp(os.path.basename(final) + '.jsopted.js'))
+                                         output_filename=self.in_temp(os.path.basename(final) + '.jsopted.js'),
+                                         extra_closure_args=self.closure_args)
     self.js_transform_tempfiles.append(final)
     save_intermediate(title, suffix='js' if 'emitJSON' not in passes else 'json')
 
@@ -2355,7 +2358,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         logger.debug('running closure')
         # no need to add this to js_transform_tempfiles, because closure and
         # debug_level > 0 are never simultaneously true
-        final = shared.Building.closure_compiler(final, pretty=options.debug_level >= 1)
+        final = shared.Building.closure_compiler(final, pretty=options.debug_level >= 1,
+                                                 extra_closure_args=options.closure_args)
         save_intermediate('closure')
 
     log_time('js opts')
@@ -2478,6 +2482,12 @@ def parse_args(newargs):
     elif newargs[i].startswith('--llvm-lto'):
       check_bad_eq(newargs[i])
       options.llvm_lto = int(newargs[i + 1])
+      newargs[i] = ''
+      newargs[i + 1] = ''
+    elif newargs[i].startswith('--closure-args'):
+      check_bad_eq(newargs[i])
+      args = newargs[i + 1]
+      options.closure_args += shlex.split(args)
       newargs[i] = ''
       newargs[i + 1] = ''
     elif newargs[i].startswith('--closure'):
@@ -2946,7 +2956,8 @@ def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
     save_intermediate_with_wasm('postclean', wasm_binary_target)
 
   def run_closure_compiler(final):
-    final = shared.Building.closure_compiler(final, pretty=not optimizer.minify_whitespace)
+    final = shared.Building.closure_compiler(final, pretty=not optimizer.minify_whitespace,
+                                             extra_closure_args=options.closure_args)
     save_intermediate_with_wasm('closure', wasm_binary_target)
     return final
 
