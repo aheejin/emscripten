@@ -7985,10 +7985,11 @@ int main() {
     sent = [x for x in sent if x]
     sent.sort()
 
-    sent_file = expected_basename + '.sent'
-    sent_data = '\n'.join(sent) + '\n'
-    self.assertFileContents(sent_file, sent_data)
-    self.assertEqual(len(sent), expected_sent)
+    if expected_imports is not None:
+      sent_file = expected_basename + '.sent'
+      sent_data = '\n'.join(sent) + '\n'
+      self.assertFileContents(sent_file, sent_data)
+      self.assertEqual(len(sent), expected_sent)
 
     for exists in expected_exists:
       self.assertIn(exists, sent)
@@ -8003,7 +8004,8 @@ int main() {
     imports = wast.count('(import ')
     exports = wast.count('(export ')
     funcs = wast.count('\n (func ')
-    self.assertEqual(imports, expected_imports)
+    if expected_imports is not None:
+      self.assertEqual(imports, expected_imports)
     self.assertEqual(exports, expected_exports)
     if expected_funcs is not None:
       self.assertEqual(funcs, expected_funcs)
@@ -8065,8 +8067,8 @@ int main() {
     # don't compare the # of functions in a main module, which changes a lot
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1612, [], [], 517336, 173, 1505, None), # noqa
-    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   16, [], [],  10770,  18,   13, None), # noqa
+    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1612, [], [], 517336, None, 1505, None), # noqa
+    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   16, [], [],  10770,   18,   13, None), # noqa
   })
   @no_fastcomp()
   def test_binaryen_metadce_hello(self, *args):
@@ -8085,8 +8087,8 @@ int main() {
                       0, [],        [],           8,   0,    0,  0), # noqa; totally empty!
     # we don't metadce with linkable code! other modules may want stuff
     # don't compare the # of functions in a main module, which changes a lot
-    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1576, [], [], 226403, 30, 96, None), # noqa
-    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   15, [], [],  10571, 19,  9,   21), # noqa
+    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1576, [], [], 226403, None, 96, None), # noqa
+    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   15, [], [],  10571,   19,  9,   21), # noqa
   })
   @no_wasm_backend()
   def test_binaryen_metadce_hello_fastcomp(self, *args):
@@ -8532,7 +8534,7 @@ end
 
   # Tests --closure-args command line flag
   def test_closure_externs(self):
-    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '--closure', '1', '--pre-js', path_from_root('tests', 'test_closure_externs_pre_js.js'), '--closure-args', '--externs ' + path_from_root('tests', 'test_closure_externs.js')])
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '--closure', '1', '--pre-js', path_from_root('tests', 'test_closure_externs_pre_js.js'), '--closure-args', '--externs "' + path_from_root('tests', 'test_closure_externs.js') + '"'])
 
   def test_toolchain_profiler(self):
     environ = os.environ.copy()
@@ -9500,13 +9502,17 @@ int main () {
   @no_fastcomp('not optimized in fastcomp')
   def test_INCOMING_MODULE_JS_API(self):
     def test(args):
-      run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-O3'] + args)
-      self.assertContained('hello, world!', run_js('a.out.js'))
+      run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-O3', '--closure', '1'] + args)
+      for engine in JS_ENGINES:
+        self.assertContained('hello, world!', run_js('a.out.js', engine=engine))
       return os.path.getsize('a.out.js')
     normal = test([])
     changed = test(['-s', 'INCOMING_MODULE_JS_API=[]'])
-    # TODO: specific sizes once we stabilize
+    print('sizes', normal, changed)
+    # Changing this option to [] should decrease code size.
     self.assertLess(changed, normal)
+    # Check an absolute code size as well, with some slack.
+    self.assertLess(abs(changed - 6768), 100)
 
   def test_llvm_includes(self):
     self.build('#include <stdatomic.h>', self.get_dir(), 'atomics.c')
@@ -9569,6 +9575,33 @@ int main () {
     ''')
     run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'ASSERTIONS', '--pre-js', 'pre.js'])
     self.assertContained('Module.read option was removed', run_js('a.out.js', assert_returncode=None, stderr=PIPE))
+
+  def test_assertions_on_outgoing_module_api_changes(self):
+    create_test_file('src.cpp', r'''
+      #include <emscripten.h>
+      int main() {
+        EM_ASM({
+          console.log();
+          function check(name) {
+            try {
+              Module[name];
+              console.log("success: " + name);
+            } catch(e) {
+            }
+          }
+          check("read");
+          // TODO check("setWindowTitle");
+          check("wasmBinary");
+          check("arguments");
+        });
+      }
+    ''')
+    run_process([PYTHON, EMCC, 'src.cpp', '-s', 'ASSERTIONS'])
+    self.assertContained('''
+Module.read has been replaced with plain read_
+Module.wasmBinary has been replaced with plain wasmBinary
+Module.arguments has been replaced with plain arguments_
+''', run_js('a.out.js', assert_returncode=None, stderr=PIPE))
 
   def test_em_asm_strict_c(self):
     create_test_file('src.c', '''
