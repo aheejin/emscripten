@@ -540,7 +540,12 @@ var ASYNCIFY = 0;
 
 // The imports which can do a sync operation. If you add more you will need to
 // add them to here.
-var ASYNCIFY_IMPORTS = ['emscripten_sleep', 'emscripten_wget', 'emscripten_wget_data', 'emscripten_idb_load', 'emscripten_idb_store', 'emscripten_idb_delete', 'emscripten_idb_exists', 'emscripten_idb_load_blob', 'emscripten_idb_store_blob', 'SDL_Delay', '__syscall118'];
+var ASYNCIFY_IMPORTS = [
+  'emscripten_sleep', 'emscripten_wget', 'emscripten_wget_data', 'emscripten_idb_load',
+  'emscripten_idb_store', 'emscripten_idb_delete', 'emscripten_idb_exists',
+  'emscripten_idb_load_blob', 'emscripten_idb_store_blob', 'SDL_Delay', '__syscall118',
+  'emscripten_scan_registers'
+];
 
 // Whether indirect calls can be on the stack during an unwind/rewind.
 // If you know they cannot, then setting this can be extremely helpful, as otherwise asyncify
@@ -1241,6 +1246,9 @@ var PTHREADS_PROFILING = 0;
 
 // If true, add in debug traces for diagnosing pthreads related issues.
 var PTHREADS_DEBUG = 0;
+
+// If true, building against Emscripten's asm.js/wasm heap memory profiler.
+var MEMORYPROFILER = 0;
 
 var MAX_GLOBAL_ALIGN = -1; // received from the backend
 var IMPLEMENTED_FUNCTIONS = []; // received from the backend

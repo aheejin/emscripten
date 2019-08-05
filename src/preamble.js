@@ -264,8 +264,6 @@ function getMemory(size) {
 
 #include "runtime_strings.js"
 
-#include "runtime_stack_trace.js"
-
 // Memory management
 
 var PAGE_SIZE = 16384;
@@ -753,6 +751,10 @@ function lookupSymbol(ptr) { // for a pointer, print out all symbols that resolv
 #endif
 
 var memoryInitializer = null;
+
+#if MEMORYPROFILER
+#include "memoryprofiler.js"
+#endif
 
 #if USE_PTHREADS && PTHREAD_HINT_NUM_CORES < 0
 if (!ENVIRONMENT_IS_PTHREAD) addOnPreRun(function() {
