@@ -496,21 +496,6 @@ def check_closure_compiler():
   return True
 
 
-# Finds the system temp directory without resorting to using the one configured in .emscripten
-def find_temp_directory():
-  if WINDOWS:
-    if os.getenv('TEMP') and os.path.isdir(os.getenv('TEMP')):
-      return os.getenv('TEMP')
-    elif os.getenv('TMP') and os.path.isdir(os.getenv('TMP')):
-      return os.getenv('TMP')
-    elif os.path.isdir('C:\\temp'):
-      return os.getenv('C:\\temp')
-    else:
-      return None # No luck!
-  else:
-    return '/tmp'
-
-
 def get_emscripten_version(path):
   return open(path).read().strip().replace('"', '')
 
@@ -895,18 +880,9 @@ class Configuration(object):
   def __init__(self, environ=os.environ):
     self.EMSCRIPTEN_TEMP_DIR = None
 
-    if "EMCC_TEMP_DIR" in environ:
-      TEMP_DIR = environ.get("EMCC_TEMP_DIR")
-    try:
-      self.TEMP_DIR = TEMP_DIR
-    except NameError:
-      self.TEMP_DIR = find_temp_directory()
-      if self.TEMP_DIR is None:
-        logger.critical('TEMP_DIR not defined in ' + hint_config_file_location() + ", and could not detect a suitable directory! Please configure .emscripten to contain a variable TEMP_DIR='/path/to/temp/dir'.")
-      logger.debug('TEMP_DIR not defined in ' + hint_config_file_location() + ', using ' + self.TEMP_DIR)
-
+    self.TEMP_DIR = environ.get("EMCC_TEMP_DIR", tempfile.gettempdir())
     if not os.path.isdir(self.TEMP_DIR):
-      logger.critical("The temp directory TEMP_DIR='" + self.TEMP_DIR + "' doesn't seem to exist! Please make sure that the path is correct.")
+      exit_with_error("The temporary directory `" + self.TEMP_DIR + "` does not exist! Please make sure that the path is correct.")
 
     self.CANONICAL_TEMP_DIR = get_canonical_temp_dir(self.TEMP_DIR)
 
@@ -1394,6 +1370,7 @@ def print_compiler_stage(cmd):
   before executing it."""
   if '-v' in COMPILER_OPTS:
     print(' "%s" %s' % (cmd[0], ' '.join(cmd[1:])), file=sys.stderr)
+    sys.stderr.flush()
 
 
 def static_library_name(name):
@@ -1854,7 +1831,6 @@ class Building(object):
 
     if Settings.USE_PTHREADS:
       cmd.append('--shared-memory')
-      cmd.append('--passive-segments')
 
     for a in Building.llvm_backend_args():
       cmd += ['-mllvm', a]
@@ -3229,9 +3205,8 @@ def asstr(s):
 
 
 def asbytes(s):
-  if str is bytes:
-    # Python 2 compatibility:
-    # s.encode implicitly will first call s.decode('ascii') which may fail when with Unicode characters
+  if isinstance(s, bytes):
+    # Do not attempt to encode bytes
     return s
   return s.encode('utf-8')
 
