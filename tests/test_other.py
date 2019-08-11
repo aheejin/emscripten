@@ -94,11 +94,10 @@ def is_python3_version_supported():
   if not python3:
     return False
   output = run_process([python3, '--version'], stdout=PIPE).stdout
-  # strip out 'rc1' etc., we don't care about release candidates
-  if 'rc' in output:
-    output = output.split('rc')[0]
-  version = [int(x) for x in output.split(' ')[1].split('.')]
-  return version >= [3, 5, 0]
+  output = output.split(' ')[1]
+  # ignore final component which can contains non-integers (e.g 'rc1')
+  version = [int(x) for x in output.split('.')[:2]]
+  return version >= [3, 5]
 
 
 def encode_leb(number):
@@ -7434,6 +7433,12 @@ int main() {
     # when exported, all good
     test("Module['print']('print'); Module['printErr']('err'); ", 'print\nerr', ['-s', 'EXTRA_EXPORTED_RUNTIME_METHODS=["print", "printErr"]'])
 
+  def test_warn_unexported_main(self):
+    WARNING = 'main() is in the input files, but "_main" is not in EXPORTED_FUNCTIONS, which means it may be eliminated as dead code. Export it if you want main() to run.'
+
+    proc = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'EXPORTED_FUNCTIONS=[]'], stderr=PIPE)
+    self.assertContained(WARNING, proc.stderr)
+
   def test_arc4random(self):
     create_test_file('src.c', r'''
 #include <stdlib.h>
@@ -8095,7 +8100,7 @@ int main() {
                       0, [],        [],           8,   0,    0,  0), # noqa; totally empty!
     # we don't metadce with linkable code! other modules may want stuff
     # don't compare the # of functions in a main module, which changes a lot
-    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1576, [], [], 226403, None, 96, None), # noqa
+    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1576, [], [], 226403, None, 97, None), # noqa
     'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   15, [], [],  10571,   19,  9,   21), # noqa
   })
   @no_wasm_backend()
@@ -8602,6 +8607,23 @@ end
     self.do_other_test(os.path.join('other', 'extern_weak'), emcc_args=['-s', 'ERROR_ON_UNDEFINED_SYMBOLS=0'])
     if not self.is_wasm_backend(): # TODO: wasm backend main module
       self.do_other_test(os.path.join('other', 'extern_weak'), emcc_args=['-s', 'MAIN_MODULE=1', '-DLINKABLE'])
+
+  def test_main_module_without_main(self):
+    create_test_file('pre.js', r'''
+var Module = {
+  onRuntimeInitialized: function() {
+    Module._foo();
+  }
+};
+''')
+    create_test_file('src.c', r'''
+#include <emscripten.h>
+EMSCRIPTEN_KEEPALIVE void foo() {
+  EM_ASM({ console.log("bar") });
+}
+''')
+    run_process([PYTHON, EMCC, 'src.c', '--pre-js', 'pre.js', '-s', 'MAIN_MODULE=2'])
+    self.assertContained('bar', run_js('a.out.js'))
 
   def test_js_optimizer_parse_error(self):
     # check we show a proper understandable error for JS parse problems
@@ -9456,7 +9478,7 @@ int main () {
   @no_fastcomp('lsan not supported on fastcomp')
   def test_lsan_no_leak(self, ext):
     self.do_smart_test(path_from_root('tests', 'other', 'test_lsan_no_leak.' + ext),
-                       emcc_args=['-fsanitize=leak', '-s', 'ALLOW_MEMORY_GROWTH=1'],
+                       emcc_args=['-fsanitize=leak', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'ASSERTIONS=0'],
                        regexes=[r'^\s*$'])
 
   @no_fastcomp('asan is not supported on fastcomp')
@@ -9546,7 +9568,7 @@ int main () {
     # Changing this option to [] should decrease code size.
     self.assertLess(changed, normal)
     # Check an absolute code size as well, with some slack.
-    self.assertLess(abs(changed - 6285), 100)
+    self.assertLess(abs(changed - 6279), 100)
 
   def test_llvm_includes(self):
     self.build('#include <stdatomic.h>', self.get_dir(), 'atomics.c')

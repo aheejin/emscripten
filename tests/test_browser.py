@@ -2836,8 +2836,11 @@ Module['onRuntimeInitialized'] = function() {
   @requires_graphics_hardware
   def test_sdl2_image_formats(self):
     shutil.copyfile(path_from_root('tests', 'screenshot.png'), 'screenshot.png')
+    shutil.copyfile(path_from_root('tests', 'screenshot.jpg'), 'screenshot.jpg')
     self.btest('sdl2_image.c', expected='512', args=['--preload-file', 'screenshot.png', '-DSCREENSHOT_DIRNAME="/"', '-DSCREENSHOT_BASENAME="screenshot.png"',
                                                      '-DNO_PRELOADED', '-s', 'USE_SDL=2', '-s', 'USE_SDL_IMAGE=2', '-s', 'SDL2_IMAGE_FORMATS=["png"]'])
+    self.btest('sdl2_image.c', expected='600', args=['--preload-file', 'screenshot.jpg', '-DSCREENSHOT_DIRNAME="/"', '-DSCREENSHOT_BASENAME="screenshot.jpg"',
+                                                     '-DBITSPERPIXEL=24', '-DNO_PRELOADED', '-s', 'USE_SDL=2', '-s', 'USE_SDL_IMAGE=2', '-s', 'SDL2_IMAGE_FORMATS=["jpg"]'])
 
   def test_sdl2_key(self):
     for defines in [[]]:
@@ -3916,6 +3919,20 @@ window.close = function() {
   def test_pthread_lsan(self, name, args=[]):
     self.btest(path_from_root('tests', 'pthread', name + '.cpp'), expected='1', args=['-fsanitize=leak', '-s', 'TOTAL_MEMORY=256MB', '-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-std=c++11', '--pre-js', path_from_root('tests', 'pthread', name + '.js')] + args)
 
+  @parameterized({
+    # Reusing the LSan test files for ASan.
+    'leak': ['test_pthread_lsan_leak', ['-g4']],
+    'no_leak': ['test_pthread_lsan_no_leak'],
+  })
+  @no_fastcomp('ASan is only supported on WASM backend')
+  @requires_threads
+  def test_pthread_asan(self, name, args=[]):
+    self.btest(path_from_root('tests', 'pthread', name + '.cpp'), expected='1', args=['-fsanitize=address', '-s', 'TOTAL_MEMORY=256MB', '-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-std=c++11', '--pre-js', path_from_root('tests', 'pthread', name + '.js')] + args)
+
+  @no_fastcomp('ASan is only supported on WASM backend')
+  def test_pthread_asan_use_after_free(self):
+    self.btest(path_from_root('tests', 'pthread', 'test_pthread_asan_use_after_free.cpp'), expected='1', args=['-fsanitize=address', '-s', 'TOTAL_MEMORY=256MB', '-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-std=c++11', '--pre-js', path_from_root('tests', 'pthread', 'test_pthread_asan_use_after_free.js')])
+
   # Tests MAIN_THREAD_EM_ASM_INT() function call signatures.
   @no_wasm_backend('MAIN_THREAD_EM_ASM() not yet implemented in Wasm backend')
   def test_main_thread_em_asm_signatures(self):
@@ -4145,7 +4162,7 @@ window.close = function() {
     size = os.path.getsize('test.js')
     print('size:', size)
     # Note that this size includes test harness additions (for reporting the result, etc.).
-    self.assertLess(abs(size - 6166), 100)
+    self.assertLess(abs(size - 6098), 100)
 
   # Tests that it is possible to initialize and render WebGL content in a pthread by using OffscreenCanvas.
   # -DTEST_CHAINED_WEBGL_CONTEXT_PASSING: Tests that it is possible to transfer WebGL canvas in a chain from main thread -> thread 1 -> thread 2 and then init and render WebGL content there.

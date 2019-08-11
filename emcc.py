@@ -1343,6 +1343,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         'getMemory',
         'addRunDependency',
         'removeRunDependency',
+        'calledRun',
       ]
 
     if shared.Settings.USE_PTHREADS:
@@ -1435,6 +1436,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       # Remove the default exported functions 'memcpy', 'memset', 'malloc', 'free', etc. - those should only be linked in if used
       shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE = []
 
+      if shared.Settings.ASSERTIONS and shared.Settings.MINIMAL_RUNTIME:
+        # In ASSERTIONS-builds, functions UTF8ArrayToString() and stringToUTF8Array() (which are not JS library functions), both
+        # use warnOnce(), which in MINIMAL_RUNTIME is a JS library function, so explicitly have to mark dependency to warnOnce()
+        # in that case. If string functions are turned to library functions in the future, then JS dependency tracking can be
+        # used and this special directive can be dropped.
+        shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$warnOnce']
+
       # Always use the new HTML5 API event target lookup rules
       shared.Settings.DISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR = 1
 
@@ -1524,6 +1532,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if sanitize:
         shared.Settings.USE_OFFSET_CONVERTER = 1
 
+        if not shared.Settings.WASM_BACKEND:
+          exit_with_error('Sanitizers are not compatible with the fastcomp backend. Please upgrade to the upstream wasm backend by following these instructions: https://v8.dev/blog/emscripten-llvm-wasm#testing')
+
       if sanitize & UBSAN_SANITIZERS:
         if '-fsanitize-minimal-runtime' in newargs:
           shared.Settings.UBSAN_RUNTIME = 1
@@ -1546,9 +1557,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           # Since the shadow memory starts at 0, the act of accessing the shadow memory is detected
           # by SAFE_HEAP as a null pointer dereference.
           exit_with_error('ASan does not work with SAFE_HEAP')
-
-        if shared.Settings.USE_PTHREADS:
-          exit_with_error('ASan currently does not support threads')
 
       if sanitize and '-g4' in args:
         shared.Settings.LOAD_SOURCE_MAP = 1
