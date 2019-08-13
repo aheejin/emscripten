@@ -18,14 +18,14 @@ def try_delete(pathname):
   try:
     mylog.log_remove(pathname)
     os.unlink(pathname)
-  except:
+  except OSError:
     pass
   if not os.path.exists(pathname):
     return
   try:
     mylog.log_remove(pathname)
     shutil.rmtree(pathname, ignore_errors=True)
-  except:
+  except IOError:
     pass
   if not os.path.exists(pathname):
     return
@@ -53,7 +53,7 @@ def try_delete(pathname):
   try:
     mylog.log_remove(pathname)
     shutil.rmtree(pathname, ignore_errors=True)
-  except:
+  except IOError:
     pass
 
 

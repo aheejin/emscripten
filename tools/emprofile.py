@@ -28,7 +28,7 @@ def delete_profiler_logs():
   try:
     mylog.log_remove(profiler_logs_path)
     shutil.rmtree(profiler_logs_path)
-  except:
+  except IOError:
     pass
 
 
@@ -41,7 +41,7 @@ def list_files_in_directory(d):
       if os.path.isfile(f):
         files += [f]
     return files
-  except:
+  except IOError:
     return []
 
 
