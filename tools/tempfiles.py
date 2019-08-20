@@ -10,6 +10,7 @@ import tempfile
 import atexit
 import stat
 import sys
+from . import mylog
 
 
 # Attempts to delete given possibly nonexisting or read-only directory tree or filename.
