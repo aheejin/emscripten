@@ -3204,20 +3204,18 @@ printErr('dir was ' + process.env.EMCC_BUILD_DIR);
     process = run_process([PYTHON, EMCC, path_from_root('tests', 'float+.c')], stdout=PIPE, stderr=PIPE)
     assert process.returncode == 0, 'float.h should agree with our system: ' + process.stdout + '\n\n\n' + process.stderr
 
+  def test_output_is_dir(self):
+    outdir = 'out_dir/'
+    os.mkdir(outdir)
+    err = self.expect_fail([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c'), '-o', outdir])
+    self.assertContained('error: unable to open output file', err)
+
   def test_default_obj_ext(self):
-    outdir = 'out_dir' + '/'
+    run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c')])
+    self.assertExists('hello_world.o')
 
-    self.clear()
-    os.mkdir(outdir)
-    err = run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c'), '-o', outdir], stderr=PIPE).stderr
-    assert not err, err
-    assert os.path.isfile(outdir + 'hello_world.o')
-
-    self.clear()
-    os.mkdir(outdir)
-    err = run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c'), '-o', outdir, '--default-obj-ext', 'obj'], stderr=PIPE).stderr
-    assert not err, err
-    assert os.path.isfile(outdir + 'hello_world.obj')
+    run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c'), '--default-obj-ext', 'obj'])
+    self.assertExists('hello_world.obj')
 
   def test_doublestart_bug(self):
     create_test_file('code.cpp', r'''
@@ -3550,16 +3548,18 @@ int main() {
       ]:
       print(name, args)
       self.clear()
-      run_process([PYTHON, EMCC, path_from_root('system', 'lib', 'dlmalloc.c')] + args, stdout=PIPE, stderr=PIPE)
+      run_process([PYTHON, EMCC, path_from_root('system', 'lib', 'dlmalloc.c')] + args)
       sizes[name] = os.path.getsize('dlmalloc.o')
     print(sizes)
     # -c should not affect code size
     for name in ['0', '1', '2', '3', 's', 'z']:
-      assert sizes[name] == sizes[name + 'c']
+      self.assertEqual(sizes[name], sizes[name + 'c'])
     opt_min = min(sizes['1'], sizes['2'], sizes['3'], sizes['s'], sizes['z'])
     opt_max = max(sizes['1'], sizes['2'], sizes['3'], sizes['s'], sizes['z'])
-    assert opt_min - opt_max <= opt_max * 0.1, 'opt builds are all fairly close'
-    assert sizes['0'] > (1.20 * opt_max), 'unopt build is quite larger'
+    # 'opt builds are all fairly close'
+    self.assertLess(opt_min - opt_max, opt_max * 0.1)
+    # unopt build is quite larger'
+    self.assertGreater(sizes['0'], (1.20 * opt_max))
 
   @no_wasm_backend('relies on ctor evaluation and dtor elimination')
   def test_global_inits(self):
