@@ -796,7 +796,7 @@ class libcxx(NoBCLibrary, CXXLibrary, NoExceptLibrary, MTLibrary):
   ]
 
 
-class libmalloc(MTLibrary):
+class libmalloc(MTLibrary, NoBCLibrary):
   name = 'libmalloc'
 
   cflags = ['-O2', '-fno-builtin']

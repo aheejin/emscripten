@@ -462,21 +462,25 @@ def check_llvm():
   return True
 
 
-EXPECTED_NODE_VERSION = (4, 1, 1)
+EXPECTED_NODE_VERSION = [8, 10]
 
 
 def check_node_version():
   jsrun.check_engine(NODE_JS)
   try:
-    actual = run_process(NODE_JS + ['--version'], stdout=PIPE).stdout.strip()
-    version = tuple(map(int, actual.replace('v', '').replace('-pre', '').split('.')))
-    if version >= EXPECTED_NODE_VERSION:
-      return True
-    logger.warning('node version appears too old (seeing "%s", expected "%s")' % (actual, 'v' + ('.'.join(map(str, EXPECTED_NODE_VERSION)))))
-    return False
+    output = run_process(NODE_JS + ['--version'], stdout=PIPE).stdout.strip()
+    # Only check for major and minor version
+    version = [int(v) for v in output.lstrip('v').split('.')[:2]]
   except Exception as e:
-    logger.warning('cannot check node version: %s', e)
+    logger.warning('error running node (%s) to check node version: %s', NODE_JS, e)
     return False
+
+  if version < EXPECTED_NODE_VERSION:
+    expected = 'v' + '.'.join(str(v) for v in EXPECTED_NODE_VERSION)
+    logger.warning('node version appears too old (seeing "%s", required "%s"): %s' % (output, expected, NODE_JS))
+    return False
+
+  return True
 
 
 def check_closure_compiler():
@@ -579,7 +583,7 @@ def check_sanity(force=False):
         force = False
 
     # some warning, mostly not fatal checks - do them even if EM_IGNORE_SANITY is on
-    check_node_version()
+    node_ok = check_node_version()
 
     llvm_ok = check_llvm()
 
@@ -587,8 +591,8 @@ def check_sanity(force=False):
       logger.info('EM_IGNORE_SANITY set, ignoring sanity checks')
       return
 
-    if not llvm_ok:
-      exit_with_error('failing sanity checks due to previous llvm failure')
+    if not llvm_ok or not node_ok:
+      exit_with_error('exiting due to sanity check failures (use EM_IGNORE_SANITY to ignore)')
 
     perform_sanify_checks()
 
@@ -1249,9 +1253,6 @@ def verify_settings():
     if Settings.EMTERPRETIFY:
       exit_with_error('emcc: EMTERPRETIFY is not supported by the LLVM wasm backend')
 
-    if not os.path.exists(WASM_LD) or run_process([WASM_LD, '--version'], stdout=PIPE, stderr=PIPE, check=False).returncode != 0:
-      exit_with_error('emcc: WASM_BACKEND selected but could not find lld (wasm-ld): %s', WASM_LD)
-
     if Settings.EMULATED_FUNCTION_POINTERS:
       exit_with_error('emcc: EMULATED_FUNCTION_POINTERS is not meaningful with the wasm backend.')
 
@@ -1786,6 +1787,8 @@ class Building(object):
     # semantics are more like the windows linker where there is no need for
     # grouping.
     args = [a for a in args if a not in ('--start-group', '--end-group')]
+    if not os.path.exists(WASM_LD) or run_process([WASM_LD, '--version'], stdout=PIPE, stderr=PIPE, check=False).returncode != 0:
+      exit_with_error('linker binary not found in LLVM direcotry: %s', WASM_LD)
 
     # Emscripten currently expects linkable output (SIDE_MODULE/MAIN_MODULE) to
     # include all archive contents.
