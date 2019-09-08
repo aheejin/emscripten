@@ -16,6 +16,7 @@ from . import mylog
 # Attempts to delete given possibly nonexisting or read-only directory tree or filename.
 # If any failures occur, the function silently returns without throwing an error.
 def try_delete(pathname):
+  return
   try:
     mylog.log_remove(pathname)
     os.unlink(pathname)
@@ -87,7 +88,7 @@ class TempFiles(object):
 
       def __exit__(self_, type, value, traceback):
         if not self.save_debug_files:
-          #try_delete(self_.file.name)
+          try_delete(self_.file.name)
           pass
     return TempFileObject()
 
@@ -101,8 +102,8 @@ class TempFiles(object):
     if self.save_debug_files:
       print('not cleaning up temp files since in debug-save mode, see them in %s' % (self.tmp,), file=sys.stderr)
       return
-    #for filename in self.to_clean:
-    #  try_delete(filename)
+    for filename in self.to_clean:
+      try_delete(filename)
     self.to_clean = []
 
   def run_and_clean(self, func):
