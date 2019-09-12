@@ -8,7 +8,7 @@ import os
 import sys
 import time
 from subprocess import Popen, PIPE, CalledProcessError
-import mylog
+from tools import mylog
 
 TRACK_PROCESS_SPAWNS = int(os.getenv('EM_BUILD_VERBOSE', '0')) >= 3
 WORKING_ENGINES = {} # Holds all configured engines and whether they work: maps path -> True/False
