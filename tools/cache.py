@@ -134,6 +134,7 @@ class Cache(object):
       temp = creator()
       if os.path.normcase(temp) != os.path.normcase(cachename):
         mylog.log_copy(temp, cachename)
+        shared.safe_ensure_dirs(os.path.dirname(cachename))
         shutil.copyfile(temp, cachename)
       logger.info(' - ok')
     finally:
