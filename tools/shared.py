@@ -289,13 +289,11 @@ EM_POPEN_WORKAROUND = None
 SPIDERMONKEY_ENGINE = None
 V8_ENGINE = None
 LLVM_ROOT = None
-COMPILER_ENGINE = None
 LLVM_ADD_VERSION = None
 CLANG_ADD_VERSION = None
 CLOSURE_COMPILER = None
 EMSCRIPTEN_NATIVE_OPTIMIZER = None
 JAVA = None
-JS_ENGINE = None
 JS_ENGINES = []
 COMPILER_OPTS = []
 FROZEN_CACHE = False
@@ -318,12 +316,10 @@ def parse_config_file():
     'EMSCRIPTEN_NATIVE_OPTIMIZER',
     'V8_ENGINE',
     'LLVM_ROOT',
-    'COMPILER_ENGINE',
     'LLVM_ADD_VERSION',
     'CLANG_ADD_VERSION',
     'CLOSURE_COMPILER',
     'JAVA',
-    'JS_ENGINE',
     'JS_ENGINES',
     'COMPILER_OPTS',
     'FROZEN_CACHE',
@@ -363,7 +359,6 @@ parse_config_file()
 SPIDERMONKEY_ENGINE = fix_js_engine(SPIDERMONKEY_ENGINE, listify(SPIDERMONKEY_ENGINE))
 NODE_JS = fix_js_engine(NODE_JS, listify(NODE_JS))
 V8_ENGINE = fix_js_engine(V8_ENGINE, listify(V8_ENGINE))
-COMPILER_ENGINE = listify(COMPILER_ENGINE)
 JS_ENGINES = [listify(engine) for engine in JS_ENGINES]
 
 if EM_POPEN_WORKAROUND is None:
@@ -503,7 +498,7 @@ EMSCRIPTEN_VERSION_MAJOR, EMSCRIPTEN_VERSION_MINOR, EMSCRIPTEN_VERSION_TINY = pa
 # NB: major version 0 implies no compatibility
 # NB: when changing the metadata format, we should only append new fields, not
 #     reorder, modify, or remove existing ones.
-(EMSCRIPTEN_METADATA_MAJOR, EMSCRIPTEN_METADATA_MINOR) = (0, 2)
+(EMSCRIPTEN_METADATA_MAJOR, EMSCRIPTEN_METADATA_MINOR) = (0, 3)
 # For the JS/WASM ABI, specifies the minimum ABI version required of
 # the WASM runtime implementation by the generated WASM binary. It follows
 # semver and changes whenever C types change size/signedness or
@@ -512,7 +507,7 @@ EMSCRIPTEN_VERSION_MAJOR, EMSCRIPTEN_VERSION_MINOR, EMSCRIPTEN_VERSION_TINY = pa
 # change, increment EMSCRIPTEN_ABI_MINOR if EMSCRIPTEN_ABI_MAJOR == 0
 # or the ABI change is backwards compatible, otherwise increment
 # EMSCRIPTEN_ABI_MAJOR and set EMSCRIPTEN_ABI_MINOR = 0.
-(EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR) = (0, 6)
+(EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR) = (0, 10)
 
 
 def generate_sanity():
@@ -523,8 +518,8 @@ def perform_sanify_checks():
   logger.info('(Emscripten: Running sanity checks)')
 
   with ToolchainProfiler.profile_block('sanity compiler_engine'):
-    if not jsrun.check_engine(COMPILER_ENGINE):
-      exit_with_error('The JavaScript shell used for compiling (%s) does not seem to work, check the paths in %s', COMPILER_ENGINE, EM_CONFIG)
+    if not jsrun.check_engine(NODE_JS):
+      exit_with_error('The configured node executable (%s) does not seem to work, check the paths in %s', NODE_JS, EM_CONFIG)
 
   with ToolchainProfiler.profile_block('sanity LLVM'):
     for cmd in [CLANG, LLVM_AR, LLVM_AS, LLVM_NM]:
@@ -893,10 +888,7 @@ apply_configuration()
 
 # EM_CONFIG stuff
 if JS_ENGINES is None:
-  if JS_ENGINE is None:
-    raise 'ERROR: %s does not seem to have JS_ENGINES or JS_ENGINE set up' % EM_CONFIG
-  else:
-    JS_ENGINES = [JS_ENGINE]
+  JS_ENGINES = [NODE_JS]
 
 if CLOSURE_COMPILER is None:
   CLOSURE_COMPILER = path_from_root('third_party', 'closure-compiler', 'compiler.jar')
@@ -1806,13 +1798,13 @@ class Building(object):
 
   @staticmethod
   def link_lld(args, target, opts=[], lto_level=0):
+    if not os.path.exists(WASM_LD):
+      exit_with_error('linker binary not found in LLVM directory: %s', WASM_LD)
     # runs lld to link things.
     # lld doesn't currently support --start-group/--end-group since the
     # semantics are more like the windows linker where there is no need for
     # grouping.
     args = [a for a in args if a not in ('--start-group', '--end-group')]
-    if not os.path.exists(WASM_LD) or run_process([WASM_LD, '--version'], stdout=PIPE, stderr=PIPE, check=False).returncode != 0:
-      exit_with_error('linker binary not found in LLVM direcotry: %s', WASM_LD)
 
     # Emscripten currently expects linkable output (SIDE_MODULE/MAIN_MODULE) to
     # include all archive contents.
@@ -1825,10 +1817,15 @@ class Building(object):
         '-o',
         target,
         '--allow-undefined',
-        '--import-memory',
-        '--import-table',
         '--lto-O%d' % lto_level,
     ] + args
+
+    # wasi does not import the memory (but for JS it is efficient to do so,
+    # as it allows us to set up memory, preload files, etc. even before the
+    # wasm module arrives)
+    if not Settings.STANDALONE_WASM:
+      cmd.append('--import-memory')
+      cmd.append('--import-table')
 
     if Settings.USE_PTHREADS:
       cmd.append('--shared-memory')
@@ -2257,7 +2254,10 @@ class Building(object):
   @staticmethod
   def js_optimizer(filename, passes, debug=False, extra_info=None, output_filename=None, just_split=False, just_concat=False, extra_closure_args=[]):
     from . import js_optimizer
-    ret = js_optimizer.run(filename, passes, NODE_JS, debug, extra_info, just_split, just_concat, extra_closure_args)
+    try:
+      ret = js_optimizer.run(filename, passes, NODE_JS, debug, extra_info, just_split, just_concat, extra_closure_args)
+    except subprocess.CalledProcessError as e:
+      exit_with_error("'%s' failed (%d)", ' '.join(e.cmd), e.returncode)
     if output_filename:
       safe_move(ret, output_filename)
       ret = output_filename
@@ -2453,7 +2453,7 @@ class Building(object):
   # minify the final wasm+JS combination. this is done after all the JS
   # and wasm optimizations; here we do the very final optimizations on them
   @staticmethod
-  def minify_wasm_js(js_file, wasm_file, expensive_optimizations, minify_whitespace, debug_info):
+  def minify_wasm_js(js_file, wasm_file, expensive_optimizations, minify_whitespace, debug_info, emitting_js):
     # start with JSDCE, to clean up obvious JS garbage. When optimizing for size,
     # use AJSDCE (aggressive JS DCE, performs multiple iterations). Clean up
     # whitespace if necessary too.
@@ -2479,11 +2479,11 @@ class Building(object):
           passes.append('minifyWhitespace')
         logger.debug('running post-meta-DCE cleanup on shell code: ' + ' '.join(passes))
         js_file = Building.acorn_optimizer(js_file, passes)
-        # also minify the names used between js and wasm, if we emitting JS (then the JS knows how to load the minified names)
+        # Also minify the names used between js and wasm, if we are emitting an optimized JS+wasm combo (then the JS knows how to load the minified names).
         # If we are building with DECLARE_ASM_MODULE_EXPORTS=0, we must *not* minify the exports from the wasm module, since in DECLARE_ASM_MODULE_EXPORTS=0 mode, the code that
         # reads out the exports is compacted by design that it does not have a chance to unminify the functions. If we are building with DECLARE_ASM_MODULE_EXPORTS=1, we might
         # as well minify wasm exports to regain some of the code size loss that setting DECLARE_ASM_MODULE_EXPORTS=1 caused.
-        if Settings.EMITTING_JS and not Settings.AUTODEBUG and not Settings.ASSERTIONS:
+        if not Settings.STANDALONE_WASM and not Settings.AUTODEBUG and not Settings.ASSERTIONS and not Settings.SIDE_MODULE and emitting_js:
           js_file = Building.minify_wasm_imports_and_exports(js_file, wasm_file, minify_whitespace=minify_whitespace, minify_exports=Settings.DECLARE_ASM_MODULE_EXPORTS, debug_info=debug_info)
     return js_file
 
@@ -2518,8 +2518,19 @@ class Building(object):
           export = '_' + export
         if export in Building.user_requested_exports or Settings.EXPORT_ALL:
           item['root'] = True
+    # in standalone wasm, always export the memory
+    if Settings.STANDALONE_WASM:
+      graph.append({
+        'export': 'memory',
+        'name': 'emcc$export$memory',
+        'reaches': [],
+        'root': True
+      })
     # fix wasi imports TODO: support wasm stable with an option?
-    WASI_IMPORTS = set(['fd_write'])
+    WASI_IMPORTS = set([
+      'fd_write',
+      'proc_exit',
+    ])
     for item in graph:
       if 'import' in item and item['import'][1][1:] in WASI_IMPORTS:
         item['import'][0] = 'wasi_unstable'
@@ -3082,7 +3093,8 @@ class WebAssembly(object):
       WebAssembly.lebify(global_base) +
       WebAssembly.lebify(dynamic_base) +
       WebAssembly.lebify(dynamictop_ptr) +
-      WebAssembly.lebify(tempdouble_ptr)
+      WebAssembly.lebify(tempdouble_ptr) +
+      WebAssembly.lebify(int(Settings.STANDALONE_WASM))
 
       # NB: more data can be appended here as long as you increase
       #     the EMSCRIPTEN_METADATA_MINOR
