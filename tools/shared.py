@@ -514,7 +514,7 @@ EMSCRIPTEN_VERSION_MAJOR, EMSCRIPTEN_VERSION_MINOR, EMSCRIPTEN_VERSION_TINY = pa
 # change, increment EMSCRIPTEN_ABI_MINOR if EMSCRIPTEN_ABI_MAJOR == 0
 # or the ABI change is backwards compatible, otherwise increment
 # EMSCRIPTEN_ABI_MAJOR and set EMSCRIPTEN_ABI_MINOR = 0.
-(EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR) = (0, 14)
+(EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR) = (0, 15)
 
 
 def generate_sanity():
@@ -1173,7 +1173,10 @@ class SettingsManager(object):
         cls.attrs['ASSERTIONS'] = 0
         cls.attrs['ALIASING_FUNCTION_POINTERS'] = 1
       if shrink_level >= 2:
-        cls.attrs['EVAL_CTORS'] = 1
+        # Ctor evalling in the wasm backend is disabled due to
+        # https://github.com/emscripten-core/emscripten/issues/9527
+        if not Settings.WASM_BACKEND:
+          cls.attrs['EVAL_CTORS'] = 1
 
     def keys(self):
       return self.attrs.keys()
@@ -2535,6 +2538,7 @@ class Building(object):
       'environ_sizes_get',
       'fd_write',
       'fd_close',
+      'fd_read',
       'proc_exit',
     ])
     for item in graph:
