@@ -5891,32 +5891,6 @@ int main(void) {
     output = run_process(NODE_JS + ['-e', 'var m; (global.define = function(deps, factory) { m = factory(); }).amd = true; require("./a.out.js"); m();'], stdout=PIPE, stderr=PIPE)
     assert output.stdout == 'hello, world!\n' and output.stderr == '', 'expected output, got\n===\nSTDOUT\n%s\n===\nSTDERR\n%s\n===\n' % (output.stdout, output.stderr)
 
-  def test_emconfigure_js_o(self):
-    # issue 2994
-    for i in [0, 1, 2]:
-      if WINDOWS and i == 0:
-        # EMCONFIGURE_JS=0 means to compile to native, and when doing so it
-        # uses windows struct layout, which differs from linux/mac/wasm, which
-        # hits assertions in the wasi headers.
-        continue
-      with env_modify({'EMCONFIGURE_JS': str(i)}):
-        for f in ['hello_world.c', 'files.cpp']:
-          print(i, f)
-          self.clear()
-          run_process([PYTHON, path_from_root('emconfigure'), PYTHON, EMCC, '-c', '-o', 'a.o', path_from_root('tests', f)])
-          run_process([PYTHON, EMCC, 'a.o'], check=False, stderr=PIPE)
-          if f == 'hello_world.c':
-            if i == 0:
-              assert not os.path.exists('a.out.js') # native .o, not bitcode!
-            else:
-              assert 'hello, world!' in run_js('a.out.js')
-          else:
-            # file access, need 2 to force js
-            if i == 0 or i == 1:
-              assert not os.path.exists('a.out.js') # native .o, not bitcode!
-            else:
-              self.assertExists('a.out.js')
-
   @no_wasm_backend('tests fastcomp specific passes')
   def test_emcc_c_multi(self):
     def test(args, llvm_opts=None):
@@ -9796,3 +9770,12 @@ Module.arguments has been replaced with plain arguments_
     run_process([PYTHON, EMCC, 'hello1.o', '-o', 'hello3.o'])
     content3 = open('hello2.o', 'rb').read()
     self.assertEqual(content1, content3)
+
+  def test_backwards_deps_in_archive(self):
+    # Test that JS dependencies from deps_info.json work for code linked via
+    # static archives using -l<name>
+    run_process([PYTHON, EMCC, path_from_root('tests', 'sockets', 'test_gethostbyname.c'), '-o', 'a.o'])
+    run_process([LLVM_AR, 'cr', 'liba.a', 'a.o'])
+    create_test_file('empty.c', 'static int foo = 0;')
+    run_process([PYTHON, EMCC, 'empty.c', '-la', '-L.'])
+    self.assertContained('success', run_js('a.out.js'))
