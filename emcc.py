@@ -918,8 +918,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     executable_endings = JS_CONTAINING_ENDINGS + ('.wasm',)
     compile_only = has_dash_c or has_dash_S
 
-    link_to_object = final_suffix not in executable_endings
-
     def add_link_flag(i, f):
       # Filter out libraries that musl includes in libc itself, or which we
       # otherwise provide implicitly.
@@ -932,7 +930,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       link_flags.append((i, f))
 
-    # find input files this a simple heuristic. we should really analyze
+    # find input files with a simple heuristic. we should really analyze
     # based on a full understanding of gcc params, right now we just assume that
     # what is left contains no more |-x OPT| things
     for i in range(len(newargs)):
@@ -1091,8 +1089,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     shared.verify_settings()
 
-    using_lld = shared.Settings.WASM_BACKEND and not (link_to_object and not shared.Settings.WASM_OBJECT_FILES)
-
     def filter_out_dynamic_libs(inputs):
       # If not compiling to JS, then we are compiling to an intermediate bitcode
       # objects or library, so ignore dynamic linking, since multiple dynamic
@@ -1199,6 +1195,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       newargs += ['-DEMSCRIPTEN']
 
     newargs = shared.COMPILER_OPTS + shared.get_cflags(newargs) + newargs
+    link_to_object = final_suffix not in executable_endings
+
+    using_lld = shared.Settings.WASM_BACKEND and not (link_to_object and not shared.Settings.WASM_OBJECT_FILES)
 
     def is_supported_link_flag(f):
       if f in SUPPORTED_LINKER_FLAGS:
@@ -2060,7 +2059,12 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if final_suffix.lower() in ('.so', '.dylib', '.dll'):
           logger.warning('When Emscripten compiles to a typical native suffix for shared libraries (.so, .dylib, .dll) then it emits an object file. You should then compile that to an emscripten SIDE_MODULE (using that flag) with suffix .wasm (for wasm) or .js (for asm.js). (You may also want to adapt your build system to emit the more standard suffix for a an object file, \'.bc\' or \'.o\', which would avoid this warning.)')
         logger.debug('link_to_object: ' + str(linker_inputs) + ' -> ' + specified_target)
-        shared.Building.link_to_object(linker_inputs, specified_target)
+        if len(temp_files) == 1:
+          temp_file = temp_files[0][1]
+          # skip running the linker and just copy the object file
+          shutil.copyfile(temp_file, specified_target)
+        else:
+          shared.Building.link_to_object(linker_inputs, specified_target)
         logger.debug('stopping after linking to object file')
         return 0
 
