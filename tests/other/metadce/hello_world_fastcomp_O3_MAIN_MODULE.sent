@@ -290,7 +290,6 @@ ___syscall10
 ___syscall102
 ___syscall104
 ___syscall114
-___syscall118
 ___syscall12
 ___syscall121
 ___syscall122
@@ -300,7 +299,6 @@ ___syscall133
 ___syscall14
 ___syscall142
 ___syscall144
-___syscall145
 ___syscall147
 ___syscall148
 ___syscall15
@@ -409,6 +407,7 @@ ___wasi_fd_close
 ___wasi_fd_fdstat_get
 ___wasi_fd_read
 ___wasi_fd_seek
+___wasi_fd_sync
 ___wasi_fd_write
 ___wasi_proc_exit
 __addDays
@@ -1064,6 +1063,7 @@ _fd_close
 _fd_fdstat_get
 _fd_read
 _fd_seek
+_fd_sync
 _fd_write
 _fexecve
 _filledEllipseColor
