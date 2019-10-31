@@ -2621,7 +2621,11 @@ class Building(object):
     with open(temp, 'w') as f:
       f.write(txt)
     # run wasm-metadce
-    cmd = Building.get_binaryen_command('wasm-metadce', ['--graph-file=' + temp, wasm_file, '-o', wasm_file], debug_info)
+    cmd = Building.get_binaryen_command('wasm-metadce',
+                                        wasm_file,
+                                        wasm_file,
+                                        ['--graph-file=' + temp],
+                                        debug=debug_info)
     out = run_process(cmd, stdout=PIPE).stdout
     # find the unused things in js
     unused = []
@@ -2644,10 +2648,11 @@ class Building(object):
     # create the lazy-loaded wasm. remove the memory segments from it, as memory
     # segments have already been applied by the initial wasm, and apply the knowledge
     # that it will only rewind, after which optimizations can remove some code
-    cmd = Building.get_wasm_opt_command(debug=debug)
-    cmd += [wasm_binary_target, '-o', wasm_binary_target + '.lazy.wasm']
-    cmd += ['--remove-memory']
-    cmd += ['--mod-asyncify-never-unwind']
+    cmd = Building.get_wasm_opt_command(wasm_binary_target,
+                                        wasm_binary_target + '.lazy.wasm',
+                                        args=['--remove-memory',
+                                              '--mod-asyncify-never-unwind'],
+                                        debug=debug)
     if options.opt_level > 0:
       cmd.append(Building.opt_level_to_str(options.opt_level, options.shrink_level))
     print_compiler_stage(cmd)
@@ -2657,9 +2662,10 @@ class Building(object):
     # a lot of code
     # TODO: support other asyncify stuff, imports that don't always unwind?
     # TODO: source maps etc.
-    cmd = Building.get_wasm_opt_command(debug=debug)
-    cmd += [wasm_binary_target, '-o', wasm_binary_target]
-    cmd += ['--mod-asyncify-always-and-only-unwind']
+    cmd = Building.get_wasm_opt_command(infile=wasm_binary_target,
+                                        outfile=wasm_binary_target,
+                                        args=['--mod-asyncify-always-and-only-unwind'],
+                                        debug=debug)
     if options.opt_level > 0:
       cmd.append(Building.opt_level_to_str(options.opt_level, options.shrink_level))
     print_compiler_stage(cmd)
@@ -2669,7 +2675,9 @@ class Building(object):
   def minify_wasm_imports_and_exports(js_file, wasm_file, minify_whitespace, minify_exports, debug_info):
     logger.debug('minifying wasm imports and exports')
     # run the pass
-    cmd = Building.get_wasm_opt_command(['--minify-imports-and-exports' if minify_exports else '--minify-imports', wasm_file, '-o', wasm_file], debug_info)
+    cmd = Building.get_wasm_opt_command(wasm_file, wasm_file,
+                                        ['--minify-imports-and-exports' if minify_exports else '--minify-imports'],
+                                        debug=debug_info)
     out = check_call(cmd, stdout=PIPE).stdout
     # get the mapping
     SEP = ' => '
@@ -2689,7 +2697,9 @@ class Building(object):
   @staticmethod
   def wasm2js(js_file, wasm_file, opt_level, minify_whitespace, use_closure_compiler, debug_info, symbols_file=None):
     logger.debug('wasm2js')
-    cmd = Building.get_binaryen_command('wasm2js', ['--emscripten', wasm_file], debug_info)
+    cmd = Building.get_binaryen_command('wasm2js', wasm_file,
+                                        args=['--emscripten'],
+                                        debug=debug_info)
     if opt_level > 0:
       cmd += ['-O']
     if symbols_file:
@@ -2773,7 +2783,7 @@ class Building(object):
   @staticmethod
   def handle_final_wasm_symbols(wasm_file, symbols_file, debug_info):
     logger.debug('handle_final_wasm_symbols')
-    cmd = Building.get_wasm_opt_command([wasm_file])
+    cmd = Building.get_wasm_opt_command(wasm_file)
     if symbols_file:
       cmd += ['--print-function-map']
     if not debug_info:
@@ -2879,16 +2889,20 @@ class Building(object):
     return os.path.join(BINARYEN_ROOT, 'bin')
 
   @staticmethod
-  def get_binaryen_command(tool, args=[], debug=False):
+  def get_binaryen_command(tool, infile, outfile=None, args=[], debug=False):
     cmd = [os.path.join(Building.get_binaryen_bin(), tool)] + args
-    cmd += Building.get_binaryen_feature_flags()
+    if infile:
+      cmd += [infile]
+    if outfile:
+      cmd += ['-o', outfile]
     if debug:
       cmd += ['-g'] # preserve the debug info
+    cmd += Building.get_binaryen_feature_flags()
     return cmd
 
   @staticmethod
-  def get_wasm_opt_command(args=[], debug=False):
-    return Building.get_binaryen_command('wasm-opt', args=args, debug=debug)
+  def get_wasm_opt_command(*args, **kwargs):
+    return Building.get_binaryen_command('wasm-opt', *args, **kwargs)
 
 
 # compatibility with existing emcc, etc. scripts
@@ -3361,7 +3375,7 @@ def read_and_preprocess(filename, expand_macros=False):
 # worker in -s ASMFS=1 mode.
 def make_fetch_worker(source_file, output_file):
   src = open(source_file, 'r').read()
-  funcs_to_import = ['alignUp', '_emscripten_get_heap_size', '_emscripten_resize_heap', 'stringToUTF8', 'UTF8ToString', 'UTF8ArrayToString', 'intArrayFromString', 'lengthBytesUTF8', 'stringToUTF8Array', '_emscripten_is_main_runtime_thread', '_emscripten_futex_wait', '_emscripten_get_sbrk_ptr']
+  funcs_to_import = ['alignUp', '_emscripten_get_heap_size', '_emscripten_resize_heap', 'stringToUTF8', 'UTF8ToString', 'UTF8ArrayToString', 'intArrayFromString', 'lengthBytesUTF8', 'stringToUTF8Array', '_emscripten_is_main_browser_thread', '_emscripten_futex_wait', '_emscripten_get_sbrk_ptr']
   asm_funcs_to_import = ['_malloc', '_free', '_sbrk', '___pthread_mutex_lock', '___pthread_mutex_unlock', '_pthread_mutexattr_init', '_pthread_mutex_init']
   function_prologue = '''this.onerror = function(e) {
   console.error(e);
