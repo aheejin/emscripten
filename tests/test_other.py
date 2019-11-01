@@ -8113,7 +8113,7 @@ int main() {
                       4, [],        [],           8,   0,    0,  0), # noqa; totally empty!
     # we don't metadce with linkable code! other modules may want stuff
     # don't compare the # of functions in a main module, which changes a lot
-    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1600, [], [], 226403, None, 107, None), # noqa
+    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1601, [], [], 226403, None, 107, None), # noqa
     'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   13, [], [],  10017,   13,   9,   20), # noqa
   })
   @no_wasm_backend()
@@ -8547,6 +8547,23 @@ end
     # See https://github.com/emscripten-core/emscripten/issues/9733
     create_test_file('file1', ' ')
     run_process([PYTHON, EMAR, 'cr', 'file1.a', 'file1', 'file1'])
+
+  def test_archive_no_index(self):
+    create_test_file('foo.c', 'int foo = 1;')
+    run_process([PYTHON, EMCC, '-c', 'foo.c'])
+    run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c')])
+    # The `S` flag means don't add an archive index
+    run_process([PYTHON, EMAR, 'crS', 'libfoo.a', 'foo.o'])
+    if self.is_wasm_backend():
+      # TODO(sbc): Handle archive without index in wasm backend too:
+      # https://github.com/emscripten-core/emscripten/issues/9705
+      stderr = self.expect_fail([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
+      self.assertContained('libfoo.a: archive has no index; run ranlib to add one', stderr)
+      # Add an index and then verify that makes the error go away.
+      run_process([PYTHON, EMRANLIB, 'libfoo.a'])
+      run_process([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
+    else:
+      run_process([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
 
   def test_flag_aliases(self):
     def assert_aliases_match(flag1, flag2, flagarg, extra_args):
