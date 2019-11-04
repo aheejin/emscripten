@@ -17,6 +17,9 @@ See docs/process.md for how version tagging works.
 
 Current Trunk
 -------------
+ - Archives with missing indexes will now have ranlib run on them automatically
+   at link time.  This avoid linker errors when using GNU ar to build archive
+   files.
  - `ERROR_ON_MISSING_LIBRARIES` now also applies to internal symbols that start
    with `emscripten_`.  Prior to this change such missing symbols would result
    in a runtime error, not they are reported at compile time.
@@ -25,6 +28,7 @@ Current Trunk
  - Add `pthread_tryjoin_np`, which is a POSIX API similar to `pthread_join`
    but without blocking.
  - New function emscripten_has_asyncify()
+ - Add support for pthreads in Node.js, using Node Workers. See #9745
 
 v1.39.1: 10/30/2019
 -------------------

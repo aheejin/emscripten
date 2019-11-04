@@ -1925,7 +1925,7 @@ int f() {
       }
       ''')
 
-    for args in ([], ['-O2']):
+    for args in ([], ['-O1'], ['-s', 'USE_WEBGL2=1']):
       for action in ('WARN', 'ERROR', None):
         for value in ([0, 1]):
           try_delete('a.out.js')
@@ -8093,7 +8093,7 @@ int main() {
     # don't compare the # of functions in a main module, which changes a lot
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'],  174, [], [], 517336, None, 1519, None), # noqa
+    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'],  174, [], [], 517336, None, 1520, None), # noqa
     'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   12, [], [],  10770,   12,   10, None), # noqa
   })
   @no_fastcomp()
@@ -8113,7 +8113,7 @@ int main() {
                       4, [],        [],           8,   0,    0,  0), # noqa; totally empty!
     # we don't metadce with linkable code! other modules may want stuff
     # don't compare the # of functions in a main module, which changes a lot
-    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1601, [], [], 226403, None, 107, None), # noqa
+    'main_module_1': (['-O3', '-s', 'MAIN_MODULE=1'], 1601, [], [], 226403, None, 108, None), # noqa
     'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   13, [], [],  10017,   13,   9,   20), # noqa
   })
   @no_wasm_backend()
@@ -8554,16 +8554,7 @@ end
     run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.c')])
     # The `S` flag means don't add an archive index
     run_process([PYTHON, EMAR, 'crS', 'libfoo.a', 'foo.o'])
-    if self.is_wasm_backend():
-      # TODO(sbc): Handle archive without index in wasm backend too:
-      # https://github.com/emscripten-core/emscripten/issues/9705
-      stderr = self.expect_fail([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
-      self.assertContained('libfoo.a: archive has no index; run ranlib to add one', stderr)
-      # Add an index and then verify that makes the error go away.
-      run_process([PYTHON, EMRANLIB, 'libfoo.a'])
-      run_process([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
-    else:
-      run_process([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
+    run_process([PYTHON, EMCC, 'libfoo.a', 'hello_world.o'])
 
   def test_flag_aliases(self):
     def assert_aliases_match(flag1, flag2, flagarg, extra_args):
@@ -8704,12 +8695,16 @@ int main() {
 ''')
     stderr = self.expect_fail([PYTHON, EMCC, 'src.cpp', '-O2'])
     # wasm backend output doesn't have spaces in the EM_ASM function bodies
+    # TODO(sbc): remove second option once binaryen#2408 rolls
     self.assertContained(('''
 var ASM_CONSTS = [function() { var x = !<->5.; }];
                                         ^
 ''', '''
   0: function() {var x = !<->5.;}
                           ^
+''', '''
+  1024: function() {var x = !<->5.;}
+                             ^
 '''), stderr)
 
   def test_EM_ASM_ES6(self):
@@ -9892,3 +9887,17 @@ Module.arguments has been replaced with plain arguments_
     run_process([PYTHON, EMRANLIB, 'liba.a'])
     output = run_process([shared.LLVM_NM, '--print-armap', 'liba.a'], stdout=PIPE).stdout
     self.assertContained('Archive map', output)
+
+  def test_pthread_stub(self):
+    # Verify that programs containing pthread code can still be compiled even
+    # without enabling threads.  This is possible becase we link in
+    # libpthread_stub.a
+    create_test_file('pthread.c', '''
+#include <pthread.h>
+
+int main() {
+  pthread_atfork(NULL, NULL, NULL);
+  return 0;
+}
+''')
+    run_process([PYTHON, EMCC, 'pthread.c'])
