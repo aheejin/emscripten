@@ -2911,13 +2911,29 @@ class Building(object):
     if emit_source_map:
       cmd += ['--input-source-map=' + infile + '.map']
       cmd += ['--output-source-map=' + outfile + '.map']
-      cmd += ['--output-source-map-url=' + Settings.SOURCE_MAP_BASE + os.path.basename(Settings.WASM_BINARY_FILE) + '.map']
+    if outfile and tool == 'wasm-opt':
+      # remove any dwarf debug info sections, as currently we are not able to
+      # properly update it anyhow, and in the case of source maps, we have
+      # that info in the map anyhow
+      cmd += ['--strip-dwarf']
 
-    return run_process(cmd, stdout=stdout).stdout
+    ret = run_process(cmd, stdout=stdout).stdout
+    if outfile:
+      Building.debug_copy(outfile, '%s.wasm' % tool)
+    return ret
 
   @staticmethod
   def run_wasm_opt(*args, **kwargs):
     return Building.run_binaryen_command('wasm-opt', *args, **kwargs)
+
+  debug_copy_counter = 0
+
+  @staticmethod
+  def debug_copy(src, dst):
+    if DEBUG:
+      mylog.log_copy(src, os.path.join(CANONICAL_TEMP_DIR, 'emdebug-%d-%s' % (Building.debug_copy_counter, dst)))
+      shutil.copyfile(src, os.path.join(CANONICAL_TEMP_DIR, 'emdebug-%d-%s' % (Building.debug_copy_counter, dst)))
+      Building.debug_copy_counter += 1
 
 
 # compatibility with existing emcc, etc. scripts
