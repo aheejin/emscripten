@@ -2869,6 +2869,14 @@ class Building(object):
     return library_files
 
   @staticmethod
+  def emit_wasm_source_map(wasm_file, map_file):
+    sourcemap_cmd = [PYTHON, path_from_root('tools', 'wasm-sourcemap.py'),
+                     wasm_file,
+                     '--dwarfdump=' + LLVM_DWARFDUMP,
+                     '-o',  map_file]
+    check_call(sourcemap_cmd)
+
+  @staticmethod
   def get_binaryen_feature_flags():
     # start with the MVP features, add the rest as needed
     ret = ['--mvp-features']
@@ -2897,10 +2905,15 @@ class Building(object):
     if '--detect-features' not in cmd:
       cmd += Building.get_binaryen_feature_flags()
     print_compiler_stage(cmd)
-    if stdout is not None:
-      return run_process(cmd, stdout=stdout).stdout
-    else:
-      run_process(cmd)
+    # if we are emitting a source map, every time we load and save the wasm
+    # we must tell binaryen to update it
+    emit_source_map = Settings.DEBUG_LEVEL == 4 and outfile
+    if emit_source_map:
+      cmd += ['--input-source-map=' + infile + '.map']
+      cmd += ['--output-source-map=' + outfile + '.map']
+      cmd += ['--output-source-map-url=' + Settings.SOURCE_MAP_BASE + os.path.basename(Settings.WASM_BINARY_FILE) + '.map']
+
+    return run_process(cmd, stdout=stdout).stdout
 
   @staticmethod
   def run_wasm_opt(*args, **kwargs):
@@ -3019,15 +3032,19 @@ class JS(object):
 
   @staticmethod
   def legalize_sig(sig):
-    ret = [sig[0]]
+    legal = [sig[0]]
+    # a return of i64 is legalized into an i32 (and the high bits are
+    # accessible on the side through getTempRet0).
+    if legal[0] == 'j':
+      legal[0] = 'i'
+    # a parameter of i64 is legalized into i32, i32
     for s in sig[1:]:
       if s != 'j':
-        ret.append(s)
+        legal.append(s)
       else:
-        # an i64 is legalized into i32, i32
-        ret.append('i')
-        ret.append('i')
-    return ''.join(ret)
+        legal.append('i')
+        legal.append('i')
+    return ''.join(legal)
 
   @staticmethod
   def is_legal_sig(sig):
