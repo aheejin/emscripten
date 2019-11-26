@@ -2292,13 +2292,13 @@ int f() {
           self.assertFalse(os.path.exists(self.canonical_temp_dir))
         elif debug == '1':
           if self.is_wasm_backend():
-            self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-0-original.js'))
+            self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-3-original.js'))
           else:
             self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-0-linktime.bc'))
             self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-1-original.js'))
         elif debug == '2':
           if self.is_wasm_backend():
-            self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-0-original.js'))
+            self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-3-original.js'))
           else:
             self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-0-basebc.bc'))
             self.assertExists(os.path.join(self.canonical_temp_dir, 'emcc-1-linktime.bc'))
@@ -2328,6 +2328,40 @@ int f() {
           self.assertNotIn('strip-debug', err)
         else:
           self.assertIn('strip-debug', err)
+
+  @no_fastcomp()
+  def test_debuginfo_line_tables_only(self):
+    def test(do_compile):
+      do_compile([])
+      no_size = os.path.getsize('a.out.wasm')
+      do_compile(['-gline-tables-only'])
+      line_size = os.path.getsize('a.out.wasm')
+      do_compile(['-g'])
+      full_size = os.path.getsize('a.out.wasm')
+      return (no_size, line_size, full_size)
+
+    def compile_to_object(compile_args):
+      run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.cpp'), '-c', '-o', 'a.out.wasm'] + compile_args)
+
+    no_size, line_size, full_size = test(compile_to_object)
+
+    self.assertLess(no_size, line_size)
+    # currently we don't support full debug info anyhow, so line tables
+    # is all we have
+    self.assertEqual(line_size, full_size)
+
+    def compile_to_executable(compile_args):
+      # compile with the specified args
+      run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.cpp'), '-c', '-o', 'a.o'] + compile_args)
+      # link with debug info
+      run_process([PYTHON, EMCC, 'a.o', '-g'])
+
+    no_size, line_size, full_size = test(compile_to_executable)
+
+    # currently we strip all debug info from the final wasm anyhow, until
+    # we have full dwarf support
+    self.assertEqual(no_size, line_size)
+    self.assertEqual(line_size, full_size)
 
   @unittest.skipIf(not scons_path, 'scons not found in PATH')
   @with_env_modify({'EMSCRIPTEN_ROOT': path_from_root()})
@@ -4076,11 +4110,6 @@ int main(int argc, char **argv) {
     assert 'eval(' not in src
     assert 'eval.' not in src
     assert 'new Function' not in src
-    try_delete('a.out.js')
-
-    # Test that -s DYNAMIC_EXECUTION=0 and --closure 1 are not allowed together.
-    self.expect_fail([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-O1',
-                      '-s', 'DYNAMIC_EXECUTION=0', '--closure', '1'])
     try_delete('a.out.js')
 
     # Test that -s DYNAMIC_EXECUTION=1 and -s RELOCATABLE=1 are not allowed together.
@@ -8216,6 +8245,10 @@ int main() {
     # Growth support code is in the wasm
     'O3_grow_standalone': ('mem.c', ['-O3', '-s', 'ALLOW_MEMORY_GROWTH', '-s', 'STANDALONE_WASM'],
                            4, [], [], 6449,  4,  3,  6),         # noqa
+    # without argc/argv, no support code for them is emitted, even with lto
+    'O3_standalone_narg_flto':
+                          ('mem_no_argv.c', ['-O3', '-s', 'STANDALONE_WASM', '-flto'],
+                           1, [], [], 6309,  1,  3,  5),         # noqa
   })
   @no_fastcomp()
   def test_metadce_mem(self, filename, *args):

@@ -2538,12 +2538,17 @@ class Building(object):
         logger.debug('running post-meta-DCE cleanup on shell code: ' + ' '.join(passes))
         js_file = Building.acorn_optimizer(js_file, passes)
         # Also minify the names used between js and wasm, if we are emitting an optimized JS+wasm combo (then the JS knows how to load the minified names).
-        # If we are building with DECLARE_ASM_MODULE_EXPORTS=0, we must *not* minify the exports from the wasm module, since in DECLARE_ASM_MODULE_EXPORTS=0 mode, the code that
-        # reads out the exports is compacted by design that it does not have a chance to unminify the functions. If we are building with DECLARE_ASM_MODULE_EXPORTS=1, we might
-        # as well minify wasm exports to regain some of the code size loss that setting DECLARE_ASM_MODULE_EXPORTS=1 caused.
-        # ASYNCIFY_LAZY_LOAD_CODE disables minification because it runs after the wasm is completely finalized, and we need to be able to still
-        # identify import names at that time. To avoid that, we would need to keep a mapping of the names and send that to binaryen.
-        if not Settings.STANDALONE_WASM and not Settings.AUTODEBUG and not Settings.ASSERTIONS and not Settings.SIDE_MODULE and emitting_js and not Settings.ASYNCIFY_LAZY_LOAD_CODE:
+        # Things that process the JS after this operation would be done must disable this.
+        # For example, ASYNCIFY_LAZY_LOAD_CODE needs to identify import names, and wasm2js
+        # needs to use the getTempRet0 imports (otherwise, it may create new ones to replace
+        # the old, which would break).
+        if not Settings.STANDALONE_WASM and \
+           not Settings.AUTODEBUG and \
+           not Settings.ASSERTIONS and \
+           not Settings.SIDE_MODULE and \
+           emitting_js and \
+           not Settings.ASYNCIFY_LAZY_LOAD_CODE and \
+           not Settings.WASM2JS:
           js_file = Building.minify_wasm_imports_and_exports(js_file, wasm_file, minify_whitespace=minify_whitespace, minify_exports=Settings.DECLARE_ASM_MODULE_EXPORTS, debug_info=debug_info)
     return js_file
 
@@ -2919,21 +2924,23 @@ class Building(object):
 
     ret = run_process(cmd, stdout=stdout).stdout
     if outfile:
-      Building.debug_copy(outfile, '%s.wasm' % tool)
+      Building.save_intermediate(outfile, '%s.wasm' % tool)
     return ret
 
   @staticmethod
   def run_wasm_opt(*args, **kwargs):
     return Building.run_binaryen_command('wasm-opt', *args, **kwargs)
 
-  debug_copy_counter = 0
+  save_intermediate_counter = 0
 
   @staticmethod
-  def debug_copy(src, dst):
+  def save_intermediate(src, dst):
     if DEBUG:
-      mylog.log_copy(src, os.path.join(CANONICAL_TEMP_DIR, 'emdebug-%d-%s' % (Building.debug_copy_counter, dst)))
-      shutil.copyfile(src, os.path.join(CANONICAL_TEMP_DIR, 'emdebug-%d-%s' % (Building.debug_copy_counter, dst)))
-      Building.debug_copy_counter += 1
+      dst = 'emcc-%d-%s' % (Building.save_intermediate_counter, dst)
+      Building.save_intermediate_counter += 1
+      logger.debug('saving debug copy %s' % dst)
+      mylog.log_copy(src, os.path.join(CANONICAL_TEMP_DIR, dst))
+      shutil.copyfile(src, os.path.join(CANONICAL_TEMP_DIR, dst))
 
 
 # compatibility with existing emcc, etc. scripts
