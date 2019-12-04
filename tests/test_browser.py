@@ -23,7 +23,7 @@ import zlib
 from runner import BrowserCore, path_from_root, has_browser, EMTEST_BROWSER, no_fastcomp, no_wasm_backend, create_test_file, parameterized
 from tools import system_libs
 from tools.shared import PYTHON, EMCC, WINDOWS, FILE_PACKAGER, PIPE, SPIDERMONKEY_ENGINE, JS_ENGINES
-from tools.shared import try_delete, Building, run_process, run_js
+from tools.shared import try_delete, run_process, run_js
 
 try:
   from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -208,22 +208,6 @@ If manually bisecting:
     create_test_file(src, self.with_report_result(open(path_from_root('tests', 'emscripten_log', 'emscripten_log.cpp')).read()))
     self.compile_btest([src, '--pre-js', path_from_root('src', 'emscripten-source-map.min.js'), '-g4', '-o', 'page.html', '-s', 'DEMANGLE_SUPPORT=1', '-s', 'WASM=0'])
     self.run_browser('page.html', None, '/report_result?1')
-
-  def build_native_lzma(self):
-    lzma_native = path_from_root('third_party', 'lzma.js', 'lzma-native')
-    if os.path.isfile(lzma_native) and os.access(lzma_native, os.X_OK):
-      return
-
-    cwd = os.getcwd()
-    try:
-      os.chdir(path_from_root('third_party', 'lzma.js'))
-      # On Windows prefer using MinGW make if it exists, otherwise fall back to hoping we have cygwin make.
-      if WINDOWS and Building.which('mingw32-make'):
-        run_process(['doit.bat'])
-      else:
-        run_process(['sh', './doit.sh'])
-    finally:
-      os.chdir(cwd)
 
   def test_preload_file(self):
     absolute_src_path = os.path.join(self.get_dir(), 'somefile.txt').replace('\\', '/')
@@ -2221,7 +2205,11 @@ void *getBindBuffer() {
     self.btest('gl_error.c', expected='1', args=['-s', 'LEGACY_GL_EMULATION=1', '-lGL'])
 
   def test_openal_error(self):
-    for args in [[], ['--closure', '1']]:
+    for args in [
+      [],
+      ['-lopenal', '-s', 'STRICT'],
+      ['--closure', '1']
+    ]:
       print(args)
       self.btest('openal_error.c', expected='1', args=args)
 
@@ -2661,6 +2649,10 @@ Module["preRun"].push(function () {
   @requires_graphics_hardware
   def test_webgl2_backwards_compatibility_emulation(self):
     self.btest(path_from_root('tests', 'webgl2_backwards_compatibility_emulation.cpp'), args=['-s', 'USE_WEBGL2=1', '-s', 'WEBGL2_BACKWARDS_COMPATIBILITY_EMULATION=1'], expected='0')
+
+  @requires_graphics_hardware
+  def test_webgl2_invalid_teximage2d_type(self):
+    self.btest(path_from_root('tests', 'webgl2_invalid_teximage2d_type.cpp'), args=['-s', 'USE_WEBGL2=1'], expected='0')
 
   @requires_graphics_hardware
   def test_webgl_with_closure(self):
@@ -3312,7 +3304,6 @@ window.close = function() {
     # check that safe-heap machinery does not cause errors in async operations
     self.btest('emterpreter_async_sleep2_safeheap.cpp', '17', args=['-s', 'EMTERPRETIFY=1', '-s', 'EMTERPRETIFY_ASYNC=1', '-Oz', '-profiling', '-s', 'SAFE_HEAP=1', '-s', 'ASSERTIONS=1', '-s', 'EMTERPRETIFY_WHITELIST=["_main","_callback","_fix"]', '-s', 'EXIT_RUNTIME=1'])
 
-  @no_wasm_backend('emterpretify - yield-specific')
   @requires_sound_hardware
   def test_sdl_audio_beep_sleep(self):
     self.btest('sdl_audio_beep_sleep.cpp', '1', args=['-Os', '-s', 'ASSERTIONS=1', '-s', 'DISABLE_EXCEPTION_CATCHING=0', '-profiling', '-s', 'SAFE_HEAP=1', '-lSDL'] + self.get_async_args(), timeout=90)
