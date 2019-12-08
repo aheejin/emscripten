@@ -1519,7 +1519,6 @@ class Ports(object):
       objects.append(obj)
 
     run_commands(commands)
-    print('create_lib', output_path)
     create_lib(output_path, objects)
     return output_path
 
