@@ -2612,7 +2612,7 @@ Module["preRun"].push(function () {
 
   def test_webgl2(self):
     for opts in [
-      [],
+      ['-s', 'MIN_CHROME_VERSION=0'],
       ['-O2', '-g1', '--closure', '1', '-s', 'WORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG=1'],
       ['-s', 'FULL_ES2=1'],
     ]:
@@ -3221,7 +3221,9 @@ window.close = function() {
     cocos2d_root = os.path.join(system_libs.Ports.get_build_dir(), 'cocos2d')
     preload_file = os.path.join(cocos2d_root, 'samples', 'HelloCpp', 'Resources') + '@'
     self.btest('cocos2d_hello.cpp', reference='cocos2d_hello.png', reference_slack=1,
-               args=['-s', 'USE_COCOS2D=3', '-s', 'ERROR_ON_UNDEFINED_SYMBOLS=0', '--std=c++11', '--preload-file', preload_file, '--use-preload-plugins'],
+               args=['-s', 'USE_COCOS2D=3', '-s', 'ERROR_ON_UNDEFINED_SYMBOLS=0', '--std=c++11',
+                     '--preload-file', preload_file, '--use-preload-plugins',
+                     '-Wno-inconsistent-missing-override'],
                message='You should see Cocos2d logo')
 
   def test_async(self):

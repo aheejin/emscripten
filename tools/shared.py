@@ -1050,7 +1050,8 @@ def emsdk_cflags():
     path_from_root('system', 'include'),
     path_from_root('system', 'include', 'libc'),
     path_from_root('system', 'lib', 'libc', 'musl', 'arch', 'emscripten'),
-    path_from_root('system', 'local', 'include')
+    path_from_root('system', 'local', 'include'),
+    Cache.get_path('include')
   ]
 
   cxx_include_paths = [
@@ -2780,7 +2781,7 @@ class Building(object):
   @staticmethod
   def apply_wasm_memory_growth(js_file):
     logger.debug('supporting wasm memory growth with pthreads')
-    fixed = Building.js_optimizer_no_asmjs(js_file, ['growableHeap'])
+    fixed = Building.acorn_optimizer(js_file, ['growableHeap'])
     ret = js_file + '.pgrow.js'
     with open(fixed, 'r') as fixed_f:
       with open(ret, 'w') as ret_f:

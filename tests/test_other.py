@@ -798,7 +798,10 @@ f.close()
       includes = stderr[start:end]
       includes = [i.strip() for i in includes.splitlines()[1:-1]]
       for i in includes:
-        self.assertContained(path_from_root('system'), i)
+        if shared.Cache.dirname in i:
+          self.assertContained(shared.Cache.dirname, i)
+        else:
+          self.assertContained(path_from_root('system'), i)
 
     err = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-v'], stderr=PIPE).stderr
     verify_includes(err)
@@ -2077,7 +2080,7 @@ int f() {
           assert 'hello, world!' in run_js('two.js')
 
   def test_js_optimizer(self):
-    ACORN_PASSES = ['JSDCE', 'AJSDCE', 'applyImportAndExportNameChanges', 'emitDCEGraph', 'applyDCEGraphRemovals']
+    ACORN_PASSES = ['JSDCE', 'AJSDCE', 'applyImportAndExportNameChanges', 'emitDCEGraph', 'applyDCEGraphRemovals', 'growableHeap']
     for input, expected, passes in [
 
       (path_from_root('tests', 'optimizer', 'eliminateDeadGlobals.js'), open(path_from_root('tests', 'optimizer', 'eliminateDeadGlobals-output.js')).read(),
@@ -2172,6 +2175,8 @@ int f() {
        ['emitDCEGraph', 'noPrint']),
       (path_from_root('tests', 'optimizer', 'emittedJSPreservesParens.js'), open(path_from_root('tests', 'optimizer', 'emittedJSPreservesParens-output.js')).read(),
        ['asm']),
+      (path_from_root('tests', 'optimizer', 'test-growableHeap.js'), open(path_from_root('tests', 'optimizer', 'test-growableHeap-output.js')).read(),
+       ['growableHeap']),
     ]:
       print(input, passes)
 
@@ -9511,6 +9516,7 @@ int main () {
                                '-s', 'GL_SUPPORT_EXPLICIT_SWAP_CONTROL=0',
                                '-s', 'GL_POOL_TEMP_BUFFERS=0',
                                '-s', 'FAST_UNROLLED_MEMCPY_AND_MEMSET=0',
+                               '-s', 'MIN_CHROME_VERSION=58',
                                '--output_eol', 'linux']
 
     asmjs = ['-s', 'WASM=0', '--separate-asm', '-s', 'ELIMINATE_DUPLICATE_FUNCTIONS=1', '--memory-init-file', '1']
@@ -9533,7 +9539,7 @@ int main () {
       (opts, hello_world_sources, {'a.html': 968, 'a.js': 604, 'a.wasm': 86}),
       (asmjs + opts, hello_webgl_sources, {'a.html': 881, 'a.js': 4918, 'a.asm.js': 11139, 'a.mem': 321}),
       (opts, hello_webgl_sources, {'a.html': 857, 'a.js': 4874, 'a.wasm': 8841}),
-      (opts, hello_webgl2_sources, {'a.html': 857, 'a.js': 5507, 'a.wasm': 8841}) # Compare how WebGL2 sizes stack up with WebGL 1
+      (opts, hello_webgl2_sources, {'a.html': 857, 'a.js': 5362, 'a.wasm': 8841}) # Compare how WebGL2 sizes stack up with WebGL 1
     ]
 
     success = True
