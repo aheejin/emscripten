@@ -2561,7 +2561,7 @@ Module["preRun"].push(function () {
 
   @requires_threads
   def test_html5(self):
-    for opts in [[], ['-O2', '-g1', '--closure', '1'], ['-s', 'USE_PTHREADS=1', '-s', 'PROXY_TO_PTHREAD=1']]:
+    for opts in [[], ['-O2', '-g1', '--closure', '1'], ['-s', 'USE_PTHREADS=1', '-s', 'PROXY_TO_PTHREAD=1'], ['-s', 'MIN_FIREFOX_VERSION=0', '-s', 'MIN_SAFARI_VERSION=0', '-s', 'MIN_IE_VERSION=0', '-s', 'MIN_EDGE_VERSION=0', '-s', 'MIN_CHROME_VERSION=0']]:
       print(opts)
       self.btest(path_from_root('tests', 'test_html5.c'), args=[] + opts, expected='0')
 
@@ -3335,6 +3335,13 @@ window.close = function() {
   def test_async_bad_whitelist(self):
     self.btest('browser/async_bad_whitelist.cpp', '0', args=['-s', 'ASYNCIFY', '-s', 'ASYNCIFY_WHITELIST=["waka"]', '--profiling'])
 
+  # Tests that when building with -s MINIMAL_RUNTIME=1, the build can use -s MODULARIZE=1 as well.
+  @no_wasm_backend('MINIMAL_RUNTIME not yet for wasm backend')
+  def test_minimal_runtime_modularize(self):
+    create_test_file('src.cpp', self.with_report_result(open(path_from_root('tests', 'browser_test_hello_world.c')).read()))
+    self.compile_btest(['src.cpp', '-o', 'test.html', '-s', 'MODULARIZE=1', '-s', 'MINIMAL_RUNTIME=1'])
+    self.run_browser('test.html', None, '/report_result?0')
+
   @requires_sync_compilation
   def test_modularize(self):
     for opts in [[], ['-O1'], ['-O2', '-profiling'], ['-O2'], ['-O2', '--closure', '1']]:
@@ -4054,6 +4061,15 @@ window.close = function() {
 
   def test_custom_messages_proxy(self):
     self.btest(path_from_root('tests', 'custom_messages_proxy.c'), expected='1', args=['--proxy-to-worker', '--shell-file', path_from_root('tests', 'custom_messages_proxy_shell.html'), '--post-js', path_from_root('tests', 'custom_messages_proxy_postjs.js')])
+
+  # Tests that when building with -s MINIMAL_RUNTIME=1, the build can use -s WASM=0 --separate-asm as well.
+  @no_wasm_backend('asm.js')
+  def test_minimal_runtime_separate_asm(self):
+    for opts in [['-s', 'MINIMAL_RUNTIME=1']]:
+      print(opts)
+      create_test_file('src.cpp', self.with_report_result(open(path_from_root('tests', 'browser_test_hello_world.c')).read()))
+      self.compile_btest(['src.cpp', '-o', 'test.html', '-s', 'WASM=0', '--separate-asm'] + opts)
+      self.run_browser('test.html', None, '/report_result?0')
 
   @no_wasm_backend('asm.js')
   def test_separate_asm(self):
@@ -4869,3 +4885,7 @@ window.close = function() {
   @no_fastcomp('offset converter is not supported on fastcomp')
   def test_offset_converter(self, *args):
     self.btest(path_from_root('tests', 'browser', 'test_offset_converter.c'), '1', args=['-s', 'USE_OFFSET_CONVERTER', '-g4', '-s', 'PROXY_TO_PTHREAD', '-s', 'USE_PTHREADS'])
+
+  # Tests emscripten_unwind_to_js_event_loop() behavior
+  def test_emscripten_unwind_to_js_event_loop(self, *args):
+    self.btest(path_from_root('tests', 'browser', 'test_emscripten_unwind_to_js_event_loop.c'), '1', args=['-s', 'NO_EXIT_RUNTIME=1'])
