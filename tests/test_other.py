@@ -1837,18 +1837,22 @@ int f() {
     Building.emcc(path_from_root('tests', 'freetype_test.c'), ['-s', 'USE_FREETYPE=1', '--embed-file', 'LiberationSansBold.ttf'], output_filename='a.out.js')
     # the test program will print an ascii representation of a bitmap where the
     # 'w' character has been rendered using the Liberation Sans Bold font
-    expectedOutput = '***   +***+   **\n' + \
-                     '***+  +***+  +**\n' + \
-                     '***+  *****  +**\n' + \
-                     '+**+ +**+**+ +**\n' + \
-                     '+*** +**+**+ ***\n' + \
-                     ' *** +** **+ ***\n' + \
-                     ' ***+**+ +**+**+\n' + \
-                     ' +**+**+ +**+**+\n' + \
-                     ' +*****  +*****+\n' + \
-                     '  *****   ***** \n' + \
-                     '  ****+   +***+ \n' + \
-                     '  +***+   +***+ \n'
+    expectedOutput = '                \n' + \
+                     '                \n' + \
+                     '                \n' + \
+                     '                \n' + \
+                     '***    +***+    \n' + \
+                     '***+   *****   +\n' + \
+                     '+**+   *****   +\n' + \
+                     '+***  +**+**+  *\n' + \
+                     ' ***+ ***+**+ +*\n' + \
+                     ' +**+ *** *** +*\n' + \
+                     ' +**++**+ +**+**\n' + \
+                     '  ***+**+ +**+**\n' + \
+                     '  ******   *****\n' + \
+                     '  +****+   +****\n' + \
+                     '  +****+   +****\n' + \
+                     '   ****     ****'
     self.assertContained(expectedOutput, run_process(JS_ENGINES[0] + ['a.out.js'], stdout=PIPE, stderr=PIPE).stdout)
 
   def test_link_memcpy(self):
@@ -2707,6 +2711,15 @@ void wakaw::Cm::RasterBase<wakaw::watwat::Polocator>::merbine1<wakaw::Cm::Raster
     run_process([PYTHON, EMCC, 'src.cpp'])
     output = run_js('a.out.js')
     self.assertContained('Waka::f::a23412341234::point()', output)
+
+  # Test that malloc() -> OOM -> abort() -> stackTrace() -> jsStackTrace() -> demangleAll() -> demangle() -> malloc()
+  # cycle will not produce an infinite loop.
+  def test_demangle_malloc_infinite_loop_crash(self):
+    run_process([PYTHON, EMXX, path_from_root('tests', 'malloc_demangle_infinite_loop.cpp'), '-g', '-s', 'ABORTING_MALLOC=1', '-s', 'DEMANGLE_SUPPORT=1'])
+    output = run_js('a.out.js', assert_returncode=None, stderr=PIPE)
+    if output.count('Cannot enlarge memory arrays') > 2:
+      print(output)
+    assert(output.count('Cannot enlarge memory arrays') <= 2)
 
   def test_module_exports_with_closure(self):
     # This test checks that module.export is retained when JavaScript is minified by compiling with --closure 1
@@ -5937,6 +5950,11 @@ int main(void) {
     output = run_process(NODE_JS + ['-e', 'var m; (global.define = function(deps, factory) { m = factory(); }).amd = true; require("./a.out.js"); m();'], stdout=PIPE, stderr=PIPE)
     assert output.stdout == 'hello, world!\n' and output.stderr == '', 'expected output, got\n===\nSTDOUT\n%s\n===\nSTDERR\n%s\n===\n' % (output.stdout, output.stderr)
 
+  def test_EXPORT_NAME_with_html(self):
+    result = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-o', 'a.html', '-s', 'EXPORT_NAME=Other'], stdout=PIPE, check=False, stderr=STDOUT)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertContained('Customizing EXPORT_NAME requires that the HTML be customized to use that name', result.stdout)
+
   @no_wasm_backend('tests fastcomp specific passes')
   def test_emcc_c_multi(self):
     def test(args, llvm_opts=None):
@@ -6667,7 +6685,7 @@ main(int argc,char** argv)
     def build_main(args):
       print(args)
       with env_modify({'EMCC_FORCE_STDLIBS': 'libc++abi'}):
-        run_process([PYTHON, EMCC, 'main.cpp', '-s', 'MAIN_MODULE=1', '-s', 'EXPORT_ALL',
+        run_process([PYTHON, EMCC, 'main.cpp', '-s', 'MAIN_MODULE=1',
                      '--embed-file', 'libside.wasm'] + args)
 
     build_main([])
@@ -8169,9 +8187,9 @@ int main() {
     self.run_metadce_test('minimal.c', *args)
 
   @parameterized({
-    'O0': ([],      25, ['abort'], ['waka'], 22712, 16, 15, 29), # noqa
-    'O1': (['-O1'], 16, ['abort'], ['waka'], 10450,  4, 11, 12), # noqa
-    'O2': (['-O2'], 16, ['abort'], ['waka'], 10440,  4, 11, 12), # noqa
+    'O0': ([],      25, ['abort'], ['waka'], 22712, 16, 14, 28), # noqa
+    'O1': (['-O1'], 16, ['abort'], ['waka'], 10450,  4, 10, 11), # noqa
+    'O2': (['-O2'], 16, ['abort'], ['waka'], 10440,  4, 10, 11), # noqa
     # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
     'O3': (['-O3'],  4, [],        [],          55,  0,  1, 1), # noqa
     'Os': (['-Os'],  4, [],        [],          55,  0,  1, 1), # noqa
@@ -8195,10 +8213,10 @@ int main() {
     self.run_metadce_test('hello_libcxx.cpp', *args)
 
   @parameterized({
-    'normal': (['-O2'], 40, ['abort'], ['waka'], 186423, 23, 37, 541), # noqa
+    'normal': (['-O2'], 40, ['abort'], ['waka'], 186423, 23, 36, 540), # noqa
     'emulated_function_pointers':
               (['-O2', '-s', 'EMULATED_FUNCTION_POINTERS=1'],
-                        40, ['abort'], ['waka'], 188310, 23, 38, 521), # noqa
+                        40, ['abort'], ['waka'], 188310, 23, 37, 520), # noqa
   })
   @no_wasm_backend()
   def test_metadce_cxx_fastcomp(self, *args):
@@ -8220,16 +8238,16 @@ int main() {
     # don't compare the # of functions in a main module, which changes a lot
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   12, [], [],  10770,   12,   10, None), # noqa
+    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'],   12, [], [],  10652,   12,   10, None), # noqa
   })
   @no_fastcomp()
   def test_metadce_hello(self, *args):
     self.run_metadce_test('hello_world.cpp', *args)
 
   @parameterized({
-    'O0': ([],      27, ['abort'], ['waka'], 42701,  18,   17, 56), # noqa
-    'O1': (['-O1'], 19, ['abort'], ['waka'], 13199,   9,   14, 32), # noqa
-    'O2': (['-O2'], 19, ['abort'], ['waka'], 12425,   9,   14, 27), # noqa
+    'O0': ([],      27, ['abort'], ['waka'], 42701,  18,   16, 55), # noqa
+    'O1': (['-O1'], 19, ['abort'], ['waka'], 13199,   9,   13, 31), # noqa
+    'O2': (['-O2'], 19, ['abort'], ['waka'], 12425,   9,   13, 26), # noqa
     'O3': (['-O3'],  7, [],        [],        2045,   6,    2, 14), # noqa; in -O3, -Os and -Oz we metadce
     'Os': (['-Os'],  7, [],        [],        2064,   6,    2, 15), # noqa
     'Oz': (['-Oz'],  7, [],        [],        2045,   6,    2, 14), # noqa
@@ -10207,3 +10225,20 @@ int main() {
 #endif
 ''')
     run_process([PYTHON, EMCC, 'errno_type.c'])
+
+  @no_fastcomp('wasm2js only')
+  def test_promise_polyfill(self):
+    def test(args):
+      # legacy browsers may lack Promise, which wasm2js depends on. see what
+      # happens when we kill the global Promise function.
+      run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.cpp'), '-s', 'WASM=0'] + args)
+      with open('a.out.js') as f:
+        js = f.read()
+      with open('a.out.js', 'w') as f:
+        f.write('Promise = undefined;\n' + js)
+      return run_js('a.out.js', stderr=PIPE, full_output=True, assert_returncode=None)
+
+    # we fail without legacy support
+    self.assertNotContained('hello, world!', test([]))
+    # but work with it
+    self.assertContained('hello, world!', test(['-s', 'LEGACY_VM_SUPPORT']))

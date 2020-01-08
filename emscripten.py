@@ -938,7 +938,10 @@ def get_exported_implemented_functions(all_exported_functions, all_implemented, 
   if shared.Settings.ALLOW_MEMORY_GROWTH:
     funcs.append('_emscripten_replace_memory')
   if not shared.Settings.SIDE_MODULE and not shared.Settings.MINIMAL_RUNTIME:
-    funcs += ['stackAlloc', 'stackSave', 'stackRestore', 'establishStackSpace']
+    funcs += ['stackAlloc', 'stackSave', 'stackRestore']
+    if shared.Settings.USE_PTHREADS:
+      funcs += ['establishStackSpace']
+
   if shared.Settings.EMTERPRETIFY:
     funcs += ['emterpret']
     if shared.Settings.EMTERPRETIFY_ASYNC:
@@ -1667,7 +1670,9 @@ def create_exports(exported_implemented_functions, in_table, function_table_data
 def create_asm_runtime_funcs():
   funcs = []
   if not (shared.Settings.WASM and shared.Settings.SIDE_MODULE) and not shared.Settings.MINIMAL_RUNTIME:
-    funcs += ['stackAlloc', 'stackSave', 'stackRestore', 'establishStackSpace']
+    funcs += ['stackAlloc', 'stackSave', 'stackRestore']
+    if shared.Settings.USE_PTHREADS:
+      funcs += ['establishStackSpace']
   return funcs
 
 
@@ -1888,13 +1893,19 @@ function stackRestore(top) {
   top = top|0;
   STACKTOP = top;
 }
+''' % stack_check]
+
+  if shared.Settings.USE_PTHREADS:
+    funcs.append('''
 function establishStackSpace(stackBase, stackMax) {
   stackBase = stackBase|0;
   stackMax = stackMax|0;
   STACKTOP = stackBase;
   STACK_MAX = stackMax;
+  tempDoublePtr = STACKTOP;
+  STACKTOP = (STACKTOP + 8)|0;
 }
-''' % stack_check]
+''')
 
   if shared.Settings.MINIMAL_RUNTIME:
     # MINIMAL_RUNTIME moves stack functions to library.
@@ -2392,8 +2403,10 @@ def create_asm_consts_wasm(forwarded_json, metadata):
   if all_sigs:
     # emit the signature-reading helper function only if we have any EM_ASM
     # functions in the module
+    check_int = ''
     check = ''
     if shared.Settings.ASSERTIONS:
+      check_int = "if (ch === 105 /*'i'*/)"
       check = ' else abort("unexpected char in asm const signature " + ch);'
     asm_const_funcs.append(r'''
 // Avoid creating a new array
@@ -2402,21 +2415,21 @@ var _readAsmConstArgsArray = [];
 function readAsmConstArgs(sigPtr, buf) {
   var args = _readAsmConstArgsArray;
   args.length = 0;
-  while (1) {
-    var ch = HEAPU8[sigPtr++];
-    if (!ch) return args;
-    if (ch === 'd'.charCodeAt(0) || ch === 'f'.charCodeAt(0)) {
-      buf = alignMemory(buf, 8);
+  var ch;
+  while (ch = HEAPU8[sigPtr++]) {
+    if (ch === 100/*'d'*/ || ch === 102/*'f'*/) {
+      buf = (buf + 7) & ~7;
       args.push(HEAPF64[(buf >> 3)]);
       buf += 8;
-    } else if (ch === 'i'.charCodeAt(0)) {
-      buf = alignMemory(buf, 4);
+    } else %s {
+      buf = (buf + 3) & ~3;
       args.push(HEAP32[(buf >> 2)]);
       buf += 4;
     }%s
   }
+  return args;
 }
-''' % check)
+''' % (check_int, check))
 
   for sig, call_type in set(all_sigs):
     const_name = '_emscripten_asm_const_' + call_type + sig

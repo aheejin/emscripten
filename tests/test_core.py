@@ -2555,12 +2555,10 @@ The current type of b is: 9
   def prep_dlfcn_lib(self):
     self.clear_setting('MAIN_MODULE')
     self.set_setting('SIDE_MODULE')
-    self.set_setting('EXPORT_ALL')
 
   def prep_dlfcn_main(self):
     self.set_setting('MAIN_MODULE')
     self.clear_setting('SIDE_MODULE')
-    self.set_setting('EXPORT_ALL')
 
     create_test_file('lib_so_pre.js', '''
     if (!Module['preRun']) Module['preRun'] = [];
@@ -3566,9 +3564,6 @@ ok
     self.do_run(src, 'float: 42.\n', js_engines=js_engines)
 
   def dylink_test(self, main, side, expected=None, header=None, main_emcc_args=[], force_c=False, need_reverse=True, auto_load=True, **kwargs):
-    # shared settings
-    self.set_setting('EXPORT_ALL', 1)
-
     if header:
       create_test_file('header.h', header)
 
@@ -8173,7 +8168,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @no_wasm2js('TODO: MINIMAL_RUNTIME with WASM2JS')
   def test_minimal_runtime_hello_world(self):
     self.banned_js_engines = [V8_ENGINE, SPIDERMONKEY_ENGINE] # TODO: Support for non-Node.js shells has not yet been added to MINIMAL_RUNTIME
-    for args in [[], ['-s', 'MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION=1'], ['-s', 'DECLARE_ASM_MODULE_EXPORTS=0']]:
+    for args in [[], ['-s', 'MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION=1'], ['-s', 'MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION=1'], ['-s', 'DECLARE_ASM_MODULE_EXPORTS=0']]:
       self.emcc_args = ['-s', 'MINIMAL_RUNTIME=1'] + args
       self.set_setting('MINIMAL_RUNTIME', 1)
       self.maybe_closure()

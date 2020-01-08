@@ -310,12 +310,6 @@ var LibraryPThread = {
       for (var i = 0; i < numWorkers; ++i) {
         var worker = workers[i];
 
-#if !WASM_BACKEND
-        // Allocate tempDoublePtr for the worker. This is done here on the worker's behalf, since we may need to do this statically
-        // if the runtime has not been loaded yet, etc. - so we just use getMemory, which is main-thread only.
-        var tempDoublePtr = getMemory(8); // TODO: leaks. Cleanup after worker terminates.
-#endif
-
         // Ask the new worker to load up the Emscripten-compiled page. This is a heavy operation.
         worker.postMessage({
           'cmd': 'load',
@@ -337,9 +331,6 @@ var LibraryPThread = {
 #else
           'buffer': HEAPU8.buffer,
           'asmJsUrlOrBlob': Module["asmJsUrlOrBlob"],
-#endif
-#if !WASM_BACKEND
-          'tempDoublePtr': tempDoublePtr,
 #endif
           'DYNAMIC_BASE': DYNAMIC_BASE,
           'DYNAMICTOP_PTR': DYNAMICTOP_PTR
@@ -408,6 +399,7 @@ var LibraryPThread = {
               if (detached) {
                 PThread.returnWorkerToPool(worker);
               }
+#if EXIT_RUNTIME // If building with -s EXIT_RUNTIME=0, no thread will post this message, so don't even compile it in.
             } else if (cmd === 'exitProcess') {
               // A pthread has requested to exit the whole application process (runtime).
               noExitRuntime = false;
@@ -417,6 +409,7 @@ var LibraryPThread = {
                 if (e instanceof ExitStatus) return;
                 throw e;
               }
+#endif
             } else if (cmd === 'cancelDone') {
               PThread.returnWorkerToPool(worker);
             } else if (cmd === 'objectTransfer') {
@@ -538,26 +531,27 @@ var LibraryPThread = {
       thread: threadParams.pthread_ptr,
       threadInfoStruct: threadParams.pthread_ptr // Info area for this thread in Emscripten HEAP (shared)
     };
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.threadStatus }}} ) >> 2, 0); // threadStatus <- 0, meaning not yet exited.
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.threadExitCode }}} ) >> 2, 0); // threadExitCode <- 0.
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.profilerBlock }}} ) >> 2, 0); // profilerBlock <- 0.
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.detached }}} ) >> 2, threadParams.detached);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.tsd }}} ) >> 2, tlsMemory); // Init thread-local-storage memory array.
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.tsd_used }}} ) >> 2, 0); // Mark initial status to unused.
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.tid }}} ) >> 2, pthread.threadInfoStruct); // Main thread ID.
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.pid }}} ) >> 2, PROCINFO.pid); // Process ID.
+    var tis = pthread.threadInfoStruct >> 2;
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.threadStatus }}} >> 2), 0); // threadStatus <- 0, meaning not yet exited.
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.threadExitCode }}} >> 2), 0); // threadExitCode <- 0.
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.profilerBlock }}} >> 2), 0); // profilerBlock <- 0.
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.detached }}} >> 2), threadParams.detached);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.tsd }}} >> 2), tlsMemory); // Init thread-local-storage memory array.
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.tsd_used }}} >> 2), 0); // Mark initial status to unused.
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.tid }}} >> 2), pthread.threadInfoStruct); // Main thread ID.
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.pid }}} >> 2), PROCINFO.pid); // Process ID.
 
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.attr }}}) >> 2, threadParams.stackSize);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.stack_size }}}) >> 2, threadParams.stackSize);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.stack }}}) >> 2, stackHigh);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.attr }}} + 8) >> 2, stackHigh);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.attr }}} + 12) >> 2, threadParams.detached);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.attr }}} + 20) >> 2, threadParams.schedPolicy);
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.attr }}} + 24) >> 2, threadParams.schedPrio);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.attr }}} >> 2), threadParams.stackSize);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.stack_size }}} >> 2), threadParams.stackSize);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.stack }}} >> 2), stackHigh);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.attr }}} + 8 >> 2), stackHigh);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.attr }}} + 12 >> 2), threadParams.detached);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.attr }}} + 20 >> 2), threadParams.schedPolicy);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.attr }}} + 24 >> 2), threadParams.schedPrio);
 
     var global_libc = _emscripten_get_global_libc();
     var global_locale = global_libc + {{{ C_STRUCTS.libc.global_locale }}};
-    Atomics.store(HEAPU32, (pthread.threadInfoStruct + {{{ C_STRUCTS.pthread.locale }}}) >> 2, global_locale);
+    Atomics.store(HEAPU32, tis + ({{{ C_STRUCTS.pthread.locale }}} >> 2), global_locale);
 
 #if PTHREADS_PROFILING
     PThread.createProfilerBlock(pthread.threadInfoStruct);
@@ -1227,7 +1221,9 @@ var LibraryPThread = {
 
   __call_main: function(argc, argv) {
     var returnCode = _main(argc, argv);
+#if EXIT_RUNTIME
     if (!noExitRuntime) postMessage({ 'cmd': 'exitProcess', 'returnCode': returnCode });
+#endif
     return returnCode;
   },
 
@@ -1339,6 +1335,18 @@ var LibraryPThread = {
   $establishStackSpaceInJsModule: function(stackTop, stackMax) {
     STACK_BASE = STACKTOP = stackTop;
     STACK_MAX = stackMax;
+
+#if !WASM_BACKEND
+    // In fastcomp backend, locate tempDoublePtr memory area at the bottom of the stack, and bump up
+    // the stack by the bytes used.
+    tempDoublePtr = STACK_BASE;
+#if ASSERTIONS
+    assert(tempDoublePtr % 8 == 0);
+#endif
+    STACK_BASE += 8;
+    STACKTOP += 8;
+#endif
+
 #if WASM_BACKEND && STACK_OVERFLOW_CHECK >= 2
     ___set_stack_limit(STACK_MAX);
 #endif
