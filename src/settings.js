@@ -114,8 +114,8 @@ var TOTAL_MEMORY = 16777216;
 //  * emmalloc - a simple and compact malloc designed for emscripten
 //  * none     - no malloc() implementation is provided, but you must implement
 //               malloc() and free() yourself.
-// dlmalloc is necessary for multithreading, split memory, and other special
-// modes, and will be used automatically in those cases.
+// dlmalloc is necessary for split memory and other special modes, and will be
+// used automatically in those cases.
 // In general, if you don't need one of those special modes, and if you don't
 // allocate very many small objects, you should use emmalloc since it's
 // smaller. Otherwise, if you do allocate many small objects, dlmalloc
@@ -1392,11 +1392,6 @@ var PTHREAD_POOL_DELAY_LOAD = 0;
 // those that have their addresses taken, or ones that are too large to fit as
 // local vars in asm.js/wasm code.
 var DEFAULT_PTHREAD_STACK_SIZE = 2*1024*1024;
-
-// Specifies the value returned by the function emscripten_num_logical_cores()
-// if navigator.hardwareConcurrency is not supported. Pass in a negative number
-// to show a popup dialog at startup so the user can configure this dynamically.
-var PTHREAD_HINT_NUM_CORES = 4;
 
 // True when building with --threadprofiler
 var PTHREADS_PROFILING = 0;
