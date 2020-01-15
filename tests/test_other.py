@@ -2554,14 +2554,15 @@ int f() {
     run_process([PYTHON, FILE_PACKAGER, 'test.data', '--preload', 'data1.txt', '--preload', 'subdir/data2.txt', '--js-output=immutable.js', '--separate-metadata'])
     self.assertExists('immutable.js.metadata')
     # verify js output JS file is not touched when the metadata is separated
-    shutil.copy2('immutable.js', 'immutable.js.copy') # copy with timestamp preserved
+    orig_timestamp = os.path.getmtime('immutable.js')
+    orig_content = open('immutable.js').read()
     # ensure some time passes before running the packager again so that if it does touch the
     # js file it will end up with the different timestamp.
     time.sleep(1.0)
     run_process([PYTHON, FILE_PACKAGER, 'test.data', '--preload', 'data1.txt', '--preload', 'subdir/data2.txt', '--js-output=immutable.js', '--separate-metadata'])
     # assert both file content and timestamp are the same as reference copy
-    self.assertTextDataIdentical(open('immutable.js.copy').read(), open('immutable.js').read())
-    self.assertEqual(os.path.getmtime('immutable.js.copy'), os.path.getmtime('immutable.js'))
+    self.assertTextDataIdentical(orig_content, open('immutable.js').read())
+    self.assertEqual(orig_timestamp, os.path.getmtime('immutable.js'))
     # verify the content of metadata file is correct
     with open('immutable.js.metadata') as f:
       metadata = json.load(f)
@@ -9565,6 +9566,7 @@ int main () {
                                '-s', 'GL_POOL_TEMP_BUFFERS=0',
                                '-s', 'FAST_UNROLLED_MEMCPY_AND_MEMSET=0',
                                '-s', 'MIN_CHROME_VERSION=58',
+                               '-s', 'NO_FILESYSTEM=1',
                                '--output_eol', 'linux']
 
     asmjs = ['-s', 'WASM=0', '--separate-asm', '-s', 'ELIMINATE_DUPLICATE_FUNCTIONS=1', '--memory-init-file', '1']
@@ -9584,17 +9586,17 @@ int main () {
 
     if self.is_wasm_backend():
       test_cases = [
-        (opts, hello_world_sources, {'a.html': 1445, 'a.js': 455, 'a.wasm': 176}),
-        (opts, hello_webgl_sources, {'a.html': 1565, 'a.js': 4636, 'a.wasm': 11809}),
-        (opts, hello_webgl2_sources, {'a.html': 1565, 'a.js': 5143, 'a.wasm': 11809}) # Compare how WebGL2 sizes stack up with WebGL 1
+        (opts, hello_world_sources, {'a.html': 1445, 'a.js': 484, 'a.wasm': 176}),
+        (opts, hello_webgl_sources, {'a.html': 1565, 'a.js': 4663, 'a.wasm': 11809}),
+        (opts, hello_webgl2_sources, {'a.html': 1565, 'a.js': 5172, 'a.wasm': 11809}) # Compare how WebGL2 sizes stack up with WebGL 1
       ]
     else:
       test_cases = [
         (asmjs + opts, hello_world_sources, {'a.html': 1481, 'a.js': 289, 'a.asm.js': 113, 'a.mem': 6}),
-        (opts, hello_world_sources, {'a.html': 1445, 'a.js': 604, 'a.wasm': 86}),
+        (opts, hello_world_sources, {'a.html': 1445, 'a.js': 633, 'a.wasm': 86}),
         (asmjs + opts, hello_webgl_sources, {'a.html': 1605, 'a.js': 4921, 'a.asm.js': 11129, 'a.mem': 321}),
-        (opts, hello_webgl_sources, {'a.html': 1565, 'a.js': 4844, 'a.wasm': 8932}),
-        (opts, hello_webgl2_sources, {'a.html': 1565, 'a.js': 5331, 'a.wasm': 8932}) # Compare how WebGL2 sizes stack up with WebGL 1
+        (opts, hello_webgl_sources, {'a.html': 1565, 'a.js': 4874, 'a.wasm': 8932}),
+        (opts, hello_webgl2_sources, {'a.html': 1565, 'a.js': 5361, 'a.wasm': 8932}) # Compare how WebGL2 sizes stack up with WebGL 1
       ]
 
     success = True
