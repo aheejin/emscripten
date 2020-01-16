@@ -449,7 +449,7 @@ actual_clang_version = None
 
 def expected_llvm_version():
   if get_llvm_target() == WASM_TARGET:
-    return "10.0"
+    return "11.0"
   else:
     return "6.0"
 
@@ -800,6 +800,18 @@ def get_clang_native_env():
 
 def exe_suffix(cmd):
   return cmd + '.exe' if WINDOWS else cmd
+
+
+def replace_suffix(filename, new_suffix):
+  assert new_suffix[0] == '.'
+  return os.path.splitext(filename)[0] + new_suffix
+
+
+# In MINIMAL_RUNTIME mode, keep suffixes of generated files simple ('.mem' instead of '.js.mem'; .'symbols' instead of '.js.symbols' etc)
+# Retain the original naming scheme in traditional runtime.
+def replace_or_append_suffix(filename, new_suffix):
+  assert new_suffix[0] == '.'
+  return replace_suffix(filename, new_suffix) if Settings.MINIMAL_RUNTIME else filename + new_suffix
 
 
 CLANG_CC = os.path.expanduser(build_clang_tool_path(exe_suffix('clang')))
