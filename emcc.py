@@ -1541,9 +1541,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if shared.Settings.PROXY_TO_PTHREAD:
         shared.Settings.EXPORTED_FUNCTIONS += ['_proxy_main']
 
-      # pthread stack setup:
-      shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$establishStackSpaceInJsModule']
-      shared.Settings.EXPORTED_FUNCTIONS += ['establishStackSpaceInJsModule']
+      # pthread stack setup and other necessary utilities
+      def include_and_export(name):
+        shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$' + name]
+        shared.Settings.EXPORTED_FUNCTIONS += [name]
+
+      include_and_export('establishStackSpaceInJsModule')
+      include_and_export('getNoExitRuntime')
 
       if shared.Settings.MODULARIZE:
         # MODULARIZE+USE_PTHREADS mode requires extra exports out to Module so that worker.js
@@ -1803,7 +1807,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           passes += ['--post-emscripten']
           # always inline __original_main into main, as otherwise it makes debugging confusing,
           # and doing so is never bad for code size
-          passes += ['--inline-main']
+          # FIXME however, don't do it with DWARF for now, as inlining is not
+          #       fully handled in DWARF updating yet
+          if not shared.Settings.FULL_DWARF:
+            passes += ['--inline-main']
           if not shared.Settings.EXIT_RUNTIME:
             passes += ['--no-exit-runtime']
           if options.opt_level > 0 or options.shrink_level > 0:
