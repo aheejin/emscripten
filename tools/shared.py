@@ -521,6 +521,15 @@ def get_node_directory():
   return os.path.dirname(NODE_JS[0] if type(NODE_JS) is list else NODE_JS)
 
 
+# When we run some tools from npm (closure, html-minifier-terser), those
+# expect that the tools have node.js accessible in PATH. Place our node
+# there when invoking those tools.
+def env_with_node_in_path():
+  env = os.environ.copy()
+  env['PATH'] = get_node_directory() + os.pathsep + env['PATH']
+  return env
+
+
 def check_node_version():
   jsrun.check_engine(NODE_JS)
   try:
@@ -2491,12 +2500,7 @@ class Building(object):
   @staticmethod
   def closure_compiler(filename, pretty=True, advanced=True, extra_closure_args=None):
     with ToolchainProfiler.profile_block('closure_compiler'):
-      env = os.environ.copy()
-
-      def add_to_path(dirname):
-        env['PATH'] = env['PATH'] + os.pathsep + dirname
-
-      add_to_path(get_node_directory())
+      env = env_with_node_in_path()
       user_args = []
       env_args = os.environ.get('EMCC_CLOSURE_ARGS')
       if env_args:
@@ -2509,6 +2513,8 @@ class Building(object):
       # versions of the compiler.
       java_bin = os.path.dirname(JAVA)
       if java_bin:
+        def add_to_path(dirname):
+          env['PATH'] = env['PATH'] + os.pathsep + dirname
         add_to_path(java_bin)
         java_home = os.path.dirname(java_bin)
         env.setdefault('JAVA_HOME', java_home)
@@ -2576,12 +2582,6 @@ class Building(object):
       logger.debug('closure compiler: ' + ' '.join(cmd))
 
       proc = run_process(cmd, stderr=PIPE, check=False, env=env)
-      if proc.returncode != 0:
-        sys.stderr.write(proc.stderr)
-        hint = ''
-        if not pretty:
-          hint = ' the error message may be clearer with -g1'
-        exit_with_error('closure compiler failed (rc: %d.%s)', proc.returncode, hint)
 
       # XXX Closure bug: if Closure is invoked with --create_source_map, Closure should create a
       # outfile.map source map file (https://github.com/google/closure-compiler/wiki/Source-Maps)
@@ -2589,6 +2589,42 @@ class Building(object):
       # flag (and currently we don't), so delete the produced source map file to not leak files in
       # temp directory.
       try_delete(outfile + '.map')
+
+      # Print Closure diagnostics result up front.
+      if proc.returncode != 0:
+        logger.error('Closure compiler run failed:\n')
+      elif len(proc.stderr.strip()) > 0:
+        if Settings.CLOSURE_WARNINGS == 'error':
+          logger.error('Closure compiler completed with warnings and -s CLOSURE_WARNINGS=error enabled, aborting!\n')
+        elif Settings.CLOSURE_WARNINGS == 'warn':
+          logger.warn('Closure compiler completed with warnings:\n')
+
+      # Print input file (long wall of text!)
+      if os.getenv('EMCC_DEBUG') and (proc.returncode != 0 or (len(proc.stderr.strip()) > 0 and Settings.CLOSURE_WARNINGS != 'quiet')):
+        logger.debug(open(filename, 'r').read())
+
+      if proc.returncode != 0:
+        logger.error(proc.stderr) # print list of errors (possibly long wall of text if input was minified)
+
+        # Exit and print final hint to get clearer output
+        exit_with_error('closure compiler failed (rc: %d.%s)', proc.returncode, '' if pretty else ' the error message may be clearer with -g1 and EMCC_DEBUG=1 set')
+
+      if len(proc.stderr.strip()) > 0 and Settings.CLOSURE_WARNINGS != 'quiet':
+        # print list of warnings (possibly long wall of text if input was minified)
+        if Settings.CLOSURE_WARNINGS == 'error':
+          logger.error(proc.stderr)
+        else:
+          logger.warn(proc.stderr)
+
+        # Exit and/or print final hint to get clearer output
+        if not pretty:
+          logger.warn('(rerun with -g1 linker flag for an unminified output)')
+        elif not os.getenv('EMCC_DEBUG'):
+          logger.warn('(rerun with EMCC_DEBUG=1 enabled to dump Closure input file)')
+
+        if Settings.CLOSURE_WARNINGS == 'error':
+          exit_with_error('closure compiler produced warnings and -s CLOSURE_WARNINGS=error enabled')
+
       return outfile
 
   # minify the final wasm+JS combination. this is done after all the JS
