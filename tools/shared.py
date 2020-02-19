@@ -565,7 +565,7 @@ EMSCRIPTEN_METADATA_MAJOR, EMSCRIPTEN_METADATA_MINOR = (0, 3)
 # change, increment EMSCRIPTEN_ABI_MINOR if EMSCRIPTEN_ABI_MAJOR == 0
 # or the ABI change is backwards compatible, otherwise increment
 # EMSCRIPTEN_ABI_MAJOR and set EMSCRIPTEN_ABI_MINOR = 0.
-EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR = (0, 20)
+EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR = (0, 21)
 
 
 def generate_sanity():
@@ -1568,8 +1568,9 @@ class Building(object):
 
     return None
 
-  # Returns a clone of the given environment with all directories that contain sh.exe removed from the PATH.
-  # Used to work around CMake limitation with MinGW Makefiles, where sh.exe is not allowed to be present.
+  # Returns a clone of the given environment with all directories that contain
+  # sh.exe removed from the PATH.  Used to work around CMake limitation with
+  # MinGW Makefiles, where sh.exe is not allowed to be present.
   @staticmethod
   def remove_sh_exe_from_path(env):
     env = env.copy()
@@ -1581,28 +1582,32 @@ class Building(object):
     return env
 
   @staticmethod
-  def handle_CMake_toolchain(args, env):
-
-    def has_substr(array, substr):
-      for arg in array:
-        if substr in arg:
-          return True
-      return False
+  def handle_cmake_toolchain(args, env):
+    def has_substr(args, substr):
+      return any(substr in s for s in args)
 
     # Append the Emscripten toolchain file if the user didn't specify one.
     if not has_substr(args, '-DCMAKE_TOOLCHAIN_FILE'):
       args.append('-DCMAKE_TOOLCHAIN_FILE=' + path_from_root('cmake', 'Modules', 'Platform', 'Emscripten.cmake'))
+    node_js = NODE_JS
 
-    # On Windows specify MinGW Makefiles or ninja if we have them and no other toolchain was specified, to keep CMake
-    # from pulling in a native Visual Studio, or Unix Makefiles.
+    if not has_substr(args, '-DCMAKE_CROSSCOMPILING_EMULATOR'):
+      node_js = NODE_JS[0].replace('"', '\"')
+      args.append('-DCMAKE_CROSSCOMPILING_EMULATOR="%s"' % node_js)
+
+    # On Windows specify MinGW Makefiles or ninja if we have them and no other
+    # toolchain was specified, to keep CMake from pulling in a native Visual
+    # Studio, or Unix Makefiles.
     if WINDOWS and '-G' not in args:
       if Building.which('mingw32-make'):
         args += ['-G', 'MinGW Makefiles']
       elif Building.which('ninja'):
         args += ['-G', 'Ninja']
 
-    # CMake has a requirement that it wants sh.exe off PATH if MinGW Makefiles is being used. This happens quite often,
-    # so do this automatically on behalf of the user. See http://www.cmake.org/Wiki/CMake_MinGW_Compiler_Issues
+    # CMake has a requirement that it wants sh.exe off PATH if MinGW Makefiles
+    # is being used. This happens quite often, so do this automatically on
+    # behalf of the user. See
+    # http://www.cmake.org/Wiki/CMake_MinGW_Compiler_Issues
     if WINDOWS and 'MinGW Makefiles' in args:
       env = Building.remove_sh_exe_from_path(env)
 
@@ -1610,35 +1615,31 @@ class Building(object):
 
   @staticmethod
   def configure(args, stdout=None, stderr=None, env=None, cflags=[], **kwargs):
-    if not args:
-      return
-    if env is None:
+    if env:
+      env = env.copy()
+    else:
       env = Building.get_building_env(cflags=cflags)
     if 'cmake' in args[0]:
-      # Note: EMMAKEN_JUST_CONFIGURE shall not be enabled when configuring with CMake. This is because CMake
-      #       does expect to be able to do config-time builds with emcc.
-      args, env = Building.handle_CMake_toolchain(args, env)
+      # Note: EMMAKEN_JUST_CONFIGURE shall not be enabled when configuring with
+      #       CMake. This is because CMake does expect to be able to do
+      #       config-time builds with emcc.
+      args, env = Building.handle_cmake_toolchain(args, env)
     else:
-      # When we configure via a ./configure script, don't do config-time compilation with emcc, but instead
-      # do builds natively with Clang. This is a heuristic emulation that may or may not work.
+      # When we configure via a ./configure script, don't do config-time
+      # compilation with emcc, but instead do builds natively with Clang. This
+      # is a heuristic emulation that may or may not work.
       env['EMMAKEN_JUST_CONFIGURE'] = '1'
-    if EM_BUILD_VERBOSE >= 3:
-      print('configure: ' + str(args), file=sys.stderr)
     if EM_BUILD_VERBOSE >= 2:
       stdout = None
     if EM_BUILD_VERBOSE >= 1:
       stderr = None
+    print('configure: ' + ' '.join(args), file=sys.stderr)
     run_process(args, stdout=stdout, stderr=stderr, env=env, **kwargs)
-    if 'EMMAKEN_JUST_CONFIGURE' in env:
-      del env['EMMAKEN_JUST_CONFIGURE']
 
   @staticmethod
   def make(args, stdout=None, stderr=None, env=None, cflags=[], **kwargs):
     if env is None:
       env = Building.get_building_env(cflags=cflags)
-    if not args:
-      exit_with_error('Executable to run not specified.')
-    # args += ['VERBOSE=1']
 
     # On Windows prefer building with mingw32-make instead of make, if it exists.
     if WINDOWS:
@@ -1657,7 +1658,7 @@ class Building(object):
       stdout = None
     if EM_BUILD_VERBOSE >= 1:
       stderr = None
-    print('make: ' + str(args), file=sys.stderr)
+    print('make: ' + ' '.join(args), file=sys.stderr)
     run_process(args, stdout=stdout, stderr=stderr, env=env, shell=WINDOWS, **kwargs)
 
   @staticmethod
@@ -1750,7 +1751,7 @@ class Building(object):
     # other otherwise for linking of bitcode we must use our python
     # code (necessary for asm.js, for wasm bitcode see
     # https://bugs.llvm.org/show_bug.cgi?id=40654)
-    if Settings.WASM_BACKEND and Settings.WASM_OBJECT_FILES:
+    if Settings.WASM_BACKEND and not Settings.LTO:
       Building.link_lld(linker_inputs, target, ['--relocatable'])
     else:
       Building.link(linker_inputs, target)
@@ -2989,8 +2990,6 @@ class JS(object):
   memory_staticbump_pattern = r'STATICTOP = STATIC_BASE \+ (\d+);'
 
   global_initializers_pattern = r'/\* global initializers \*/ __ATINIT__.push\((.+)\);'
-
-  module_export_name_substitution_pattern = '"__EMSCRIPTEN_PRIVATE_MODULE_EXPORT_NAME_SUBSTITUTION__"'
 
   @staticmethod
   def to_nice_ident(ident): # limited version of the JS function toNiceIdent
