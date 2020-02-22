@@ -2962,7 +2962,7 @@ class Building(object):
       Building.save_intermediate_counter += 1
       dst = os.path.join(CANONICAL_TEMP_DIR, dst)
       logger.debug('saving debug copy %s' % dst)
-:     mylog.log_copy(src, dst)
+      mylog.log_copy(src, dst)
       shutil.copyfile(src, dst)
 
 
