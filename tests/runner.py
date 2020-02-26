@@ -1048,8 +1048,8 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     self.clear_setting('SIDE_MODULE')
     self.clear_setting('RUNTIME_LINKED_LIBS')
 
-    # XXX in wasm each lib load currently takes 5MB; default TOTAL_MEMORY=16MB is thus not enough
-    self.set_setting('TOTAL_MEMORY', 32 * 1024 * 1024)
+    # XXX in wasm each lib load currently takes 5MB; default INITIAL_MEMORY=16MB is thus not enough
+    self.set_setting('INITIAL_MEMORY', 32 * 1024 * 1024)
 
     so = '.wasm' if self.is_wasm() else '.js'
 
@@ -1250,6 +1250,15 @@ def harness_server_func(in_queue, out_queue, port):
         return f
       else:
         return SimpleHTTPRequestHandler.send_head(self)
+
+    # Add COOP, COEP and CORP headers
+    def end_headers(self):
+      self.send_header('Access-Control-Allow-Origin', '*')
+      self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+      self.send_header('Cross-Origin-Embedder-Policy', 'require-corp')
+      self.send_header('Cross-Origin-Resource-Policy', 'cross-origin')
+
+      return SimpleHTTPRequestHandler.end_headers(self)
 
     def do_GET(self):
       if self.path == '/run_harness':
@@ -1541,12 +1550,12 @@ class BrowserCore(RunnerCore):
         if (typeof WebGLClient !== 'undefined') {
           // trigger reftest from RAF as well, needed for workers where there is no pre|postRun on the main thread
           var realRAF = window.requestAnimationFrame;
-          window.requestAnimationFrame = function(func) {
+          window.requestAnimationFrame = /** @suppress{checkTypes} */ (function(func) {
             realRAF(function() {
               func();
               realRAF(doReftest);
             });
-          };
+          });
 
           // trigger reftest from canvas render too, for workers not doing GL
           var realWOM = worker.onmessage;

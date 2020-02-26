@@ -127,12 +127,6 @@ LEAVE_INPUTS_RAW = int(os.environ.get('EMCC_LEAVE_INPUTS_RAW', '0'))
 if LEAVE_INPUTS_RAW:
   del os.environ['EMCC_LEAVE_INPUTS_RAW']
 
-# If set to 1, we will run the autodebugger (the automatic debugging tool, see
-# tools/autodebugger).  Note that this will disable inclusion of libraries. This
-# is useful because including dlmalloc makes it hard to compare native and js
-# builds
-AUTODEBUG = os.environ.get('EMCC_AUTODEBUG')
-
 # Target options
 final = None
 
@@ -402,14 +396,6 @@ def apply_settings(changes):
   """
 
   def standardize_setting_change(key, value):
-    # Handle aliases in settings flags. These are settings whose name
-    # has changed.
-    settings_aliases = {
-      'BINARYEN': 'WASM',
-      'BINARYEN_MEM_MAX': 'WASM_MEM_MAX',
-      # TODO: change most (all?) other BINARYEN* names to WASM*
-    }
-    key = settings_aliases.get(key, key)
     # boolean NO_X settings are aliases for X
     # (note that *non*-boolean setting values have special meanings,
     # and we can't just flip them, so leave them as-is to be
@@ -427,8 +413,8 @@ def apply_settings(changes):
       exit_with_error('%s is an internal setting and cannot be set from command line', key)
 
     # In those settings fields that represent amount of memory, translate suffixes to multiples of 1024.
-    if key in ('TOTAL_STACK', 'TOTAL_MEMORY', 'MEMORY_GROWTH_LINEAR_STEP', 'MEMORY_GROWTH_GEOMETRIC_STEP',
-               'GL_MAX_TEMP_BUFFER_SIZE', 'WASM_MEM_MAX', 'DEFAULT_PTHREAD_STACK_SIZE'):
+    if key in ('TOTAL_STACK', 'INITIAL_MEMORY', 'MEMORY_GROWTH_LINEAR_STEP', 'MEMORY_GROWTH_GEOMETRIC_STEP',
+               'GL_MAX_TEMP_BUFFER_SIZE', 'MAXIMUM_MEMORY', 'DEFAULT_PTHREAD_STACK_SIZE'):
       value = str(shared.expand_byte_size_suffixes(value))
 
     if value[0] == '@':
@@ -1186,7 +1172,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.AUTO_JS_LIBRARIES = 0
       shared.Settings.AUTO_ARCHIVE_INDEXES = 0
 
-    if AUTODEBUG:
+    # If set to 1, we will run the autodebugger (the automatic debugging tool, see
+    # tools/autodebugger).  Note that this will disable inclusion of libraries. This
+    # is useful because including dlmalloc makes it hard to compare native and js
+    # builds
+    if os.environ.get('EMCC_AUTODEBUG'):
       shared.Settings.AUTODEBUG = 1
 
     # Use settings
@@ -1594,21 +1584,23 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         misc_temp_files.note(asm_target)
 
     if shared.Settings.WASM:
-      if shared.Settings.TOTAL_MEMORY % 65536 != 0:
-        exit_with_error('For wasm, TOTAL_MEMORY must be a multiple of 64KB, was ' + str(shared.Settings.TOTAL_MEMORY))
+      if shared.Settings.INITIAL_MEMORY % 65536 != 0:
+        exit_with_error('For wasm, INITIAL_MEMORY must be a multiple of 64KB, was ' + str(shared.Settings.INITIAL_MEMORY))
+      if shared.Settings.INITIAL_MEMORY >= 2 * 1024 * 1024 * 1024:
+        exit_with_error('INITIAL_MEMORY must be less than 2GB due to current spec limitations')
     else:
-      if shared.Settings.TOTAL_MEMORY < 16 * 1024 * 1024:
-        exit_with_error('TOTAL_MEMORY must be at least 16MB, was ' + str(shared.Settings.TOTAL_MEMORY))
-      if shared.Settings.TOTAL_MEMORY % (16 * 1024 * 1024) != 0:
-        exit_with_error('For asm.js, TOTAL_MEMORY must be a multiple of 16MB, was ' + str(shared.Settings.TOTAL_MEMORY))
-    if shared.Settings.TOTAL_MEMORY < shared.Settings.TOTAL_STACK:
-      exit_with_error('TOTAL_MEMORY must be larger than TOTAL_STACK, was ' + str(shared.Settings.TOTAL_MEMORY) + ' (TOTAL_STACK=' + str(shared.Settings.TOTAL_STACK) + ')')
-    if shared.Settings.WASM_MEM_MAX != -1 and shared.Settings.WASM_MEM_MAX % 65536 != 0:
-      exit_with_error('WASM_MEM_MAX must be a multiple of 64KB, was ' + str(shared.Settings.WASM_MEM_MAX))
+      if shared.Settings.INITIAL_MEMORY < 16 * 1024 * 1024:
+        exit_with_error('INITIAL_MEMORY must be at least 16MB, was ' + str(shared.Settings.INITIAL_MEMORY))
+      if shared.Settings.INITIAL_MEMORY % (16 * 1024 * 1024) != 0:
+        exit_with_error('For asm.js, INITIAL_MEMORY must be a multiple of 16MB, was ' + str(shared.Settings.INITIAL_MEMORY))
+    if shared.Settings.INITIAL_MEMORY < shared.Settings.TOTAL_STACK:
+      exit_with_error('INITIAL_MEMORY must be larger than TOTAL_STACK, was ' + str(shared.Settings.INITIAL_MEMORY) + ' (TOTAL_STACK=' + str(shared.Settings.TOTAL_STACK) + ')')
+    if shared.Settings.MAXIMUM_MEMORY != -1 and shared.Settings.MAXIMUM_MEMORY % 65536 != 0:
+      exit_with_error('MAXIMUM_MEMORY must be a multiple of 64KB, was ' + str(shared.Settings.MAXIMUM_MEMORY))
     if shared.Settings.MEMORY_GROWTH_LINEAR_STEP != -1 and shared.Settings.MEMORY_GROWTH_LINEAR_STEP % 65536 != 0:
       exit_with_error('MEMORY_GROWTH_LINEAR_STEP must be a multiple of 64KB, was ' + str(shared.Settings.MEMORY_GROWTH_LINEAR_STEP))
-    if shared.Settings.USE_PTHREADS and shared.Settings.WASM and shared.Settings.ALLOW_MEMORY_GROWTH and shared.Settings.WASM_MEM_MAX == -1:
-      exit_with_error('If pthreads and memory growth are enabled, WASM_MEM_MAX must be set')
+    if shared.Settings.USE_PTHREADS and shared.Settings.WASM and shared.Settings.ALLOW_MEMORY_GROWTH and shared.Settings.MAXIMUM_MEMORY == -1:
+      exit_with_error('If pthreads and memory growth are enabled, MAXIMUM_MEMORY must be set')
 
     if shared.Settings.EXPORT_ES6 and not shared.Settings.MODULARIZE:
       exit_with_error('EXPORT_ES6 requires MODULARIZE to be set')
@@ -1779,8 +1771,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         shared.Settings.USE_ASAN = 1
 
         shared.Settings.GLOBAL_BASE = shared.Settings.ASAN_SHADOW_SIZE
-        shared.Settings.TOTAL_MEMORY += shared.Settings.ASAN_SHADOW_SIZE
-        assert shared.Settings.TOTAL_MEMORY < 2**32
+        shared.Settings.INITIAL_MEMORY += shared.Settings.ASAN_SHADOW_SIZE
+        assert shared.Settings.INITIAL_MEMORY < 2**32
 
         if shared.Settings.SAFE_HEAP:
           # SAFE_HEAP instruments ASan's shadow memory accesses.
@@ -1835,7 +1827,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             passes += ['--strip-debug']
           if not shared.Settings.EMIT_PRODUCERS_SECTION:
             passes += ['--strip-producers']
-          if shared.Settings.AUTODEBUG and not shared.Settings.LTO:
+          if shared.Settings.AUTODEBUG:
             # adding '--flatten' here may make these even more effective
             passes += ['--instrument-locals']
             passes += ['--log-execution']
@@ -2348,7 +2340,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
                link_opts.append("-wholeprogramdevirt")
             link_opts.append("-lowertypetests")
 
-          if AUTODEBUG:
+          if shared.Settings.AUTODEBUG:
             # let llvm opt directly emit ll, to skip writing and reading all the bitcode
             link_opts += ['-S']
             final = shared.Building.llvm_opt(final, link_opts, get_final() + '.link.ll')
@@ -2367,7 +2359,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if options.save_bc:
           save_intermediate('ll', 'll')
 
-        if AUTODEBUG:
+        if shared.Settings.AUTODEBUG:
           logger.debug('autodebug')
           next = get_final() + '.ad.ll'
           run_process([shared.PYTHON, shared.AUTODEBUGGER, final, next])
@@ -2835,6 +2827,11 @@ def parse_args(newargs):
           newargs[i] = '-g'
           shared.Settings.FULL_DWARF = 1
           shared.warning('gforce_dwarf is a temporary option that will eventually disappear')
+        elif requested_level.startswith('side'):
+          # Emit full DWARF but also emit it in a file on the side
+          newargs[i] = '-g'
+          shared.Settings.FULL_DWARF = 1
+          shared.Settings.SIDE_DEBUG = 1
         # a non-integer level can be something like -gline-tables-only. keep
         # the flag for the clang frontend to emit the appropriate DWARF info.
         # set the emscripten debug level to 3 so that we do not remove that
@@ -3148,7 +3145,7 @@ def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
     if DEBUG:
       # save the asm.js input
       shared.Building.save_intermediate(asm_target, 'asmjs.js')
-    cmd = [os.path.join(binaryen_bin, 'asm2wasm'), asm_target, '--total-memory=' + str(shared.Settings.TOTAL_MEMORY)]
+    cmd = [os.path.join(binaryen_bin, 'asm2wasm'), asm_target, '--total-memory=' + str(shared.Settings.INITIAL_MEMORY)]
     if shared.Settings.BINARYEN_TRAP_MODE not in ('js', 'clamp', 'allow'):
       exit_with_error('invalid BINARYEN_TRAP_MODE value: ' + shared.Settings.BINARYEN_TRAP_MODE + ' (should be js/clamp/allow)')
     cmd += ['--trap-mode=' + shared.Settings.BINARYEN_TRAP_MODE]
@@ -3170,8 +3167,8 @@ def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
       cmd += ['--table-max=-1']
     if shared.Settings.SIDE_MODULE:
       cmd += ['--mem-max=-1']
-    elif shared.Settings.WASM_MEM_MAX >= 0:
-      cmd += ['--mem-max=' + str(shared.Settings.WASM_MEM_MAX)]
+    elif shared.Settings.MAXIMUM_MEMORY >= 0:
+      cmd += ['--mem-max=' + str(shared.Settings.MAXIMUM_MEMORY)]
     if shared.Settings.LEGALIZE_JS_FFI != 1:
       cmd += ['--no-legalize-javascript-ffi']
     if shared.Building.is_wasm_only():
@@ -3355,6 +3352,9 @@ def do_binaryen(target, asm_target, options, memfile, wasm_binary_target,
       shared.try_delete(target)
     with open(final, 'w') as f:
       f.write(js)
+
+  if shared.Settings.FULL_DWARF and shared.Settings.SIDE_DEBUG:
+    shared.Building.emit_debug_on_side(wasm_binary_target)
 
 
 def modularize():

@@ -180,19 +180,20 @@ def run_process(cmd, check=True, input=None, *args, **kw):
 
   debug_text = '%sexecuted %s' % ('successfully ' if check else '', ' '.join(cmd))
 
-  if hasattr(subprocess, "run"):
-    ret = subprocess.run(cmd, check=check, input=input, *args, **kw)
-    logger.debug(debug_text)
-    return ret
+  if hasattr(subprocess, 'run'):
+    # Python 3.5 and above only
+    kw.setdefault('encoding', 'utf-8')
+    result = subprocess.run(cmd, check=check, input=input, *args, **kw)
+  else:
+    # Python 2 compatibility: Introduce Python 3 subprocess.run-like behavior
+    if input is not None:
+      kw['stdin'] = subprocess.PIPE
+    proc = Popen(cmd, *args, **kw)
+    stdout, stderr = proc.communicate(input)
+    result = Py2CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    if check:
+      result.check_returncode()
 
-  # Python 2 compatibility: Introduce Python 3 subprocess.run-like behavior
-  if input is not None:
-    kw['stdin'] = subprocess.PIPE
-  proc = Popen(cmd, *args, **kw)
-  stdout, stderr = proc.communicate(input)
-  result = Py2CompletedProcess(cmd, proc.returncode, stdout, stderr)
-  if check:
-    result.check_returncode()
   logger.debug(debug_text)
   return result
 
@@ -706,6 +707,7 @@ LLVM_NM = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-nm')))
 LLVM_INTERPRETER = os.path.expanduser(build_llvm_tool_path(exe_suffix('lli')))
 LLVM_COMPILER = os.path.expanduser(build_llvm_tool_path(exe_suffix('llc')))
 LLVM_DWARFDUMP = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-dwarfdump')))
+LLVM_OBJCOPY = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-objcopy')))
 WASM_LD = os.path.expanduser(build_llvm_tool_path(exe_suffix('wasm-ld')))
 
 EMSCRIPTEN = path_from_root('emscripten.py')
@@ -1852,15 +1854,15 @@ class Building(object):
     if not Settings.SIDE_MODULE:
       cmd += [
         '-z', 'stack-size=%s' % Settings.TOTAL_STACK,
-        '--initial-memory=%d' % Settings.TOTAL_MEMORY,
+        '--initial-memory=%d' % Settings.INITIAL_MEMORY,
       ]
       use_start_function = Settings.STANDALONE_WASM
       if not use_start_function:
         cmd += ['--no-entry']
-      if Settings.WASM_MEM_MAX != -1:
-        cmd.append('--max-memory=%d' % Settings.WASM_MEM_MAX)
+      if Settings.MAXIMUM_MEMORY != -1:
+        cmd.append('--max-memory=%d' % Settings.MAXIMUM_MEMORY)
       elif not Settings.ALLOW_MEMORY_GROWTH:
-        cmd.append('--max-memory=%d' % Settings.TOTAL_MEMORY)
+        cmd.append('--max-memory=%d' % Settings.INITIAL_MEMORY)
       if not Settings.RELOCATABLE:
         cmd.append('--global-base=%s' % Settings.GLOBAL_BASE)
 
@@ -1905,8 +1907,7 @@ class Building(object):
         return False
       # Check the object is valid for us, and not a native object file.
       if not Building.is_bitcode(f):
-        warning('object %s is not a valid object file for emscripten, cannot link', f)
-        return False
+        exit_with_error('unknown file type: %s', f)
       provided = new_symbols.defs.union(new_symbols.commons)
       do_add = force_add or not unresolved_symbols.isdisjoint(provided)
       if do_add:
@@ -1974,17 +1975,7 @@ class Building(object):
           # Command line flags should already be vetted by the time this method
           # is called, so this is an internal error
           assert False, 'unsupported link flag: ' + f
-      elif not Building.is_ar(absolute_path_f):
-        if Building.is_bitcode(absolute_path_f):
-          if has_ar:
-            consider_object(absolute_path_f, force_add=True)
-          else:
-            # If there are no archives then we can simply link all valid object
-            # files and skip the symbol table stuff.
-            actual_files.append(f)
-        else:
-          logging.debug('ignoring non-bitcode file for link: %s' % absolute_path_f)
-      else:
+      elif Building.is_ar(absolute_path_f):
         # Extract object files from ar archives, and link according to gnu ld semantics
         # (link in an entire .o from the archive if it supplies symbols still unresolved)
         consider_archive(absolute_path_f, in_whole_archive or force_add_all)
@@ -1992,6 +1983,15 @@ class Building(object):
         # so we can loop back around later.
         if current_archive_group is not None:
           current_archive_group.append(absolute_path_f)
+      elif Building.is_bitcode(absolute_path_f):
+        if has_ar:
+          consider_object(f, force_add=True)
+        else:
+          # If there are no archives then we can simply link all valid object
+          # files and skip the symbol table stuff.
+          actual_files.append(f)
+      else:
+        exit_with_error('unknown file type: %s', f)
 
     # We have to consider the possibility that --start-group was used without a matching
     # --end-group; GNU ld permits this behavior and implicitly treats the end of the
@@ -2052,16 +2052,8 @@ class Building(object):
     cmd = [LLVM_OPT] + inputs + opts + ['-o', target]
     cmd = Building.get_command_with_possible_response_file(cmd)
     print_compiler_stage(cmd)
-    try:
-      run_process(cmd, stdout=PIPE)
-      assert os.path.exists(target), 'llvm optimizer emitted no output.'
-    except subprocess.CalledProcessError as e:
-      for i in inputs:
-        if not os.path.exists(i):
-          warning('Note: Input file "' + i + '" did not exist.')
-        elif not Building.is_bitcode(i):
-          warning('Note: Input file "' + i + '" exists but was not an LLVM bitcode file suitable for Emscripten. Perhaps accidentally mixing native built object files with Emscripten?')
-      exit_with_error('Failed to run llvm optimizations: ' + e.output)
+    check_call(cmd)
+    assert os.path.exists(target), 'llvm optimizer emitted no output.'
     if not out:
       mylog.log_move(filename + '.opt.bc', filename)
       shutil.move(filename + '.opt.bc', filename)
@@ -2093,17 +2085,21 @@ class Building(object):
       if ':' in line:
         continue
       parts = [seg for seg in line.split(' ') if len(seg)]
-      # pnacl-nm will print zero offsets for bitcode, and newer llvm-nm will print present symbols as  -------- T name
+      # pnacl-nm will print zero offsets for bitcode, and newer llvm-nm will print present symbols
+      # as  -------- T name
       if len(parts) == 3 and parts[0] == "--------" or re.match(r'^[\da-f]{8}$', parts[0]):
         parts.pop(0)
-      if len(parts) == 2:  # ignore lines with absolute offsets, these are not bitcode anyhow (e.g. |00000630 t d_source_name|)
+      if len(parts) == 2:
+        # ignore lines with absolute offsets, these are not bitcode anyhow
+        # e.g. |00000630 t d_source_name|
         status, symbol = parts
         if status == 'U':
           undefs.append(symbol)
         elif status == 'C':
           commons.append(symbol)
         elif (not include_internal and status == status.upper()) or \
-             (include_internal and status in ['W', 't', 'T', 'd', 'D']): # FIXME: using WTD in the previous line fails due to llvm-nm behavior on macOS,
+             (include_internal and status in ['W', 't', 'T', 'd', 'D']):
+          # FIXME: using WTD in the previous line fails due to llvm-nm behavior on macOS,
           #        so for now we assume all uppercase are normally defined external symbols
           defs.append(symbol)
     return ObjectFileInfo(0, None, set(defs), set(undefs), set(commons))
@@ -2286,7 +2282,7 @@ class Building(object):
     if Settings.WASM_BACKEND:
       logger.debug('Ctor evalling in the wasm backend is disabled due to https://github.com/emscripten-core/emscripten/issues/9527')
       return
-    cmd = [PYTHON, path_from_root('tools', 'ctor_evaller.py'), js_file, binary_file, str(Settings.TOTAL_MEMORY), str(Settings.TOTAL_STACK), str(Settings.GLOBAL_BASE), binaryen_bin, str(int(debug_info))]
+    cmd = [PYTHON, path_from_root('tools', 'ctor_evaller.py'), js_file, binary_file, str(Settings.INITIAL_MEMORY), str(Settings.TOTAL_STACK), str(Settings.GLOBAL_BASE), binaryen_bin, str(int(debug_info))]
     if binaryen_bin:
       cmd += Building.get_binaryen_feature_flags()
     print_compiler_stage(cmd)
@@ -2758,6 +2754,27 @@ class Building(object):
     with open(js_file, 'w') as f:
       f.write(all_js)
     return js_file
+
+  @staticmethod
+  def emit_debug_on_side(wasm_file):
+    # extract the DWARF info from the main file, and leave the wasm with
+    # debug into as a file on the side
+    # TODO: emit only debug sections in the side file, and not the entire
+    #       wasm as well
+    wasm_file_with_dwarf = wasm_file + '.debug.wasm'
+    shutil.move(wasm_file, wasm_file_with_dwarf)
+    run_process([LLVM_OBJCOPY, '--remove-section=.debug*', wasm_file_with_dwarf, wasm_file])
+
+    # embed a section in the main wasm to point to the file with external DWARF,
+    # see https://yurydelendik.github.io/webassembly-dwarf/#external-DWARF
+    section_name = b'\x13external_debug_info' # section name, including prefixed size
+    contents = asbytes(wasm_file_with_dwarf)
+    section_size = len(section_name) + len(contents)
+    with open(wasm_file, 'ab') as f:
+      f.write(b'\0') # user section is code 0
+      f.write(WebAssembly.lebify(section_size))
+      f.write(section_name)
+      f.write(contents)
 
   @staticmethod
   def apply_wasm_memory_growth(js_file):
@@ -3243,7 +3260,7 @@ class WebAssembly(object):
   def add_emscripten_metadata(js_file, wasm_file):
     WASM_PAGE_SIZE = 65536
 
-    mem_size = Settings.TOTAL_MEMORY // WASM_PAGE_SIZE
+    mem_size = Settings.INITIAL_MEMORY // WASM_PAGE_SIZE
     table_size = Settings.WASM_TABLE_SIZE
     global_base = Settings.GLOBAL_BASE
 
