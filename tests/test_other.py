@@ -8336,8 +8336,7 @@ int main() {
     # don't compare the # of functions in a main module, which changes a lot
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    # FIXME disabled temporarily for rolling
-    # 'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'], [], [],  10652, True, True, True, False), # noqa
+    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'], [], [],  10652, True, True, True, False), # noqa
   })
   @no_fastcomp()
   def test_metadce_hello(self, *args):
@@ -8933,10 +8932,10 @@ end
   def test_noderawfs_disables_embedding(self):
     expected = '--preload-file and --embed-file cannot be used with NODERAWFS which disables virtual filesystem'
     base = [PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'NODERAWFS=1']
-    err = self.expect_fail(base + ['--preload-files', 'somefile'])
-    assert expected in err
-    err = self.expect_fail(base + ['--embed-files', 'somefile'])
-    assert expected in err
+    err = self.expect_fail(base + ['--preload-file', 'somefile'])
+    self.assertContained(expected, err)
+    err = self.expect_fail(base + ['--embed-file', 'somefile'])
+    self.assertContained(expected, err)
 
   def test_node_code_caching(self):
     run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'),
@@ -10651,9 +10650,16 @@ int main() {
     self.assertContained('undefined symbol:', self.expect_fail([PYTHON, EMCC, path_from_root('tests', 'unistd', 'close.c'), '-nostdlib']))
     self.assertContained('undefined symbol:', self.expect_fail([PYTHON, EMCC, path_from_root('tests', 'unistd', 'close.c'), '-nodefaultlibs']))
 
-    # Buil again but with explit system libraries
+    # Build again but with explit system libraries
     libs = ['-lc', '-lcompiler_rt']
     if self.is_wasm_backend():
       libs.append('-lc_rt_wasm')
     run_process([PYTHON, EMCC, path_from_root('tests', 'unistd', 'close.c'), '-nostdlib'] + libs)
     run_process([PYTHON, EMCC, path_from_root('tests', 'unistd', 'close.c'), '-nodefaultlibs'] + libs)
+
+  def test_argument_match(self):
+    # Verify that emcc arguments match precisely.  We had a bug where only the prefix
+    # was matched
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '--js-opts', '10'])
+    err = self.expect_fail([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '--js-optsXX'])
+    self.assertContained("error: unsupported option '--js-optsXX'", err)
