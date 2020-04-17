@@ -1434,66 +1434,66 @@ int main(int argc, char **argv)
 
   @with_both_exception_handling
   def test_exceptions_uncaught(self, js_engines):
-      # needs to flush stdio streams
-      self.set_setting('EXIT_RUNTIME', 1)
-      src = r'''
-        #include <stdio.h>
-        #include <exception>
-        struct X {
-          ~X() {
-            printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
-          }
-        };
-        int main() {
+    # needs to flush stdio streams
+    self.set_setting('EXIT_RUNTIME', 1)
+    src = r'''
+      #include <stdio.h>
+      #include <exception>
+      struct X {
+        ~X() {
           printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
-          try {
-            X x;
-            throw 1;
-          } catch(...) {
-            printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
-          }
-          printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
-          return 0;
         }
-      '''
-      self.do_run(src, 'exception? no\nexception? yes\nexception? no\nexception? no\n', js_engines=js_engines)
+      };
+      int main() {
+        printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+        try {
+          X x;
+          throw 1;
+        } catch(...) {
+          printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+        }
+        printf("exception? %s\n", std::uncaught_exception() ? "yes" : "no");
+        return 0;
+      }
+    '''
+    self.do_run(src, 'exception? no\nexception? yes\nexception? no\nexception? no\n', js_engines=js_engines)
 
-      src = r'''
-        #include <fstream>
-        #include <iostream>
-        int main() {
-          std::ofstream os("test");
-          os << std::unitbuf << "foo"; // trigger a call to std::uncaught_exception from
-                                       // std::basic_ostream::sentry::~sentry
-          std::cout << "success";
-        }
-      '''
-      self.do_run(src, 'success', js_engines=js_engines)
+    src = r'''
+      #include <fstream>
+      #include <iostream>
+      int main() {
+        std::ofstream os("test");
+        os << std::unitbuf << "foo"; // trigger a call to std::uncaught_exception from
+                                     // std::basic_ostream::sentry::~sentry
+        std::cout << "success";
+      }
+    '''
+    self.do_run(src, 'success', js_engines=js_engines)
 
   @with_both_exception_handling
   def test_exceptions_uncaught_2(self, js_engines):
-      # needs to flush stdio streams
-      self.set_setting('EXIT_RUNTIME', 1)
-      src = r'''
-        #include <iostream>
-        #include <exception>
+    # needs to flush stdio streams
+    self.set_setting('EXIT_RUNTIME', 1)
+    src = r'''
+      #include <iostream>
+      #include <exception>
 
-        int main() {
+      int main() {
+        try {
+            throw std::exception();
+        } catch(std::exception) {
           try {
-              throw std::exception();
-          } catch(std::exception) {
-            try {
-              throw;
-            } catch(std::exception) {}
-          }
-
-          if (std::uncaught_exception())
-            std::cout << "ERROR: uncaught_exception still set.";
-          else
-            std::cout << "OK";
+            throw;
+          } catch(std::exception) {}
         }
-      '''
-      self.do_run(src, 'OK\n', js_engines=js_engines)
+
+        if (std::uncaught_exception())
+          std::cout << "ERROR: uncaught_exception still set.";
+        else
+          std::cout << "OK";
+      }
+    '''
+    self.do_run(src, 'OK\n', js_engines=js_engines)
 
   @with_both_exception_handling
   def test_exceptions_typed(self, js_engines):
@@ -6884,6 +6884,9 @@ return malloc(size);
       self.do_run(open(src).read(), 'Unable to grow wasm table', assert_returncode=None)
       print('- with table growth')
       self.set_setting('ALLOW_TABLE_GROWTH', 1)
+      self.emcc_args += ['-DGROWTH']
+      # enable costly assertions to verify correct table behavior
+      self.set_setting('ASSERTIONS', 2)
       self.do_run_in_out_file_test('tests', 'interop', 'test_add_function')
     else:
       self.do_run(open(src).read(), 'Finished up all reserved function pointers. Use a higher value for RESERVED_FUNCTION_POINTERS.', assert_returncode=None)
@@ -7088,7 +7091,7 @@ return malloc(size);
 class std_string {
 public:
   std_string(): ptr(nullptr) { std::cout << "std_string()\n"; }
-  std_string(const char* s): ptr(s) { std::cout << "std_string(const char* s) " << std::endl; }
+  std_string(const char* s): ptr(s) { std::cout << "std_string(const char* s)" << std::endl; }
   std_string(const std_string& s): ptr(s.ptr) { std::cout << "std_string(const std_string& s) " << std::endl; }
   const char* data() const { return ptr; }
 private:
@@ -7104,7 +7107,7 @@ int main() {
   std::cout << txtTestString.data() << std::endl;
   return 0;
 }
-      ''', '''std_string(const char* s) 
+      ''', '''std_string(const char* s)
 someweirdtext
 212121
 212121
