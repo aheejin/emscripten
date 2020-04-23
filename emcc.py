@@ -117,19 +117,6 @@ LLVM_OPT_LEVEL = {
   3: ['-O3'],
 }
 
-# Do not compile .ll files into .bc, just compile them with emscripten directly
-# Not recommended, this is mainly for the test runner, or if you have some other
-# specific need.
-# One major limitation with this mode is that libc and libc++ cannot be
-# added in. Also, LLVM optimizations will not be done, nor dead code elimination
-LEAVE_INPUTS_RAW = int(os.environ.get('EMCC_LEAVE_INPUTS_RAW', '0'))
-
-# If emcc is running with LEAVE_INPUTS_RAW and then launches an emcc to build
-# something like the struct info, then we don't want LEAVE_INPUTS_RAW to be
-# active in that emcc subprocess.
-if LEAVE_INPUTS_RAW:
-  del os.environ['EMCC_LEAVE_INPUTS_RAW']
-
 # Target options
 final = None
 
@@ -610,9 +597,6 @@ def run(args):
   # Strip args[0] (program name)
   args = args[1:]
 
-  if DEBUG and LEAVE_INPUTS_RAW:
-    logger.warning('leaving inputs raw')
-
   misc_temp_files = shared.configuration.get_temp_files()
 
   # Handle some global flags
@@ -751,10 +735,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         except IOError:
           pass
 
-    # if CONFIGURE_CC is defined, use that. let's you use local gcc etc. if you need that
-    compiler = os.environ.get('CONFIGURE_CC') or shared.EMXX
-    if not run_via_emxx:
-      compiler = cxx_to_c_compiler(compiler)
+    if run_via_emxx:
+      compiler = [shared.PYTHON, shared.EMXX]
+    else:
+      compiler = [shared.PYTHON, shared.EMCC]
 
     def filter_emscripten_options(argv):
       skip_next = False
@@ -765,10 +749,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if arg != '--tracing':
           yield arg
 
-    if compiler in (shared.EMCC, shared.EMXX):
-      compiler = [shared.PYTHON, compiler]
-    else:
-      compiler = [compiler]
     cmd = compiler + list(filter_emscripten_options(args))
     # configure tests want a more shell-like style, where we emit return codes on exit()
     cmd += ['-s', 'NO_EXIT_RUNTIME=0']
@@ -1026,18 +1006,18 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         file_suffix = get_file_suffix(arg)
         if file_suffix in SOURCE_ENDINGS + OBJECT_FILE_ENDINGS + DYNAMICLIB_ENDINGS + ASSEMBLY_ENDINGS + HEADER_ENDINGS or shared.Building.is_ar(arg): # we already removed -o <target>, so all these should be inputs
           newargs[i] = ''
-          if file_suffix.endswith(SOURCE_ENDINGS) or (has_dash_c and file_suffix == '.bc'):
+          if file_suffix in SOURCE_ENDINGS or (has_dash_c and file_suffix == '.bc'):
             input_files.append((i, arg))
-          elif file_suffix.endswith(HEADER_ENDINGS):
+          elif file_suffix in HEADER_ENDINGS:
             input_files.append((i, arg))
             has_header_inputs = True
-          elif file_suffix.endswith(ASSEMBLY_ENDINGS) or shared.Building.is_bitcode(arg) or shared.Building.is_ar(arg):
+          elif file_suffix in ASSEMBLY_ENDINGS or shared.Building.is_bitcode(arg) or shared.Building.is_ar(arg):
             input_files.append((i, arg))
           elif shared.Building.is_wasm(arg):
             if not shared.Settings.WASM_BACKEND:
               exit_with_error('fastcomp is not compatible with wasm object files:' + arg)
             input_files.append((i, arg))
-          elif file_suffix.endswith(STATICLIB_ENDINGS + DYNAMICLIB_ENDINGS):
+          elif file_suffix in (STATICLIB_ENDINGS + DYNAMICLIB_ENDINGS):
             # if it's not, and it's a library, just add it to libs to find later
             libname = unsuffixed_basename(arg)
             for prefix in LIB_PREFIXES:
@@ -1050,7 +1030,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             newargs[i] = ''
           else:
             diagnostics.warning('invalid-input', arg + ' is not a valid input file')
-        elif file_suffix.endswith(STATICLIB_ENDINGS):
+        elif file_suffix in STATICLIB_ENDINGS:
           if not shared.Building.is_ar(arg):
             if shared.Building.is_bitcode(arg):
               message = arg + ': File has a suffix of a static library ' + str(STATICLIB_ENDINGS) + ', but instead is an LLVM bitcode file! When linking LLVM bitcode files, use one of the suffixes ' + str(OBJECT_FILE_ENDINGS)
@@ -2171,26 +2151,25 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # First, generate LLVM bitcode. For each input file, we get base.o with bitcode
       for i, input_file in input_files:
-        file_ending = get_file_suffix(input_file)
-        if file_ending.endswith(SOURCE_ENDINGS) or (has_dash_c and file_ending == '.bc'):
+        file_suffix = get_file_suffix(input_file)
+        if file_suffix in SOURCE_ENDINGS or (has_dash_c and file_suffix == '.bc'):
           compile_source_file(i, input_file)
         else:
-          if file_ending.endswith(OBJECT_FILE_ENDINGS):
+          if file_suffix in OBJECT_FILE_ENDINGS:
             logger.debug('using object file: ' + input_file)
             temp_files.append((i, input_file))
-          elif file_ending.endswith(DYNAMICLIB_ENDINGS):
+          elif file_suffix in DYNAMICLIB_ENDINGS:
             logger.debug('using shared library: ' + input_file)
             temp_files.append((i, input_file))
           elif shared.Building.is_ar(input_file):
             logger.debug('using static library: ' + input_file)
             ensure_archive_index(input_file)
             temp_files.append((i, input_file))
-          elif file_ending.endswith(ASSEMBLY_ENDINGS):
-            if not LEAVE_INPUTS_RAW:
-              logger.debug('assembling assembly file: ' + input_file)
-              temp_file = in_temp(unsuffixed(uniquename(input_file)) + '.o')
-              shared.Building.llvm_as(input_file, temp_file)
-              temp_files.append((i, temp_file))
+          elif file_suffix in ASSEMBLY_ENDINGS:
+            logger.debug('assembling assembly file: ' + input_file)
+            temp_file = in_temp(unsuffixed(uniquename(input_file)) + '.o')
+            shared.Building.llvm_as(input_file, temp_file)
+            temp_files.append((i, temp_file))
           elif has_fixed_language_mode:
             compile_source_file(i, input_file)
           elif input_file == '-':
@@ -2202,14 +2181,14 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     log_time('compile inputs')
 
     with ToolchainProfiler.profile_block('process inputs'):
-      if not LEAVE_INPUTS_RAW and not shared.Settings.WASM_BACKEND:
+      if not shared.Settings.WASM_BACKEND:
         assert len(temp_files) == len(input_files)
 
         # Optimize source files
         if optimizing(options.llvm_opts):
           for pos, (_, input_file) in enumerate(input_files):
-            file_ending = get_file_suffix(input_file)
-            if file_ending.endswith(SOURCE_ENDINGS):
+            file_suffix = get_file_suffix(input_file)
+            if file_suffix in SOURCE_ENDINGS:
               temp_file = temp_files[pos][1]
               logger.debug('optimizing %s', input_file)
               new_temp_file = in_temp(unsuffixed(uniquename(temp_file)) + '.o')
@@ -2289,8 +2268,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     with ToolchainProfiler.profile_block('calculate system libraries'):
       # link in ports and system libraries, if necessary
-      if not LEAVE_INPUTS_RAW and \
-         not shared.Settings.BOOTSTRAPPING_STRUCT_INFO and \
+      if not shared.Settings.BOOTSTRAPPING_STRUCT_INFO and \
          not shared.Settings.SIDE_MODULE: # shared libraries/side modules link no C libraries, need them in parent
         extra_files_to_link = system_libs.get_ports(shared.Settings)
         if '-nostdlib' not in newargs and '-nodefaultlibs' not in newargs:
@@ -2327,7 +2305,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # First, combine the bitcode files if there are several. We must also link if we have a singleton .a
       perform_link = len(linker_inputs) > 1 or shared.Settings.WASM_BACKEND
-      if not perform_link and not LEAVE_INPUTS_RAW:
+      if not perform_link:
         is_bc = suffix(temp_files[0][1]) in OBJECT_FILE_ENDINGS
         is_dylib = suffix(temp_files[0][1]) in DYNAMICLIB_ENDINGS
         is_ar = shared.Building.is_ar(temp_files[0][1])
@@ -2352,21 +2330,15 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           final = shared.Building.link(linker_inputs, DEFAULT_FINAL, force_archive_contents=force_archive_contents, just_calculate=just_calculate)
       else:
         logger.debug('skipping linking: ' + str(linker_inputs))
-        if not LEAVE_INPUTS_RAW:
-          _, temp_file = temp_files[0]
-          _, input_file = input_files[0]
-          final = in_temp(target_basename + '.bc')
-          if temp_file != input_file:
-            mylog.log_move(temp_file, final)
-            shutil.move(temp_file, final)
-          else:
-            mylog.log_copy(temp_file, final)
-            shutil.copyfile(temp_file, final)
+        temp_file = temp_files[0][1]
+        input_file = input_files[0][1]
+        final = in_temp(target_basename + '.bc')
+        if temp_file != input_file:
+          mylog.log_move(temp_file, final)
+          shutil.move(temp_file, final)
         else:
-          _, input_file = input_files[0]
-          final = in_temp(input_file)
-          mylog.log_copy(input_file, final)
-          shutil.copyfile(input_file, final)
+          mylog.log_copy(temp_file, final)
+          shutil.copyfile(temp_file, final)
 
     # exit block 'link'
     log_time('link')
@@ -2375,64 +2347,60 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       with ToolchainProfiler.profile_block('post-link'):
         if DEBUG:
           logger.debug('saving intermediate processing steps to %s', shared.get_emscripten_temp_dir())
-          if not LEAVE_INPUTS_RAW:
-            save_intermediate('basebc', 'bc')
+          save_intermediate('basebc', 'bc')
 
         # Optimize, if asked to
-        if not LEAVE_INPUTS_RAW:
-          # remove LLVM debug if we are not asked for it
+        # remove LLVM debug if we are not asked for it
+        link_opts = []
+        if not need_llvm_debug_info(options):
+          link_opts += ['-strip-debug']
+        if not shared.Settings.ASSERTIONS:
+          link_opts += ['-disable-verify']
+        else:
+          # when verifying, LLVM debug info has some tricky linking aspects, and llvm-link will
+          # disable the type map in that case. we added linking to opt, so we need to do
+          # something similar, which we can do with a param to opt
+          link_opts += ['-disable-debug-info-type-map']
+
+        if options.llvm_lto is not None and options.llvm_lto >= 2 and optimizing(options.llvm_opts):
+          logger.debug('running LLVM opts as pre-LTO')
+          final = shared.Building.llvm_opt(final, options.llvm_opts, DEFAULT_FINAL)
+          save_intermediate('opt', 'bc')
+
+        # If we can LTO, do it before dce, since it opens up dce opportunities
+        if (not shared.Settings.LINKABLE) and options.llvm_lto and options.llvm_lto != 2:
+          if not shared.Building.can_inline():
+            link_opts.append('-disable-inlining')
+          # add a manual internalize with the proper things we need to be kept alive during lto
+          link_opts += shared.Building.get_safe_internalize() + ['-std-link-opts']
+          # execute it now, so it is done entirely before we get to the stage of legalization etc.
+          final = shared.Building.llvm_opt(final, link_opts, DEFAULT_FINAL)
+          save_intermediate('lto', 'bc')
           link_opts = []
-          if not need_llvm_debug_info(options):
-            link_opts += ['-strip-debug']
-          if not shared.Settings.ASSERTIONS:
-            link_opts += ['-disable-verify']
-          else:
-            # when verifying, LLVM debug info has some tricky linking aspects, and llvm-link will
-            # disable the type map in that case. we added linking to opt, so we need to do
-            # something similar, which we can do with a param to opt
-            link_opts += ['-disable-debug-info-type-map']
+        else:
+          # At minimum remove dead functions etc., this potentially saves a
+          # lot in the size of the generated code (and the time to compile it)
+          link_opts += shared.Building.get_safe_internalize() + ['-globaldce']
 
-          if options.llvm_lto is not None and options.llvm_lto >= 2 and optimizing(options.llvm_opts):
-            logger.debug('running LLVM opts as pre-LTO')
-            final = shared.Building.llvm_opt(final, options.llvm_opts, DEFAULT_FINAL)
-            save_intermediate('opt', 'bc')
+        if options.cfi:
+          if use_cxx:
+             link_opts.append("-wholeprogramdevirt")
+          link_opts.append("-lowertypetests")
 
-          # If we can LTO, do it before dce, since it opens up dce opportunities
-          if (not shared.Settings.LINKABLE) and options.llvm_lto and options.llvm_lto != 2:
-            if not shared.Building.can_inline():
-              link_opts.append('-disable-inlining')
-            # add a manual internalize with the proper things we need to be kept alive during lto
-            link_opts += shared.Building.get_safe_internalize() + ['-std-link-opts']
-            # execute it now, so it is done entirely before we get to the stage of legalization etc.
+        if shared.Settings.AUTODEBUG:
+          # let llvm opt directly emit ll, to skip writing and reading all the bitcode
+          link_opts += ['-S']
+          final = shared.Building.llvm_opt(final, link_opts, get_final() + '.link.ll')
+          save_intermediate('linktime', 'll')
+        else:
+          if len(link_opts) > 0:
             final = shared.Building.llvm_opt(final, link_opts, DEFAULT_FINAL)
-            save_intermediate('lto', 'bc')
-            link_opts = []
-          else:
-            # At minimum remove dead functions etc., this potentially saves a
-            # lot in the size of the generated code (and the time to compile it)
-            link_opts += shared.Building.get_safe_internalize() + ['-globaldce']
-
-          if options.cfi:
-            if use_cxx:
-               link_opts.append("-wholeprogramdevirt")
-            link_opts.append("-lowertypetests")
-
-          if shared.Settings.AUTODEBUG:
-            # let llvm opt directly emit ll, to skip writing and reading all the bitcode
-            link_opts += ['-S']
-            final = shared.Building.llvm_opt(final, link_opts, get_final() + '.link.ll')
-            save_intermediate('linktime', 'll')
-          else:
-            if len(link_opts) > 0:
-              final = shared.Building.llvm_opt(final, link_opts, DEFAULT_FINAL)
-              save_intermediate('linktime', 'bc')
-            if options.save_bc:
-              mylog.log_copy(final, options.save_bc)
-              shutil.copyfile(final, options.save_bc)
+            save_intermediate('linktime', 'bc')
+          if options.save_bc:
+            mylog.log_copy(final, options.save_bc)
+            shutil.copyfile(final, options.save_bc)
 
         # Prepare .ll for Emscripten
-        if LEAVE_INPUTS_RAW:
-          assert len(input_files) == 1
         if options.save_bc:
           save_intermediate('ll', 'll')
 
