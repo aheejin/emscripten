@@ -63,16 +63,17 @@ C_ENDINGS = ('.c', '.i')
 CXX_ENDINGS = ('.cpp', '.cxx', '.cc', '.c++', '.CPP', '.CXX', '.C', '.CC', '.C++', '.ii')
 OBJC_ENDINGS = ('.m', '.mi')
 OBJCXX_ENDINGS = ('.mm', '.mii')
+ASSEMBLY_CPP_ENDINGS = ('.S',)
 SPECIAL_ENDINGLESS_FILENAMES = ('/dev/null' if not WINDOWS else 'NUL',)
 
-SOURCE_ENDINGS = C_ENDINGS + CXX_ENDINGS + OBJC_ENDINGS + OBJCXX_ENDINGS + SPECIAL_ENDINGLESS_FILENAMES
+SOURCE_ENDINGS = C_ENDINGS + CXX_ENDINGS + OBJC_ENDINGS + OBJCXX_ENDINGS + SPECIAL_ENDINGLESS_FILENAMES + ASSEMBLY_CPP_ENDINGS
 C_ENDINGS = C_ENDINGS + SPECIAL_ENDINGLESS_FILENAMES # consider the special endingless filenames like /dev/null to be C
 
 JS_CONTAINING_ENDINGS = ('.js', '.mjs', '.html')
 OBJECT_FILE_ENDINGS = ('.bc', '.o', '.obj', '.lo')
 DYNAMICLIB_ENDINGS = ('.dylib', '.so') # Windows .dll suffix is not included in this list, since those are never linked to directly on the command line.
 STATICLIB_ENDINGS = ('.a',)
-ASSEMBLY_ENDINGS = ('.ll',)
+ASSEMBLY_ENDINGS = ('.ll', '.s')
 HEADER_ENDINGS = ('.h', '.hxx', '.hpp', '.hh', '.H', '.HXX', '.HPP', '.HH')
 WASM_ENDINGS = ('.wasm',)
 
@@ -711,11 +712,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     logger.debug('treating -s as linker option and not as -s OPT=VALUE for js compilation')
     return False
 
-  # If this is a configure-type thing, do not compile to JavaScript, instead use clang
-  # to compile to a native binary (using our headers, so things make sense later)
-  CONFIGURE_CONFIG = (os.environ.get('EMMAKEN_JUST_CONFIGURE') or 'conftest.c' in args) and not os.environ.get('EMMAKEN_JUST_CONFIGURE_RECURSE')
-  CMAKE_CONFIG = 'CMakeFiles/cmTryCompileExec.dir' in ' '.join(args)
-  if CONFIGURE_CONFIG or CMAKE_CONFIG:
+  CONFIGURE_CONFIG = os.environ.get('EMMAKEN_JUST_CONFIGURE') or 'conftest.c' in args
+  if CONFIGURE_CONFIG and not os.environ.get('EMMAKEN_JUST_CONFIGURE_RECURSE'):
     # XXX use this to debug configure stuff. ./configure's generally hide our
     # normal output including stderr so we write to a file
     debug_configure = 0
@@ -725,33 +723,23 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if not os.path.exists(tempout):
         open(tempout, 'w').write('//\n')
 
-    src = None
-    for arg in args:
-      if arg.endswith(SOURCE_ENDINGS):
-        try:
-          src = open(arg).read()
-          if debug_configure:
+    if debug_configure:
+      for arg in args:
+        if arg.endswith(SOURCE_ENDINGS):
+          try:
+            src = open(arg).read()
             open(tempout, 'a').write('============= ' + arg + '\n' + src + '\n=============\n\n')
-        except IOError:
-          pass
+          except IOError:
+            pass
 
     if run_via_emxx:
       compiler = [shared.PYTHON, shared.EMXX]
     else:
       compiler = [shared.PYTHON, shared.EMCC]
 
-    def filter_emscripten_options(argv):
-      skip_next = False
-      for idx, arg in enumerate(argv):
-        if skip_next:
-          skip_next = False
-          continue
-        if arg != '--tracing':
-          yield arg
-
-    cmd = compiler + list(filter_emscripten_options(args))
+    cmd = compiler + [a for a in args if a != '--tracing']
     # configure tests want a more shell-like style, where we emit return codes on exit()
-    cmd += ['-s', 'NO_EXIT_RUNTIME=0']
+    cmd += ['-s', 'EXIT_RUNTIME=1']
     # use node.js raw filesystem access, to behave just like a native executable
     cmd += ['-s', 'NODERAWFS=1']
 
@@ -771,24 +759,20 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     os.environ['EMMAKEN_JUST_CONFIGURE_RECURSE'] = '1'
     ret = run_process(cmd, check=False).returncode
     os.environ['EMMAKEN_JUST_CONFIGURE_RECURSE'] = ''
-    if not os.path.exists(target):
-      # note that emcc -c will cause target to have the wrong value here;
-      # but then, we don't care about bitcode outputs anyhow, below, so
-      # skipping returning early is fine
-      return ret
-    if target.endswith('.js'):
-      shutil.copyfile(target, unsuffixed(target))
-      target = unsuffixed(target)
-    if not target.endswith(OBJECT_FILE_ENDINGS):
-      src = open(target).read()
-      full_node = ' '.join(shared.NODE_JS)
-      if os.path.sep not in full_node:
-        full_node = '/usr/bin/' + full_node # TODO: use whereis etc. And how about non-*NIX?
-      open(target, 'w').write('#!' + full_node + '\n' + src) # add shebang
-      try:
-        os.chmod(target, stat.S_IMODE(os.stat(target).st_mode) | stat.S_IXUSR) # make executable
-      except OSError:
-        pass # can fail if e.g. writing the executable to /dev/null
+    if ret == 0:
+      if target.endswith('.js'):
+        shutil.copyfile(target, unsuffixed(target))
+        target = unsuffixed(target)
+      if not target.endswith(OBJECT_FILE_ENDINGS):
+        src = open(target).read()
+        full_node = ' '.join(shared.NODE_JS)
+        if os.path.sep not in full_node:
+          full_node = '/usr/bin/' + full_node # TODO: use whereis etc. And how about non-*NIX?
+        open(target, 'w').write('#!' + full_node + '\n' + src) # add shebang
+        try:
+          os.chmod(target, stat.S_IMODE(os.stat(target).st_mode) | stat.S_IXUSR) # make executable
+        except OSError:
+          pass # can fail if e.g. writing the executable to /dev/null
     return ret
 
   CXX = os.environ.get('EMMAKEN_COMPILER', shared.CLANG_CXX)
@@ -1290,12 +1274,15 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         newargs.append(f)
         add_link_flag(len(newargs), f)
 
+    # Flags we pass to the compiler when building C/C++ code
+    # We add these to the user's flags (newargs), but not when building .s or .S assembly files
+    cflags = shared.get_cflags(newargs)
+
     if not shared.Settings.STRICT:
       # The preprocessor define EMSCRIPTEN is deprecated. Don't pass it to code
       # in strict mode. Code should use the define __EMSCRIPTEN__ instead.
-      newargs += ['-DEMSCRIPTEN']
+      cflags.append('-DEMSCRIPTEN')
 
-    newargs = shared.get_cflags(newargs) + newargs
     if not link_to_object and not compile_only and final_suffix not in executable_endings:
       # TODO(sbc): Remove this emscripten-specific special case.
       diagnostics.warning('emcc', 'Assuming object file output in the absence of `-c`, based on output filename. Add with `-c` or `-r` to avoid this warning')
@@ -1348,7 +1335,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       next_arg_index += 1
       shared.Settings.EXPORTED_FUNCTIONS += ['_stbi_load', '_stbi_load_from_memory', '_stbi_image_free']
       # stb_image 2.x need to have STB_IMAGE_IMPLEMENTATION defined to include the implementation when compiling
-      newargs.append('-DSTB_IMAGE_IMPLEMENTATION')
+      cflags.append('-DSTB_IMAGE_IMPLEMENTATION')
 
     if shared.Settings.USE_WEBGL2:
       shared.Settings.MAX_WEBGL_VERSION = 2
@@ -1357,7 +1344,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if shared.Settings.ASMFS and final_suffix in JS_CONTAINING_ENDINGS:
       forced_stdlibs.append('libasmfs')
-      newargs.append('-D__EMSCRIPTEN_ASMFS__=1')
+      cflags.append('-D__EMSCRIPTEN_ASMFS__=1')
       next_arg_index += 1
       shared.Settings.FILESYSTEM = 0
       shared.Settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
@@ -1445,7 +1432,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # if exception catching is disabled, we can prevent that code from being
     # generated in the frontend
     if shared.Settings.DISABLE_EXCEPTION_CATCHING == 1 and shared.Settings.WASM_BACKEND and not shared.Settings.EXCEPTION_HANDLING:
-      newargs.append('-fignore-exceptions')
+      cflags.append('-fignore-exceptions')
 
     if shared.Settings.DEAD_FUNCTIONS:
       if not options.js_opts:
@@ -1474,7 +1461,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       # to flush streams on FS exit, we need to be able to call fflush
       # we only include it if the runtime is exitable, or when ASSERTIONS
       # (ASSERTIONS will check that streams do not need to be flushed,
-      # helping people see when they should have disabled NO_EXIT_RUNTIME)
+      # helping people see when they should have enabled EXIT_RUNTIME)
       if shared.Settings.EXIT_RUNTIME or shared.Settings.ASSERTIONS:
         shared.Settings.EXPORTED_FUNCTIONS += ['_fflush']
 
@@ -1509,7 +1496,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       # UTF8Decoder.decode doesn't work with a view of a SharedArrayBuffer
       shared.Settings.TEXTDECODER = 0
       shared.Settings.SYSTEM_JS_LIBRARIES.append(shared.path_from_root('src', 'library_pthread.js'))
-      newargs.append('-D__EMSCRIPTEN_PTHREADS__=1')
+      cflags.append('-D__EMSCRIPTEN_PTHREADS__=1')
       if shared.Settings.WASM_BACKEND:
         newargs += ['-pthread']
         # some pthreads code is in asm.js library functions, which are auto-exported; for the wasm backend, we must
@@ -1923,9 +1910,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           passes += parse_passes(shared.Settings.BINARYEN_EXTRA_PASSES)
         options.binaryen_passes = passes
 
-        # to bootstrap struct_info, we need binaryen
-        os.environ['EMCC_WASM_BACKEND_BINARYEN'] = '1'
-
       # run safe-heap as a binaryen pass in fastcomp wasm, while in the wasm backend we
       # run it in binaryen_passes so that it can be synchronized with the sbrk ptr
       if shared.Settings.SAFE_HEAP and shared.Building.is_wasm_only() and not shared.Settings.WASM_BACKEND:
@@ -1991,6 +1975,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       newargs.append('-g')
 
     if options.tracing:
+      cflags.append('-D__EMSCRIPTEN_TRACING__=1')
       if shared.Settings.ALLOW_MEMORY_GROWTH:
         shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['emscripten_trace_report_memory_layout']
 
@@ -2073,17 +2058,17 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # For asm.js, the generated JavaScript could preserve LLVM value names, which can be useful for debugging.
       if shared.Settings.DEBUG_LEVEL >= 3 and not shared.Settings.WASM and not shared.Settings.WASM_BACKEND:
-        compile_args.append('-fno-discard-value-names')
+        cflags.append('-fno-discard-value-names')
 
       if not shared.Building.can_inline():
-        compile_args.append('-fno-inline-functions')
+        cflags.append('-fno-inline-functions')
 
       # For fastcomp backend, no LLVM IR functions should ever be annotated
       # 'optnone', because that would skip running the SimplifyCFG pass on
       # them, which is required to always run to clean up LandingPadInst
       # instructions that are not needed.
       if not shared.Settings.WASM_BACKEND:
-        compile_args += ['-Xclang', '-disable-O0-optnone']
+        cflags += ['-Xclang', '-disable-O0-optnone']
 
       # Precompiled headers support
       if has_header_inputs:
@@ -2091,17 +2076,20 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         for header in headers:
           if not header.endswith(HEADER_ENDINGS):
             exit_with_error('cannot mix precompile headers with non-header inputs: ' + str(headers) + ' : ' + header)
-        args = compile_args + headers
+        args = cflags + compile_args + headers
         if specified_target:
           args += ['-o', specified_target]
         args = system_libs.process_args(args, shared.Settings)
         logger.debug("running (for precompiled headers): " + clang_compiler + ' ' + ' '.join(args))
         return run_process([clang_compiler] + args, check=False).returncode
 
-      # Bitcode args generation code
       def get_clang_command(input_files):
-        args = [clang_compiler] + compile_args + input_files
+        args = [clang_compiler] + cflags + compile_args + input_files
         return system_libs.process_args(args, shared.Settings)
+
+      def get_clang_command_asm(input_files):
+        asflags = shared.get_asmflags(compile_args)
+        return [clang_compiler] + asflags + compile_args + input_files
 
       # preprocessor-only (-E) support
       if has_dash_E or '-M' in newargs or '-MM' in newargs or '-fsyntax-only' in newargs:
@@ -2129,7 +2117,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         logger.debug('compiling source file: ' + input_file)
         output_file = get_object_filename(input_file)
         temp_files.append((i, output_file))
-        cmd = get_clang_command([input_file]) + ['-c', '-o', output_file]
+        if get_file_suffix(input_file) in ASSEMBLY_ENDINGS:
+          cmd = get_clang_command_asm([input_file])
+        else:
+          cmd = get_clang_command([input_file])
+        cmd += ['-c', '-o', output_file]
         if shared.Settings.WASM_BACKEND and shared.Settings.RELOCATABLE:
           cmd.append('-fPIC')
           cmd.append('-fvisibility=default')
@@ -2168,10 +2160,15 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           ensure_archive_index(input_file)
           temp_files.append((i, input_file))
         elif file_suffix in ASSEMBLY_ENDINGS:
-          logger.debug('assembling assembly file: ' + input_file)
           temp_file = in_temp(unsuffixed(uniquename(input_file)) + '.o')
-          shared.Building.llvm_as(input_file, temp_file)
-          temp_files.append((i, temp_file))
+          if file_suffix == '.ll':
+            logger.debug('assembling assembly file: ' + input_file)
+            shared.Building.llvm_as(input_file, temp_file)
+            temp_files.append((i, temp_file))
+          else:
+            if not shared.Settings.WASM_BACKEND:
+              exit_with_error('assembly files not supported by fastcomp')
+            compile_source_file(i, input_file)
         elif has_fixed_language_mode:
           compile_source_file(i, input_file)
         elif input_file == '-':
@@ -2890,7 +2887,6 @@ def parse_args(newargs):
         options.memory_profiler = True
       options.tracing = True
       newargs[i] = ''
-      newargs.append('-D__EMSCRIPTEN_TRACING__=1')
       settings_changes.append("EMSCRIPTEN_TRACING=1")
       shared.Settings.SYSTEM_JS_LIBRARIES.append(shared.path_from_root('src', 'library_trace.js'))
     elif newargs[i] == '--emit-symbol-map':
