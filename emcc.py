@@ -1388,9 +1388,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if shared.Settings.EMBIND:
       forced_stdlibs.append('libembind')
 
-    if not shared.Settings.MINIMAL_RUNTIME:
-      # Always need malloc and free to be kept alive and exported, for internal use and other
-      # modules
+    if not shared.Settings.MINIMAL_RUNTIME and not shared.Settings.STANDALONE_WASM:
+      # The normal JS runtime depends on malloc and free so always keep them alive.
+      # MINIMAL_RUNTIME avoids this dependency as does STANDALONE_WASM mode (since it has no
+      # JS runtime at all).
       shared.Settings.EXPORTED_FUNCTIONS += ['_malloc', '_free']
 
     if shared.Settings.RELOCATABLE and not shared.Settings.DYNAMIC_EXECUTION:
@@ -2581,7 +2582,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
         # Minify the worker.js file in optimized builds
         if (shared.Settings.OPT_LEVEL >= 1 or shared.Settings.SHRINK_LEVEL >= 1) and not shared.Settings.DEBUG_LEVEL:
-          minified_worker = shared.Building.js_optimizer_no_asmjs(worker_output, ['minifyWhitespace'], acorn=True, return_output=True)
+          minified_worker = shared.Building.acorn_optimizer(worker_output, ['minifyWhitespace'], return_output=True)
           open(worker_output, 'w').write(minified_worker)
 
       # Generate the fetch.js worker script for multithreaded emscripten_fetch() support if targeting pthreads.

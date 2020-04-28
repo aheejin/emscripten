@@ -2148,7 +2148,7 @@ int f() {
         expected = [expected]
       expected = [out.replace('\n\n', '\n').replace('\n\n', '\n') for out in expected]
 
-      acorn = any([p for p in passes if p in ACORN_PASSES])
+      acorn = any(p in ACORN_PASSES for p in passes)
 
       # test calling optimizer
       if not acorn:
@@ -8363,7 +8363,7 @@ int main() {
     # without argc/argv, no support code for them is emitted, even with lto
     'O3_standalone_narg_flto':
                           ('mem_no_argv.c', ['-O3', '-s', 'STANDALONE_WASM', '-flto'],
-                           [], [], 6309),         # noqa
+                           [], [], 4971),         # noqa
   })
   @no_fastcomp()
   def test_metadce_mem(self, filename, *args):
