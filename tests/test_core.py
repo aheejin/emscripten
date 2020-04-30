@@ -2476,11 +2476,16 @@ The current type of b is: 9
     # tests strtoll for decimal strings (0x...)
     self.do_run_in_out_file_test('tests', 'core', 'test_strtol_oct')
 
+  @also_with_standalone_wasm
   def test_atexit(self):
-    # Confirms they are called in reverse order
-    # needs atexits
+    # Confirms they are called in the proper reverse order
     self.set_setting('EXIT_RUNTIME', 1)
     self.do_run_in_out_file_test('tests', 'core', 'test_atexit')
+
+  def test_atexit_threads(self):
+    # also tests thread exit (__cxa_thread_atexit)
+    self.set_setting('EXIT_RUNTIME', 1)
+    self.do_run_in_out_file_test('tests', 'core', 'test_atexit_threads')
 
   @no_asan('test relies on null pointer reads')
   def test_pthread_specific(self):
@@ -4583,7 +4588,7 @@ res64 - external 64\n''', header='''
   @no_wasm_backend('possible https://github.com/emscripten-core/emscripten/issues/9038')
   def test_dylink_dso_needed(self):
     def do_run(src, expected_output):
-      self.do_run(src + 'int main() { return _main(); }', expected_output)
+      self.do_run(src + 'int main() { return test_main(); }', expected_output)
     self._test_dylink_dso_needed(do_run)
 
   @needs_dlfcn
@@ -7857,6 +7862,7 @@ Module['onRuntimeInitialized'] = function() {
 
   @no_wasm_backend('EMTERPRETIFY')
   def test_async_emterpretify(self):
+    self.emcc_args.append('-Wno-emterpreter')
     self.test_async(emterpretify=True)
 
   def test_async_returnvalue(self):
@@ -8080,6 +8086,7 @@ extern "C" {
   @no_wasm_backend('EMTERPRETIFY causes JSOptimizer to run, which is '
                    'unsupported with Wasm backend')
   def test_coroutine_emterpretify_async(self):
+    self.emcc_args.append('-Wno-emterpreter')
     # The same EMTERPRETIFY_WHITELIST should be in other.test_emterpreter_advise
     self.do_test_coroutine({'EMTERPRETIFY': 1, 'EMTERPRETIFY_ASYNC': 1, 'EMTERPRETIFY_WHITELIST': ['_fib', '_f', '_g'], 'ASSERTIONS': 1})
 
@@ -8116,6 +8123,7 @@ extern "C" {
   @no_wasm_backend('EMTERPRETIFY causes JSOptimizer to run, which is '
                    'unsupported with Wasm backend')
   def test_emterpretify(self):
+    self.emcc_args.append('-Wno-emterpreter')
     self.set_setting('EMTERPRETIFY', 1)
     self.do_run_in_out_file_test('tests', 'core', 'test_hello_world')
     print('async')
@@ -8983,7 +8991,7 @@ strict = make_run('strict', emcc_args=['-O2'], settings={'DEFAULT_TO_CXX': 0})
 
 if not shared.Settings.WASM_BACKEND:
   # emterpreter
-  asm2i = make_run('asm2i', emcc_args=['-O2'], settings={'EMTERPRETIFY': 1, 'WASM': 0})
+  asm2i = make_run('asm2i', emcc_args=['-O2', '-Wno-emterpreter'], settings={'EMTERPRETIFY': 1, 'WASM': 0})
 
 if shared.Settings.WASM_BACKEND:
   lsan = make_run('lsan', emcc_args=['-fsanitize=leak'], settings={'ALLOW_MEMORY_GROWTH': 1})
