@@ -17,6 +17,9 @@ See docs/process.md for how version tagging works.
 
 Current Trunk
 -------------
+
+1.39.14: 05/01/2020
+-------------------
 - Update SDL2 to latest in ports, which has recently been updated to include
   upstream 2.0.10.
 - Add warning on use of `EMTERPRETIFY` which is soon to be removed.
@@ -31,6 +34,8 @@ Current Trunk
 - Remove undocumented and untested config settings: `COMPILER_OPTS`.  This was
   a global setting in the emscripten config file that would inject extra
   compiler options.
+- Allow spaces in a path to Python interpreter when running emscripten from Unix
+  shell (#11005).
 
 v1.39.13: 04/17/2020
 --------------------
