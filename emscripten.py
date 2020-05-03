@@ -823,6 +823,7 @@ def apply_memory(js):
   logger.debug('global_base: %d stack_base: %d, stack_max: %d, dynamic_base: %d, static bump: %d', memory.global_base, memory.stack_base, memory.stack_max, memory.dynamic_base, memory.static_bump)
 
   shared.Settings.DYNAMIC_BASE = memory.dynamic_base
+  shared.Settings.STACK_BASE = memory.stack_base
 
   return js
 
@@ -1841,7 +1842,14 @@ Module['%(full)s'] = function() {
 
 def create_named_globals(metadata):
   if not shared.Settings.RELOCATABLE:
-    return ''
+    named_globals = []
+    for k, v in metadata['namedGlobals'].items():
+      # We keep __data_end alive internally so that wasm-emscripten-finalize knows where the
+      # static data region ends.  Don't export this to JS like other user-exported global
+      # address.
+      if k not in ['__data_end']:
+        named_globals.append("Module['_%s'] = %s;" % (k, v))
+    return '\n'.join(named_globals)
 
   named_globals = '''
 var NAMED_GLOBALS = {
@@ -1866,7 +1874,7 @@ for (var named in NAMED_GLOBALS) {
   })(named);
 }
 '''
-  named_globals += ''.join(["Module['%s'] = Module['%s']\n" % (k, v) for k, v in metadata['aliases'].items()])
+  named_globals += ''.join(["Module['%s'] = Module['%s'];\n" % (k, v) for k, v in metadata['aliases'].items()])
   return named_globals
 
 
