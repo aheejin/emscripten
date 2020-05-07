@@ -36,7 +36,6 @@ ZERO = False
 ASYNC = False
 ASSERTIONS = False
 PROFILING = False
-SWAPPABLE = False
 FROUND = False
 ADVISE = False
 MEMORY_SAFE = False
@@ -800,9 +799,6 @@ if __name__ == '__main__':
   if len(sys.argv) >= 6:
     SYNC_FUNCS.update(read_json_list(sys.argv[5]))
 
-  if len(sys.argv) >= 7:
-    SWAPPABLE = int(sys.argv[6])
-
   if ADVISE:
     # Advise the user on which functions should likely be emterpreted
     data = shared.Building.calculate_reachable_functions(infile, list(SYNC_FUNCS))
@@ -832,7 +828,7 @@ if __name__ == '__main__':
 
   BLACKLIST = set(list(BLACKLIST) + extra_blacklist)
 
-  if DEBUG or SWAPPABLE:
+  if DEBUG:
     orig = infile + '.orig.js'
     shared.logger.debug('saving original (non-emterpreted) code to ' + orig)
     mylog.log_copy(infile, orig)
