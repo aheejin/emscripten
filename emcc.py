@@ -623,14 +623,11 @@ def run(args):
   if '--help' in args:
     # Documentation for emcc and its options must be updated in:
     #    site/source/docs/tools_reference/emcc.rst
-    # A prebuilt local version of the documentation is available at:
+    # This then gets built (via: `make -C site text`) to:
     #    site/build/text/docs/tools_reference/emcc.txt
-    #    (it is read from there and printed out when --help is invoked)
-    # You can also build docs locally as HTML or other formats in site/
-    # An online HTML version (which may be of a different version of Emscripten)
-    #    is up at http://kripken.github.io/emscripten-site/docs/tools_reference/emcc.html
-
-    with open(shared.path_from_root('site', 'build', 'text', 'docs', 'tools_reference', 'emcc.txt'), 'r') as f:
+    # This then needs to be copied to its final home in docs/emcc.txt from where
+    # we read it here.  We have CI rules that ensure its always up-to-date.
+    with open(shared.path_from_root('docs', 'emcc.txt'), 'r') as f:
       print(f.read())
 
     print('''
@@ -1181,7 +1178,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     input_files = filter_out_dynamic_libs(input_files)
 
-    if len(input_files) == 0:
+    if not input_files and not link_flags:
       exit_with_error('no input files\nnote that input files without a known suffix are ignored, make sure your input files end with one of: ' + str(SOURCE_ENDINGS + OBJECT_FILE_ENDINGS + DYNAMICLIB_ENDINGS + STATICLIB_ENDINGS + ASSEMBLY_ENDINGS + HEADER_ENDINGS))
 
     # Note the exports the user requested
@@ -2352,6 +2349,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
             js_funcs = get_all_js_syms(misc_temp_files)
             log_time('JS symbol generation')
           final = shared.Building.link_lld(linker_inputs, DEFAULT_FINAL, external_symbol_list=js_funcs)
+          # Special handling for when the user passed '-Wl,--version'.  In this case the linker
+          # does not create the output file, but just prints its version and exits with 0.
+          if '--version' in linker_inputs:
+            return 0
         else:
           final = shared.Building.link(linker_inputs, DEFAULT_FINAL, force_archive_contents=force_archive_contents, just_calculate=just_calculate)
       else:
@@ -2971,9 +2972,6 @@ def parse_args(newargs):
     elif newargs[i] == '--jcache':
       logger.error('jcache is no longer supported')
       newargs[i] = ''
-    elif check_arg('--cache'):
-      os.environ['EM_CACHE'] = os.path.normpath(consume_arg())
-      shared.reconfigure_cache()
     elif newargs[i] == '--clear-cache':
       logger.info('clearing cache as requested by --clear-cache')
       shared.Cache.erase()
