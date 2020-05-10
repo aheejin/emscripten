@@ -58,13 +58,15 @@ except ImportError:
 
 logger = logging.getLogger('emcc')
 
+DEV_NULL = '/dev/null' if not WINDOWS else 'NUL'
+
 # endings = dot + a suffix, safe to test by  filename.endswith(endings)
 C_ENDINGS = ('.c', '.i')
 CXX_ENDINGS = ('.cpp', '.cxx', '.cc', '.c++', '.CPP', '.CXX', '.C', '.CC', '.C++', '.ii')
 OBJC_ENDINGS = ('.m', '.mi')
 OBJCXX_ENDINGS = ('.mm', '.mii')
 ASSEMBLY_CPP_ENDINGS = ('.S',)
-SPECIAL_ENDINGLESS_FILENAMES = ('/dev/null' if not WINDOWS else 'NUL',)
+SPECIAL_ENDINGLESS_FILENAMES = (DEV_NULL,)
 
 SOURCE_ENDINGS = C_ENDINGS + CXX_ENDINGS + OBJC_ENDINGS + OBJCXX_ENDINGS + SPECIAL_ENDINGLESS_FILENAMES + ASSEMBLY_CPP_ENDINGS
 C_ENDINGS = C_ENDINGS + SPECIAL_ENDINGLESS_FILENAMES # consider the special endingless filenames like /dev/null to be C
@@ -955,7 +957,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     has_dash_S = '-S' in newargs
     has_dash_E = '-E' in newargs
     link_to_object = False
-    executable_endings = JS_CONTAINING_ENDINGS + ('.wasm',)
     compile_only = has_dash_c or has_dash_S or has_dash_E
 
     def add_link_flag(i, f):
@@ -1092,6 +1093,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if final_suffix == '.mjs':
       shared.Settings.EXPORT_ES6 = 1
       shared.Settings.MODULARIZE = 1
+
+    if final_suffix in ('.mjs', '.js', ''):
       js_target = target
     else:
       js_target = unsuffixed(target) + '.js'
@@ -1307,8 +1310,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       # in strict mode. Code should use the define __EMSCRIPTEN__ instead.
       cflags.append('-DEMSCRIPTEN')
 
+    # Treat the empty extension as an executable, to handle the commond case of `emcc -o foo foo.c`
+    executable_endings = JS_CONTAINING_ENDINGS + WASM_ENDINGS + ('',)
     if not link_to_object and not compile_only and final_suffix not in executable_endings:
-      # TODO(sbc): Remove this emscripten-specific special case.
+      # TODO(sbc): Remove this emscripten-specific special case.  We should only generate object
+      # file output with an explicit `-c` or `-r`.
       diagnostics.warning('emcc', 'Assuming object file output in the absence of `-c`, based on output filename. Add with `-c` or `-r` to avoid this warning')
       link_to_object = True
 
@@ -1321,9 +1327,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if shared.Settings.MODULARIZE:
       assert not options.proxy_to_worker, '-s MODULARIZE=1 is not compatible with --proxy-to-worker (if you want to run in a worker with -s MODULARIZE=1, you likely want to do the worker side setup manually)'
-      # MODULARIZE's .then() method uses onRuntimeInitialized currently, so make sure
-      # it is expected to be used.
-      shared.Settings.INCOMING_MODULE_JS_API += ['onRuntimeInitialized']
 
     if shared.Settings.EMULATE_FUNCTION_POINTER_CASTS:
       shared.Settings.ALIASING_FUNCTION_POINTERS = 0
@@ -2258,6 +2261,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         diagnostics.warning('unused-command-line-argument', "argument unused during compilation: '%s'" % flag[1])
       return 0
 
+    if specified_target and specified_target.startswith('-'):
+      exit_with_error('invalid output filename: `%s`' % specified_target)
+
     using_lld = shared.Settings.WASM_BACKEND and not (link_to_object and shared.Settings.LTO)
     link_flags = filter_link_flags(link_flags, using_lld)
 
@@ -2442,6 +2448,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # exit block 'post-link'
       log_time('post-link')
+
+    if target == DEV_NULL:
+      # TODO(sbc): In theory we should really run the whole pipeline even if the output is
+      # /dev/null, but that will take some refactoring
+      return 0
 
     with ToolchainProfiler.profile_block('emscript'):
       # Emscripten
@@ -3419,22 +3430,17 @@ def modularize():
   logger.debug('Modularizing, assigning to var ' + shared.Settings.EXPORT_NAME)
   src = open(final).read()
 
-  # TODO: exports object generation for MINIMAL_RUNTIME. As a temp measure, multithreaded MINIMAL_RUNTIME builds export like regular
-  # runtime does, so that worker.js can see the JS module contents.
-  exports_object = '{}' if shared.Settings.MINIMAL_RUNTIME and not shared.Settings.USE_PTHREADS else shared.Settings.EXPORT_NAME
-
   src = '''
 function(%(EXPORT_NAME)s) {
   %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
 
 %(src)s
 
-  return %(exports_object)s
+  return %(EXPORT_NAME)s.ready;
 }
 ''' % {
     'EXPORT_NAME': shared.Settings.EXPORT_NAME,
     'src': src,
-    'exports_object': exports_object
   }
 
   if shared.Settings.MINIMAL_RUNTIME and not shared.Settings.USE_PTHREADS:
