@@ -1330,6 +1330,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if shared.Settings.MODULARIZE:
       assert not options.proxy_to_worker, '-s MODULARIZE=1 is not compatible with --proxy-to-worker (if you want to run in a worker with -s MODULARIZE=1, you likely want to do the worker side setup manually)'
+      # in MINIMAL_RUNTIME we may not need to emit the Promise code, as the
+      # HTML output creates a singleton instance, and it does so without the
+      # Promise. However, in Pthreads mode the Promise is used for worker
+      # creation.
+      if shared.Settings.MINIMAL_RUNTIME and final_suffix == '.html' and \
+         not shared.Settings.USE_PTHREADS:
+        shared.Settings.EXPORT_READY_PROMISE = 0
 
     if shared.Settings.EMULATE_FUNCTION_POINTER_CASTS:
       shared.Settings.ALIASING_FUNCTION_POINTERS = 0
@@ -1523,6 +1530,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if not shared.Settings.DECLARE_ASM_MODULE_EXPORTS:
       shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$exportAsmFunctions']
+
+    if shared.Settings.ALLOW_MEMORY_GROWTH and 'ABORTING_MALLOC=1' not in settings_changes:
+      # Setting ALLOW_MEMORY_GROWTH turns off ABORTING_MALLOC, as in that mode we default to
+      # the behavior of trying to grow and returning 0 from malloc on failure, like
+      # a standard system would. However, if the user sets the flag it
+      # overrides that.
+      shared.Settings.ABORTING_MALLOC = 0
 
     if shared.Settings.USE_PTHREADS:
       if shared.Settings.USE_PTHREADS == 2:
@@ -3438,17 +3452,22 @@ def modularize():
   logger.debug('Modularizing, assigning to var ' + shared.Settings.EXPORT_NAME)
   src = open(final).read()
 
+  return_value = shared.Settings.EXPORT_NAME + '.ready'
+  if not shared.Settings.EXPORT_READY_PROMISE:
+    return_value = '{}'
+
   src = '''
 function(%(EXPORT_NAME)s) {
   %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
 
 %(src)s
 
-  return %(EXPORT_NAME)s.ready;
+  return %(return_value)s
 }
 ''' % {
     'EXPORT_NAME': shared.Settings.EXPORT_NAME,
     'src': src,
+    'return_value': return_value
   }
 
   if shared.Settings.MINIMAL_RUNTIME and not shared.Settings.USE_PTHREADS:

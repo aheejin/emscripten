@@ -6183,7 +6183,7 @@ int main() {
       ('EM_ASM( Module.temp = HEAP32[DYNAMICTOP_PTR>>2] );', 'EM_ASM( assert(Module.temp === HEAP32[DYNAMICTOP_PTR>>2], "must not adjust DYNAMICTOP when an alloc fails!") );', ['-s', 'WASM=0']),
     ]:
       for growth in [0, 1]:
-        for aborting in [0, 1]:
+        for aborting_args in [[], ['-s', 'ABORTING_MALLOC=0'], ['-s', 'ABORTING_MALLOC=1']]:
           create_test_file('main.cpp', r'''
 #include <stdio.h>
 #include <stdlib.h>
@@ -6224,18 +6224,18 @@ int main() {
   printf("managed another malloc!\n");
 }
 ''' % (pre_fail, post_fail))
-          args = [PYTHON, EMCC, 'main.cpp'] + opts
+          args = [PYTHON, EMCC, 'main.cpp'] + opts + aborting_args
           args += ['-s', 'TEST_MEMORY_GROWTH_FAILS=1'] # In this test, force memory growing to fail
           if growth:
             args += ['-s', 'ALLOW_MEMORY_GROWTH=1']
-          if not aborting:
-            args += ['-s', 'ABORTING_MALLOC=0']
+          # growth disables aborting by default, but it can be overridden
+          aborting = 'ABORTING_MALLOC=1' in aborting_args or (not aborting_args and not growth)
           print('test_failing_alloc', args, pre_fail)
           run_process(args)
           # growth also disables aborting
-          can_manage_another = (not aborting) or growth
+          can_manage_another = not aborting
           split = '-DSPLIT' in args
-          print('can manage another:', can_manage_another, 'split:', split)
+          print('can manage another:', can_manage_another, 'split:', split, 'aborting:', aborting)
           output = run_js('a.out.js', stderr=PIPE, full_output=True, assert_returncode=0 if can_manage_another else None)
           if can_manage_another:
             self.assertContained('an allocation failed!\n', output)
@@ -6248,9 +6248,14 @@ int main() {
           else:
             # we should see an abort
             self.assertContained('abort(Cannot enlarge memory arrays', output)
-            self.assertContained(('higher than the current value 16777216,', 'higher than the current value 33554432,'), output)
-            self.assertContained('compile with  -s ALLOW_MEMORY_GROWTH=1 ', output)
-            self.assertContained('compile with  -s ABORTING_MALLOC=0 ', output)
+            if growth:
+              # when growth is enabled, the default is to not abort, so just explain that
+              self.assertContained('If you want malloc to return NULL (0) instead of this abort, do not link with -s ABORTING_MALLOC=1', output)
+            else:
+              # when growth is not enabled, suggest 3 possible solutions (start with more memory, allow growth, or don't abort)
+              self.assertContained(('higher than the current value 16777216,', 'higher than the current value 33554432,'), output)
+              self.assertContained('compile with  -s ALLOW_MEMORY_GROWTH=1 ', output)
+              self.assertContained('compile with  -s ABORTING_MALLOC=0 ', output)
 
   def test_failing_growth_2gb(self):
     create_test_file('test.cpp', r'''
@@ -10054,6 +10059,35 @@ int main () {
     # both is a little bigger still
     self.assertGreater(lf, both - 100)
     self.assertLess(lf, both - 50)
+
+  @parameterized({
+    'normal': ([], '''\
+0.000051 => -5.123719529365189373493194580078e-05
+0.000051 => -5.123719300544352718866300544498e-05
+0.000051 => -5.123719300544352718866300544498e-05
+'''),
+    'full_long_double': (['-s', 'PRINTF_LONG_DOUBLE'], '''\
+0.000051 => -5.123719529365189373493194580078e-05
+0.000051 => -5.123719300544352718866300544498e-05
+0.000051 => -5.123719300544352710023893104250e-05
+'''),
+  })
+  @no_fastcomp('float128 is wasm backend only')
+  def test_long_double_printing(self, args, expected):
+    create_test_file('src.cpp', r'''
+#include <stdio.h>
+
+int main(void) {
+    float f = 5.123456789e-5;
+    double d = 5.123456789e-5;
+    long double ld = 5.123456789e-5;
+    printf("%f => %.30e\n", f, f  / (f - 1));
+    printf("%f => %.30e\n", d, d / (d - 1));
+    printf("%Lf => %.30Le\n", ld, ld / (ld - 1));
+}
+    ''')
+    run_process([PYTHON, EMCC, 'src.cpp'] + args)
+    self.assertContained(expected, run_js('a.out.js'))
 
   # Tests that passing -s MALLOC=none will not include system malloc() to the build.
   def test_malloc_none(self):

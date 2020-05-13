@@ -132,6 +132,19 @@ var MALLOC = "dlmalloc";
 // how big that initial allocation (INITIAL_MEMORY) must be.
 // If you set this to 0, then you get the standard malloc behavior of
 // returning NULL (0) when it fails.
+//
+// Setting ALLOW_MEMORY_GROWTH turns this off, as in that mode we default to
+// the behavior of trying to grow and returning 0 from malloc on failure, like
+// a standard system would. However, you can still set this flag to override
+// that.
+//    * This is a mostly-backwards-compatible change. Previously this option
+//      was ignored when growth was on. The current behavior is that growth
+//      turns it off by default, so for users that never specified the flag
+//      nothing changes. But if you do specify it, it will have an effect now,
+//      which it did not previously. If you don't want that, just stop passing
+//      it in at link time.
+//
+// [link]
 var ABORTING_MALLOC = 1;
 
 // If 1, generated a version of memcpy() and memset() that unroll their
@@ -1064,8 +1077,11 @@ var DETERMINISTIC = 0;
 // for default values. Default values must be passed as a parameter to the
 // factory function.
 //
-// The default .html shell file provided in MINIMAL_RUNTIME mode shows
-// an example to how the module is instantiated from within the html file.
+// The default .html shell file provided in MINIMAL_RUNTIME mode will create
+// a singleton instance automatically, to run the application on the page.
+// (Note that it does so without using the Promise API mentioned earlier, and
+// so code for the Promise is not even emitted in the .js file if you tell
+// emcc to emit an .html output.)
 // The default .html shell file provided by traditional runtime mode is only
 // compatible with MODULARIZE=0 mode, so when building with traditional
 // runtime, you should provided your own html shell file to perform the
@@ -1772,6 +1788,12 @@ var LLD_REPORT_UNDEFINED = 0;
 // When this is disabled `em++` is required when compiling and linking C++
 // programs. This which matches the behaviour of gcc/g++ and clang/clang++.
 var DEFAULT_TO_CXX = 1;
+
+// While LLVM's wasm32 has long double = float128, we don't support printing
+// that at full precision by default. Instead we print as 64-bit doubles, which
+// saves libc code size. You can flip this option on to get a libc with full
+// long double printing precision.
+var PRINTF_LONG_DOUBLE = 0;
 
 //===========================================
 // Internal, used for testing only, from here
