@@ -7271,6 +7271,7 @@ someweirdtext
     self.emcc_args += ['--bind']
     self.do_run_from_file(path_from_root('tests', 'embind', 'test_unsigned.cpp'), path_from_root('tests', 'embind', 'test_unsigned.out'))
 
+  @no_asan('FIXME #11158')
   def test_embind_val(self):
     self.emcc_args += ['--bind']
     self.do_run_from_file(path_from_root('tests', 'embind', 'test_val.cpp'), path_from_root('tests', 'embind', 'test_val.out'))
@@ -7770,6 +7771,7 @@ Success!
   def test_vswprintf_utf8(self):
     self.do_run_from_file(path_from_root('tests', 'vswprintf_utf8.c'), path_from_root('tests', 'vswprintf_utf8.out'))
 
+  @no_asan('asan is not compatible with asyncify stack operations; may also need to not instrument asan_c_load_4, TODO')
   def test_async(self, emterpretify=False):
     # needs to flush stdio streams
     self.set_setting('EXIT_RUNTIME', 1)
@@ -8118,6 +8120,7 @@ extern "C" {
     'whitelist_b_response': ([], True,  '["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()"]'),
     'whitelist_c_response': ([], False, '["main","__original_main","foo(int, double)","baz()","c_baz"]'),
   })
+  @no_asan('asan is not compatible with asyncify stack operations; may also need to not instrument asan_c_load_4, TODO')
   @no_fastcomp('new asyncify only')
   def test_asyncify_lists(self, args, should_pass, response=None):
     if response is not None:
@@ -8755,6 +8758,9 @@ NODEFS is no longer included by default; build with -lnodefs.js
     'stack_buffer_overflow': ('test_asan_stack_buffer_overflow.c', [
       'AddressSanitizer: stack-buffer-overflow'
     ], ['-fno-builtin-memset']),
+    'stack_buffer_overflow_js': ('test_asan_stack_buffer_overflow_js.c', [
+      'AddressSanitizer: stack-buffer-overflow'
+    ], ['-fno-builtin-memset']),
     'bitfield_unround_size': ('test_asan_bitfield_unround_size.c', [
       'AddressSanitizer: stack-buffer-overflow'
     ], ['-fno-builtin-memset']),
@@ -8919,6 +8925,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.emcc_args.remove('--no-entry')
     self.set_setting('EXPORTED_FUNCTIONS', [])
     self.do_run_in_out_file_test('tests', 'core', 'test_ctors_no_main')
+
+  # Tests the operation of API found in #include <emscripten/math.h>
+  def test_emscripten_math(self):
+    self.do_run_in_out_file_test('tests', 'core', 'test_emscripten_math')
 
 
 # Generate tests for everything
