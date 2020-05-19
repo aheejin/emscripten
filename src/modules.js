@@ -130,7 +130,7 @@ var LibraryManager = {
         'library_async.js'
       ]);
     } else {
-      if (EMTERPRETIFY_ASYNC || ASYNCIFY) {
+      if (ASYNCIFY) {
         libraries.push('library_async.js');
       }
       if (USE_SDL == 1) {
@@ -161,7 +161,7 @@ var LibraryManager = {
     }
 
     if (BOOTSTRAPPING_STRUCT_INFO) {
-      libraries = ['library_formatString.js'];
+      libraries = ['library_formatString.js', 'library_stack_trace.js'];
     }
 
     // Deduplicate libraries to avoid processing any library file multiple times

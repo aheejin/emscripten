@@ -67,7 +67,6 @@ diagnostics.add_warning('linkflags')
 diagnostics.add_warning('emcc')
 diagnostics.add_warning('undefined')
 diagnostics.add_warning('version-check')
-diagnostics.add_warning('emterpreter')
 diagnostics.add_warning('unused-command-line-argument', shared=True)
 
 
@@ -996,9 +995,6 @@ def verify_settings():
     if Settings.CYBERDWARF:
       exit_with_error('emcc: CYBERDWARF is not supported by the LLVM wasm backend')
 
-    if Settings.EMTERPRETIFY:
-      exit_with_error('emcc: EMTERPRETIFY is not supported by the LLVM wasm backend')
-
     if Settings.EMULATED_FUNCTION_POINTERS:
       exit_with_error('emcc: EMULATED_FUNCTION_POINTERS is not meaningful with the wasm backend.')
 
@@ -1585,9 +1581,12 @@ class Building(object):
         '-z', 'stack-size=%s' % Settings.TOTAL_STACK,
         '--initial-memory=%d' % Settings.INITIAL_MEMORY,
       ]
-      use_start_function = Settings.STANDALONE_WASM
 
-      if not use_start_function:
+      if Settings.STANDALONE_WASM:
+        # when Settings.EXPECT_MAIN is set we fall back to wasm-ld default of _start
+        if not Settings.EXPECT_MAIN:
+          cmd += ['--entry=_initialize']
+      else:
         if Settings.EXPECT_MAIN and not Settings.IGNORE_MISSING_MAIN:
           cmd += ['--entry=main']
         else:
@@ -3464,7 +3463,7 @@ EMSCRIPTEN_METADATA_MAJOR, EMSCRIPTEN_METADATA_MINOR = (0, 3)
 # change, increment EMSCRIPTEN_ABI_MINOR if EMSCRIPTEN_ABI_MAJOR == 0
 # or the ABI change is backwards compatible, otherwise increment
 # EMSCRIPTEN_ABI_MAJOR and set EMSCRIPTEN_ABI_MINOR = 0.
-EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR = (0, 25)
+EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR = (0, 26)
 
 # Tools/paths
 if LLVM_ADD_VERSION is None:
