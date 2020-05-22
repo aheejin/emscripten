@@ -67,7 +67,6 @@ diagnostics.add_warning('legacy-settings', enabled=False, part_of_all=False)
 diagnostics.add_warning('linkflags')
 diagnostics.add_warning('emcc')
 diagnostics.add_warning('undefined')
-diagnostics.add_warning('deprected')
 diagnostics.add_warning('version-check')
 diagnostics.add_warning('unused-command-line-argument', shared=True)
 
@@ -3379,7 +3378,7 @@ elif os.path.exists(emsdk_embedded_config):
 else:
   EM_CONFIG = '~/.emscripten'
 
-PYTHON = os.getenv('EM_PYTHON', sys.executable)
+PYTHON = sys.executable
 EMSCRIPTEN_ROOT = __rootpath__
 
 # The following globals can be overridden by the config file.
