@@ -1802,10 +1802,7 @@ class Building(object):
     # opts += ['-debug-pass=Arguments']
     # TODO: move vectorization logic to clang/LLVM?
     if not Settings.WASM_BACKEND:
-      if not Settings.SIMD:
-        opts += ['-disable-loop-vectorization', '-disable-slp-vectorization', '-vectorize-loops=false', '-vectorize-slp=false']
-      else:
-        opts += ['-force-vector-width=4']
+      opts += ['-disable-loop-vectorization', '-disable-slp-vectorization', '-vectorize-loops=false', '-vectorize-slp=false']
 
     target = out or (filename + '.opt.bc')
     cmd = [LLVM_OPT] + inputs + opts + ['-o', target]
@@ -2706,7 +2703,7 @@ class Building(object):
     ret = ['--mvp-features']
     if Settings.USE_PTHREADS:
       ret += ['--enable-threads']
-    if Settings.SIMD:
+    if Settings.BINARYEN_SIMD:
       ret += ['--enable-simd']
     ret += Settings.BINARYEN_FEATURES
     return ret
@@ -2862,16 +2859,6 @@ class JS(object):
       if settings:
         assert settings['WASM'], 'j aka i64 only makes sense in wasm-only mode in binaryen'
       return 'i64(0)'
-    elif sig == 'F':
-      return 'SIMD_Float32x4_check(SIMD_Float32x4(0,0,0,0))'
-    elif sig == 'D':
-      return 'SIMD_Float64x2_check(SIMD_Float64x2(0,0,0,0))'
-    elif sig == 'B':
-      return 'SIMD_Int8x16_check(SIMD_Int8x16(0,0,0,0))'
-    elif sig == 'S':
-      return 'SIMD_Int16x8_check(SIMD_Int16x8(0,0,0,0))'
-    elif sig == 'I':
-      return 'SIMD_Int32x4_check(SIMD_Int32x4(0,0,0,0))'
     else:
       return '+0'
 
@@ -2899,16 +2886,6 @@ class JS(object):
       if settings:
         assert settings['WASM'], 'j aka i64 only makes sense in wasm-only mode in binaryen'
       return 'i64(' + value + ')'
-    elif sig == 'F':
-      return 'SIMD_Float32x4_check(' + value + ')'
-    elif sig == 'D':
-      return 'SIMD_Float64x2_check(' + value + ')'
-    elif sig == 'B':
-      return 'SIMD_Int8x16_check(' + value + ')'
-    elif sig == 'S':
-      return 'SIMD_Int16x8_check(' + value + ')'
-    elif sig == 'I':
-      return 'SIMD_Int32x4_check(' + value + ')'
     else:
       return value
 
