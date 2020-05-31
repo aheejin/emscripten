@@ -58,7 +58,7 @@ __rootpath__ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(__rootpath__)
 
 import parallel_testsuite
-from tools.shared import EM_CONFIG, TEMP_DIR, EMCC, EMXX, DEBUG, PYTHON, LLVM_TARGET, ASM_JS_TARGET, EMSCRIPTEN_TEMP_DIR, WASM_TARGET, SPIDERMONKEY_ENGINE, WINDOWS, EM_BUILD_VERBOSE
+from tools.shared import EM_CONFIG, TEMP_DIR, EMCC, EMXX, DEBUG, LLVM_TARGET, ASM_JS_TARGET, EMSCRIPTEN_TEMP_DIR, WASM_TARGET, SPIDERMONKEY_ENGINE, WINDOWS, EM_BUILD_VERBOSE
 from tools.shared import asstr, get_canonical_temp_dir, Building, run_process, try_delete, asbytes, safe_copy, Settings
 from tools import jsrun, shared, line_endings
 from tools import mylog
@@ -276,7 +276,7 @@ core_test_modes = [
   'strict'
 ]
 
-if shared.Settings.WASM_BACKEND:
+if Settings.WASM_BACKEND:
   core_test_modes += [
     'wasm2js0',
     'wasm2js1',
@@ -307,7 +307,7 @@ non_core_test_modes = [
   'benchmark',
 ]
 
-if shared.Settings.WASM_BACKEND:
+if Settings.WASM_BACKEND:
   non_core_test_modes += [
     'asan',
     'lsan',
@@ -462,6 +462,9 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     self.env = {}
     self.temp_files_before_run = []
 
+    if not Settings.WASM_BACKEND:
+      os.environ['EMCC_ALLOW_FASTCOMP'] = '1'
+
     if EMTEST_DETECT_TEMPFILE_LEAKS:
       for root, dirnames, filenames in os.walk(self.temp_dir):
         for dirname in dirnames:
@@ -473,13 +476,18 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     self.use_all_engines = EMTEST_ALL_ENGINES
     if EMTEST_SAVE_DIR:
       self.working_dir = os.path.join(self.temp_dir, 'emscripten_test')
-      if EMTEST_SAVE_DIR != 2 and os.path.exists(self.working_dir):
-        # Even when EMTEST_SAVE_DIR we still try to start with an empty directoy as many tests
-        # expect this.  EMTEST_SAVE_DIR=2 can be used to keep the old contents for the new test
-        # run. This can be useful when iterating on a given test with extra files you want to keep
-        # around in the output directory.
-        delete_contents(self.working_dir)
+      if os.path.exists(self.working_dir):
+        if EMTEST_SAVE_DIR == 2:
+          print('Not clearing existing test directory')
+        else:
+          print('Clearing existing test directory')
+          # Even when EMTEST_SAVE_DIR we still try to start with an empty directoy as many tests
+          # expect this.  EMTEST_SAVE_DIR=2 can be used to keep the old contents for the new test
+          # run. This can be useful when iterating on a given test with extra files you want to keep
+          # around in the output directory.
+          delete_contents(self.working_dir)
       else:
+        print('Creating new test output directory')
         ensure_dir(self.working_dir)
     else:
       self.working_dir = tempfile.mkdtemp(prefix='emscripten_test_' + self.__class__.__name__ + '_', dir=self.temp_dir)
@@ -690,7 +698,7 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
           os.remove(f + '.o')
         except OSError:
           pass
-        args = [PYTHON, compiler] + self.get_emcc_args(main_file=True) + \
+        args = [compiler] + self.get_emcc_args(main_file=True) + \
                ['-I' + dirname, '-I' + os.path.join(dirname, 'include')] + \
                ['-I' + include for include in includes] + \
                ['-c', f, '-o', f + '.o']
@@ -716,7 +724,7 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     else:
       # "fast", new path: just call emcc and go straight to JS
       all_files = all_sources + libraries
-      args = [PYTHON, compiler] + self.get_emcc_args(main_file=True) + \
+      args = [compiler] + self.get_emcc_args(main_file=True) + \
           ['-I' + dirname, '-I' + os.path.join(dirname, 'include')] + \
           ['-I' + include for include in includes] + \
           all_files + ['-o', filename + suffix]
@@ -1100,7 +1108,7 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     so = '.wasm' if self.is_wasm() else '.js'
 
     def ccshared(src, linkto=[]):
-      cmdv = [PYTHON, EMCC, src, '-o', os.path.splitext(src)[0] + so] + self.get_emcc_args()
+      cmdv = [EMCC, src, '-o', os.path.splitext(src)[0] + so] + self.get_emcc_args()
       cmdv += ['-s', 'SIDE_MODULE=1', '-s', 'RUNTIME_LINKED_LIBS=' + str(linkto)]
       run_process(cmdv)
 
@@ -1673,7 +1681,7 @@ class BrowserCore(RunnerCore):
 ''' % (reporting.read(), basename, int(manually_trigger)))
 
   def compile_btest(self, args):
-    run_process([PYTHON, EMCC] + args + ['--pre-js', path_from_root('tests', 'browser_reporting.js')])
+    run_process([EMCC] + args + ['--pre-js', path_from_root('tests', 'browser_reporting.js')])
 
   def btest(self, filename, expected=None, reference=None, force_c=False,
             reference_slack=0, manual_reference=False, post_build=None,
@@ -2009,10 +2017,11 @@ def flattened_tests(loaded_tests):
 
 def suite_for_module(module, tests):
   suite_supported = module.__name__ in ('test_core', 'test_other')
-  has_multiple_tests = len(tests) > 1
-  has_multiple_cores = parallel_testsuite.num_cores() > 1
-  if suite_supported and has_multiple_tests and has_multiple_cores:
-    return parallel_testsuite.ParallelTestSuite(len(tests))
+  if not EMTEST_SAVE_DIR:
+    has_multiple_tests = len(tests) > 1
+    has_multiple_cores = parallel_testsuite.num_cores() > 1
+    if suite_supported and has_multiple_tests and has_multiple_cores:
+      return parallel_testsuite.ParallelTestSuite(len(tests))
   return unittest.TestSuite()
 
 

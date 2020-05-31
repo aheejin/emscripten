@@ -87,6 +87,9 @@ def run_one_command(cmd):
   for opt in ['EMMAKEN_CFLAGS']:
     if opt in safe_env:
       del safe_env[opt]
+  # Disable certain warnings when we build ports/system libraries we don't want to
+  # show them a million times.
+  cmd.append('-Wno-fastcomp')
   shared.run_process(cmd, stdout=stdout, stderr=stderr, env=safe_env)
 
 
@@ -382,9 +385,9 @@ class Library(object):
       o = self.in_temp(shared.unsuffixed_basename(src) + '.o')
       ext = os.path.splitext(src)[1]
       if ext in ('.s', '.c'):
-        cmd = [shared.PYTHON, shared.EMCC]
+        cmd = [shared.EMCC]
       else:
-        cmd = [shared.PYTHON, shared.EMXX]
+        cmd = [shared.EMXX]
       if ext != '.s':
         cmd += cflags
       commands.append(cmd + ['-c', src, '-o', o])
@@ -1773,7 +1776,7 @@ class Ports(object):
     objects = []
     for src in srcs:
       obj = src + '.o'
-      commands.append([shared.PYTHON, shared.EMCC, '-c', src, '-O2', '-o', obj, '-w'] + include_commands + flags)
+      commands.append([shared.EMCC, '-c', src, '-O2', '-o', obj, '-w'] + include_commands + flags)
       objects.append(obj)
 
     Ports.run_commands(commands)
@@ -1786,9 +1789,9 @@ class Ports(object):
     # that the ports are built in the correct configuration.
     def add_args(cmd):
       # this must only be called on a standard build command
-      assert cmd[0] == shared.PYTHON and cmd[1] in (shared.EMCC, shared.EMXX)
+      assert cmd[0] in (shared.EMCC, shared.EMXX)
       # add standard cflags, but also allow the cmd to override them
-      return cmd[:2] + get_cflags() + cmd[2:]
+      return cmd[:1] + get_cflags() + cmd[1:]
     run_build_commands([add_args(c) for c in commands])
 
   @staticmethod
@@ -1797,7 +1800,7 @@ class Ports(object):
 
   @staticmethod
   def get_dir():
-    dirname = os.environ.get('EM_PORTS') or os.path.expanduser(os.path.join('~', '.emscripten_ports'))
+    dirname = shared.PORTS
     shared.safe_ensure_dirs(dirname)
     return dirname
 

@@ -154,7 +154,12 @@ def also_with_standalone_wasm(func):
     if can_do_standalone(self):
       print('standalone')
       self.set_setting('STANDALONE_WASM', 1)
-      func(self)
+      # we will not legalize the JS ffi interface, so we must use BigInt
+      # support in order for JS to have a chance to run this without trapping
+      # when it sees an i64 on the ffi.
+      self.set_setting('WASM_BIGINT', 1)
+      with js_engines_modify([NODE_JS + ['--experimental-wasm-bigint']]):
+        func(self)
 
   return decorated
 
@@ -3694,7 +3699,7 @@ ok
     if isinstance(side, list):
       # side is just a library
       try_delete('liblib.cpp.o.' + side_suffix)
-      run_process([PYTHON, EMCC] + side + self.get_emcc_args() + ['-o', os.path.join(self.get_dir(), 'liblib.cpp.o.' + side_suffix)])
+      run_process([EMCC] + side + self.get_emcc_args() + ['-o', os.path.join(self.get_dir(), 'liblib.cpp.o.' + side_suffix)])
     else:
       base = 'liblib.cpp' if not force_c else 'liblib.c'
       try_delete(base + '.o.' + side_suffix)
@@ -3717,7 +3722,7 @@ ok
     if isinstance(main, list):
       # main is just a library
       try_delete('src.cpp.o.js')
-      run_process([PYTHON, EMCC] + main + self.emcc_args + self.serialize_settings() + ['-o', 'src.cpp.o.js'])
+      run_process([EMCC] + main + self.emcc_args + self.serialize_settings() + ['-o', 'src.cpp.o.js'])
       self.do_run(None, expected, no_build=True, **kwargs)
     else:
       self.do_run(main, expected, force_c=force_c, **kwargs)
@@ -4525,7 +4530,7 @@ res64 - external 64\n''', header='''
       libname = 'third.wasm'
     else:
       libname = 'third.js'
-    run_process([PYTHON, EMCC, 'third.cpp', '-o', libname, '-s', 'SIDE_MODULE', '-s', 'EXPORT_ALL'] + self.get_emcc_args())
+    run_process([EMCC, 'third.cpp', '-o', libname, '-s', 'SIDE_MODULE', '-s', 'EXPORT_ALL'] + self.get_emcc_args())
 
     self.dylink_test(main=r'''
       #include <stdio.h>
@@ -4582,9 +4587,9 @@ res64 - external 64\n''', header='''
     create_test_file('third.cpp', 'extern "C" int sidef() { return 36; }')
     create_test_file('fourth.cpp', 'extern "C" int sideg() { return 17; }')
 
-    run_process([PYTHON, EMCC, '-c', 'third.cpp', '-o', 'third.o'] + self.get_emcc_args())
-    run_process([PYTHON, EMCC, '-c', 'fourth.cpp', '-o', 'fourth.o'] + self.get_emcc_args())
-    run_process([PYTHON, EMAR, 'rc', 'libfourth.a', 'fourth.o'])
+    run_process([EMCC, '-c', 'third.cpp', '-o', 'third.o'] + self.get_emcc_args())
+    run_process([EMCC, '-c', 'fourth.cpp', '-o', 'fourth.o'] + self.get_emcc_args())
+    run_process([EMAR, 'rc', 'libfourth.a', 'fourth.o'])
 
     self.dylink_test(main=r'''
       #include <stdio.h>
@@ -5574,7 +5579,7 @@ main( int argv, char ** argc ) {
 
   # i64s in the API, which we'd need to legalize for JS, so in standalone mode
   # all we can test is wasm VMs
-  @also_with_only_standalone_wasm
+  @also_with_standalone_wasm
   def test_posixtime(self):
     test_path = path_from_root('tests', 'core', 'test_posixtime')
     src, output = (test_path + s for s in ('.c', '.out'))
@@ -5861,7 +5866,7 @@ int main(void) {
       # emcc should build in dlmalloc automatically, and do all the sign correction etc. for it
 
       try_delete('src.cpp.o.js')
-      run_process([PYTHON, EMCC, path_from_root('tests', 'dlmalloc_test.c'), '-s', 'INITIAL_MEMORY=128MB', '-o', 'src.cpp.o.js'], stdout=PIPE, stderr=self.stderr_redirect)
+      run_process([EMCC, path_from_root('tests', 'dlmalloc_test.c'), '-s', 'INITIAL_MEMORY=128MB', '-o', 'src.cpp.o.js'], stdout=PIPE, stderr=self.stderr_redirect)
 
       self.do_run(None, '*1,0*', ['200', '1'], no_build=True)
       self.do_run(None, '*400,0*', ['400', '400'], no_build=True)
@@ -6138,7 +6143,7 @@ return malloc(size);
 
     if use_cmake:
       make_args = []
-      configure = [PYTHON, path_from_root('emcmake.py'), 'cmake', '.']
+      configure = [path_from_root('emcmake'), 'cmake', '.']
     else:
       make_args = ['libz.a']
       configure = ['sh', './configure']
@@ -6726,18 +6731,18 @@ return malloc(size);
   def test_response_file(self):
     response_data = '-o %s/response_file.js %s' % (self.get_dir(), path_from_root('tests', 'hello_world.cpp'))
     create_test_file('rsp_file', response_data.replace('\\', '\\\\'))
-    run_process([PYTHON, EMCC, "@rsp_file"] + self.get_emcc_args())
+    run_process([EMCC, "@rsp_file"] + self.get_emcc_args())
     self.do_run('response_file.js', 'hello, world', no_build=True)
 
-    self.assertContained('response file not found: foo.txt', self.expect_fail([PYTHON, EMCC, '@foo.txt']))
+    self.assertContained('response file not found: foo.txt', self.expect_fail([EMCC, '@foo.txt']))
 
   def test_linker_response_file(self):
     objfile = 'response_file.o'
-    run_process([PYTHON, EMCC, '-c', path_from_root('tests', 'hello_world.cpp'), '-o', objfile] + self.get_emcc_args())
+    run_process([EMCC, '-c', path_from_root('tests', 'hello_world.cpp'), '-o', objfile] + self.get_emcc_args())
     # This should expand into -Wl,--start-group <objfile> -Wl,--end-group
     response_data = '--start-group ' + objfile + ' --end-group'
     create_test_file('rsp_file', response_data.replace('\\', '\\\\'))
-    run_process([PYTHON, EMCC, "-Wl,@rsp_file", '-o', 'response_file.o.js'] + self.get_emcc_args())
+    run_process([EMCC, "-Wl,@rsp_file", '-o', 'response_file.o.js'] + self.get_emcc_args())
     self.do_run('response_file.o.js', 'hello, world', no_build=True)
 
   def test_exported_response(self):
@@ -7974,7 +7979,7 @@ Module['onRuntimeInitialized'] = function() {
       self.skipTest('redundant to test wasm2js in wasm2js* mode')
 
     for args in [[], ['-s', 'MINIMAL_RUNTIME=1']]:
-      cmd = [PYTHON, EMCC, path_from_root('tests', 'small_hello_world.c'), '-s', 'WASM=2'] + args
+      cmd = [EMCC, path_from_root('tests', 'small_hello_world.c'), '-s', 'WASM=2'] + args
       run_process(cmd)
 
       # First run with WebAssembly support enabled
@@ -8587,7 +8592,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
       # Disabling IGNORE_MISSING_MAIN should cause link to fail due to missing main
       self.set_setting('IGNORE_MISSING_MAIN', 0)
-      err = self.expect_fail([PYTHON, EMCC, path_from_root('tests', 'core', 'test_ctors_no_main.cpp')] + self.get_emcc_args())
+      err = self.expect_fail([EMCC, path_from_root('tests', 'core', 'test_ctors_no_main.cpp')] + self.get_emcc_args())
       self.assertContained('error: entry symbol not defined (pass --no-entry to suppress): main', err)
 
     # If we pass --no-entry or set EXPORTED_FUNCTIONS to empty should never see any errors
