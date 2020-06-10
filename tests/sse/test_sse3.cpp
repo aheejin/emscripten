@@ -10,6 +10,8 @@
 #include <pmmintrin.h>
 #include "test_sse.h"
 
+bool testNaNBits = true;
+
 float *interesting_floats = get_interesting_floats();
 int numInterestingFloats = sizeof(interesting_floats_)/sizeof(interesting_floats_[0]);
 uint32_t *interesting_ints = get_interesting_ints();
@@ -23,9 +25,11 @@ int main()
 	assert(numInterestingInts % 4 == 0);
 	assert(numInterestingDoubles % 4 == 0);	
 
+	testNaNBits = false;
 	Ret_M128d_M128d(__m128d, _mm_addsub_pd);
-	Ret_M128_M128(__m128, _mm_addsub_ps);
 	Ret_M128d_M128d(__m128d, _mm_hadd_pd);
+	testNaNBits = true;
+	Ret_M128_M128(__m128, _mm_addsub_ps);
 	Ret_M128_M128(__m128, _mm_hadd_ps);
 	Ret_M128d_M128d(__m128d, _mm_hsub_pd);
 	Ret_M128_M128(__m128, _mm_hsub_ps);
