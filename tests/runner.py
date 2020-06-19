@@ -57,15 +57,16 @@ else:
 __rootpath__ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(__rootpath__)
 
-import parallel_testsuite
 import clang_native
+import jsrun
+import parallel_testsuite
 from tools.shared import EM_CONFIG, TEMP_DIR, EMCC, EMXX, DEBUG
 from tools.shared import LLVM_TARGET, ASM_JS_TARGET, EMSCRIPTEN_TEMP_DIR
 from tools.shared import WASM_TARGET, SPIDERMONKEY_ENGINE, WINDOWS
 from tools.shared import EM_BUILD_VERBOSE, CLANG_CC
 from tools.shared import asstr, get_canonical_temp_dir, run_process, try_delete
 from tools.shared import asbytes, safe_copy, Settings
-from tools import jsrun, shared, line_endings, building
+from tools import shared, line_endings, building
 from tools import mylog
 
 
@@ -357,11 +358,6 @@ def parameterized(parameters):
     func._parameterize = parameters
     return func
   return decorator
-
-
-def run_js_default(filename, *args, **kw):
-  engine = shared.JS_ENGINES[0]
-  return jsrun.run_js(filename, engine, *args, **kw)
 
 
 class RunnerMeta(type):
