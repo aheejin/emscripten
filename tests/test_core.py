@@ -123,10 +123,10 @@ def no_wasm2js(note=''):
 def sync(f):
   assert callable(f)
 
-  def decorated(self):
+  def decorated(self, *args, **kwargs):
     if self.get_setting('WASM') or self.is_wasm_backend():
       self.emcc_args += ['-s', 'WASM_ASYNC_COMPILATION=0'] # test is set up synchronously
-    f(self)
+    f(self, *args, **kwargs)
   return decorated
 
 
@@ -283,6 +283,9 @@ class TestCoreBase(RunnerCore):
       self.emcc_args += ['--closure', '1']
       return True
     return False
+
+  def assertStartswith(self, output, prefix):
+    self.assertEqual(prefix, output[:len(prefix)])
 
   def verify_in_strict_mode(self, filename):
     with open(filename) as infile:
@@ -627,7 +630,7 @@ class TestCoreBase(RunnerCore):
 
   @no_asan('asan errors on corner cases we check')
   def test_aligned_alloc(self):
-    self.do_run(open(path_from_root('tests', 'test_aligned_alloc.c')).read(), '', assert_returncode=0)
+    self.do_run(open(path_from_root('tests', 'test_aligned_alloc.c')).read(), '')
 
   def test_unsigned(self):
     src = '''
@@ -1319,7 +1322,7 @@ int main(int argc, char **argv)
     print('2')
     self.do_run(None, 'Caught exception: Hello\nDone.', ['2'], no_build=True)
 
-  def test_exceptions_white_list(self):
+  def test_exceptions_allowed(self):
     self.set_setting('DISABLE_EXCEPTION_CATCHING', 2)
     # Wasm does not add an underscore to function names. For wasm, the
     # mismatches are fixed in fixImports() function in JS glue code.
@@ -1330,14 +1333,14 @@ int main(int argc, char **argv)
     # otherwise it is inlined and not identified
     self.set_setting('INLINING_LIMIT', 50)
 
-    test_path = path_from_root('tests', 'core', 'test_exceptions_white_list')
+    test_path = path_from_root('tests', 'core', 'test_exceptions_allowed')
     src, output = (test_path + s for s in ('.cpp', '.out'))
     self.do_run_from_file(src, output)
     size = len(open('src.cpp.o.js').read())
     shutil.copyfile('src.cpp.o.js', 'orig.js')
 
     # check that an empty whitelist works properly (as in, same as exceptions disabled)
-    empty_output = path_from_root('tests', 'core', 'test_exceptions_white_list_empty.out')
+    empty_output = path_from_root('tests', 'core', 'test_exceptions_allowed_empty.out')
 
     self.set_setting('EXCEPTION_CATCHING_ALLOWED', [])
     self.do_run_from_file(src, empty_output, assert_returncode=None)
@@ -1362,7 +1365,7 @@ int main(int argc, char **argv)
       # full disable can remove a little bit more
       assert empty_size >= disabled_size, [empty_size, disabled_size]
 
-  def test_exceptions_white_list_2(self):
+  def test_exceptions_allowed_2(self):
     self.set_setting('DISABLE_EXCEPTION_CATCHING', 2)
     # Wasm does not add an underscore to function names. For wasm, the
     # mismatches are fixed in fixImports() function in JS glue code.
@@ -1373,9 +1376,9 @@ int main(int argc, char **argv)
     # otherwise it is inlined and not identified
     self.set_setting('INLINING_LIMIT', 1)
 
-    self.do_run_in_out_file_test('tests', 'core', 'test_exceptions_white_list_2')
+    self.do_run_in_out_file_test('tests', 'core', 'test_exceptions_allowed_2')
 
-  def test_exceptions_white_list_uncaught(self):
+  def test_exceptions_allowed_uncaught(self):
     self.emcc_args += ['-std=c++11']
     self.set_setting('DISABLE_EXCEPTION_CATCHING', 2)
     # Wasm does not add an underscore to function names. For wasm, the
@@ -1387,7 +1390,7 @@ int main(int argc, char **argv)
     # otherwise it is inlined and not identified
     self.set_setting('INLINING_LIMIT', 1)
 
-    self.do_run_in_out_file_test('tests', 'core', 'test_exceptions_white_list_uncaught')
+    self.do_run_in_out_file_test('tests', 'core', 'test_exceptions_allowed_uncaught')
 
   @with_both_exception_handling
   def test_exceptions_uncaught(self):
@@ -2530,10 +2533,10 @@ The current type of b is: 9
     self.do_run_in_out_file_test('tests', 'core', 'test_memcpy_memcmp', output_nicerizer=check)
 
   def test_memcpy2(self):
-    self.do_run_in_out_file_test('tests', 'core', 'test_memcpy2', assert_returncode=None)
+    self.do_run_in_out_file_test('tests', 'core', 'test_memcpy2')
 
   def test_memcpy3(self):
-    self.do_run_in_out_file_test('tests', 'core', 'test_memcpy3', assert_returncode=None)
+    self.do_run_in_out_file_test('tests', 'core', 'test_memcpy3')
 
   @also_with_standalone_wasm()
   def test_memcpy_alignment(self):
@@ -2543,7 +2546,7 @@ The current type of b is: 9
     self.do_run(open(path_from_root('tests', 'test_memset_alignment.cpp')).read(), 'OK.')
 
   def test_memset(self):
-    self.do_run_in_out_file_test('tests', 'core', 'test_memset', assert_returncode=None)
+    self.do_run_in_out_file_test('tests', 'core', 'test_memset')
 
   def test_getopt(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_getopt', args=['-t', '12', '-n', 'foobar'])
@@ -2555,7 +2558,7 @@ The current type of b is: 9
     self.do_run_in_out_file_test('tests', 'core', 'test_memmove')
 
   def test_memmove2(self):
-    self.do_run_in_out_file_test('tests', 'core', 'test_memmove2', assert_returncode=None)
+    self.do_run_in_out_file_test('tests', 'core', 'test_memmove2')
 
   def test_memmove3(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_memmove3')
@@ -4135,6 +4138,42 @@ res64 - external 64\n''', header='''
       EMSCRIPTEN_KEEPALIVE int32_t function_ret_32(int32_t i, int32_t j, int32_t k);
       EMSCRIPTEN_KEEPALIVE int64_t function_ret_64(int32_t i, int32_t j, int32_t k);
     ''')
+
+  @needs_dlfcn
+  @also_with_wasm_bigint
+  def test_dylink_i64_invoke(self):
+    self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
+    self.dylink_test(r'''\
+    #include <stdio.h>
+    #include <stdint.h>
+
+    extern "C" int64_t sidey(int64_t arg);
+
+    int main(int argc, char *argv[]) {
+        int64_t temp = 42;
+        printf("got %lld\n", sidey(temp));
+        return 0;
+    }''', r'''\
+    #include <stdint.h>
+    #include <stdio.h>
+    #include <emscripten.h>
+
+    extern "C" {
+
+    EMSCRIPTEN_KEEPALIVE int64_t do_call(int64_t arg) {
+        if (arg == 0) {
+            throw;
+        }
+        return 2 * arg;
+    }
+    int64_t sidey(int64_t arg) {
+        try {
+            return do_call(arg);
+        } catch(...) {
+            return 0;
+        }
+    }
+    }''', 'got 84', need_reverse=False)
 
   @needs_dlfcn
   def test_dylink_class(self):
@@ -5821,8 +5860,9 @@ int main(void) {
     self.emcc_args += ['-mnontrapping-fptoint']
     self.test_fasta()
 
+  @no_fastcomp('RuntimeError: float unrepresentable in integer range')
   def test_whets(self):
-    self.do_run(open(path_from_root('tests', 'whets.cpp')).read(), 'Single Precision C Whetstone Benchmark', assert_returncode=None)
+    self.do_run(open(path_from_root('tests', 'whets.cpp')).read(), 'Single Precision C Whetstone Benchmark')
 
   def test_dlmalloc_inline(self):
     self.banned_js_engines = [NODE_JS] # slower, and fail on 64-bit
@@ -6100,7 +6140,7 @@ return malloc(size);
   def test_gcc_unmangler(self):
     self.emcc_args += ['-I' + path_from_root('third_party')]
 
-    self.do_run(open(path_from_root('third_party', 'gcc_demangler.c')).read(), '*d_demangle(char const*, int, unsigned int*)*', args=['_ZL10d_demanglePKciPj'], assert_returncode=None)
+    self.do_run(open(path_from_root('third_party', 'gcc_demangler.c')).read(), '*d_demangle(char const*, int, unsigned int*)*', args=['_ZL10d_demanglePKciPj'])
 
   @needs_make('make')
   def test_lua(self):
@@ -6365,7 +6405,6 @@ return malloc(size);
                             path_from_root('tests', 'third_party', 'openjpeg', 'common'),
                             os.path.join(self.get_build_dir(), 'openjpeg')],
                   force_c=True,
-                  assert_returncode=0,
                   output_nicerizer=image_compare)
 
     do_test()
@@ -7310,59 +7349,54 @@ someweirdtext
     self.emcc_args += ['--bind', '-fno-rtti', '-frtti', '--pre-js', 'pre.js']
     self.do_run(src, '418\ndotest retured: 42\n')
 
+  @parameterized({
+    'all': ('ALL', False),
+    'fast': ('FAST', False),
+    'default': ('DEFAULT', False),
+    'all_growth': ('ALL', True),
+  })
   @sync
-  def test_webidl(self):
+  def test_webidl(self, mode, allow_memory_growth):
     if self.run_name == 'asm2':
       self.emcc_args += ['--closure', '1', '-g1'] # extra testing
       # avoid closure minified names competing with our test code in the global name space
       self.set_setting('MODULARIZE', 1)
 
-    def do_test_in_mode(mode, allow_memory_growth):
-      print('testing mode', mode, ', memory growth =', allow_memory_growth)
-      # Force IDL checks mode
-      os.environ['IDL_CHECKS'] = mode
+    # Force IDL checks mode
+    os.environ['IDL_CHECKS'] = mode
 
-      run_process([PYTHON, path_from_root('tools', 'webidl_binder.py'),
-                   path_from_root('tests', 'webidl', 'test.idl'),
-                   'glue'])
-      self.assertExists('glue.cpp')
-      self.assertExists('glue.js')
+    run_process([PYTHON, path_from_root('tools', 'webidl_binder.py'),
+                 path_from_root('tests', 'webidl', 'test.idl'),
+                 'glue'])
+    self.assertExists('glue.cpp')
+    self.assertExists('glue.js')
 
-      # Export things on "TheModule". This matches the typical use pattern of the bound library
-      # being used as Box2D.* or Ammo.*, and we cannot rely on "Module" being always present (closure may remove it).
-      create_test_file('export.js', '''
-// test purposes: remove printErr output, whose order is unpredictable when compared to print
-err = err = function(){};
-''')
-      self.emcc_args += ['-s', 'EXPORTED_FUNCTIONS=["_malloc"]', '--post-js', 'glue.js', '--post-js', 'export.js']
-      if allow_memory_growth:
-        self.emcc_args += ['-s', 'ALLOW_MEMORY_GROWTH', '-Wno-almost-asm']
-      shutil.copyfile(path_from_root('tests', 'webidl', 'test.h'), 'test.h')
-      shutil.copyfile(path_from_root('tests', 'webidl', 'test.cpp'), 'test.cpp')
-      src = open('test.cpp').read()
+    # Export things on "TheModule". This matches the typical use pattern of the bound library
+    # being used as Box2D.* or Ammo.*, and we cannot rely on "Module" being always present (closure may remove it).
+    self.emcc_args += ['-s', 'EXPORTED_FUNCTIONS=["_malloc"]', '--post-js', 'glue.js']
+    if allow_memory_growth:
+      self.emcc_args += ['-s', 'ALLOW_MEMORY_GROWTH', '-Wno-almost-asm']
+    shutil.copyfile(path_from_root('tests', 'webidl', 'test.h'), 'test.h')
+    shutil.copyfile(path_from_root('tests', 'webidl', 'test.cpp'), 'test.cpp')
+    src = open('test.cpp').read()
 
-      def post(filename):
-        with open(filename, 'a') as f:
-          f.write('\n\n')
-          if self.run_name == 'asm2':
-            f.write('var TheModule = Module();\n')
-          else:
-            f.write('var TheModule = Module;\n')
-          f.write('\n\n')
-          if allow_memory_growth:
-            f.write("var isMemoryGrowthAllowed = true;")
-          else:
-            f.write("var isMemoryGrowthAllowed = false;")
-          f.write(open(path_from_root('tests', 'webidl', 'post.js')).read())
-          f.write('\n\n')
+    def post(filename):
+      with open(filename, 'a') as f:
+        f.write('\n\n')
+        if self.run_name == 'asm2':
+          f.write('var TheModule = Module();\n')
+        else:
+          f.write('var TheModule = Module;\n')
+        f.write('\n\n')
+        if allow_memory_growth:
+          f.write("var isMemoryGrowthAllowed = true;")
+        else:
+          f.write("var isMemoryGrowthAllowed = false;")
+        f.write(open(path_from_root('tests', 'webidl', 'post.js')).read())
+        f.write('\n\n')
 
-      output = open(path_from_root('tests', 'webidl', "output_%s.txt" % mode)).read()
-      self.do_run(src, output, post_build=post, output_nicerizer=(lambda out, err: out))
-
-    do_test_in_mode('ALL', False)
-    do_test_in_mode('FAST', False)
-    do_test_in_mode('DEFAULT', False)
-    do_test_in_mode('ALL', True)
+    output = open(path_from_root('tests', 'webidl', "output_%s.txt" % mode)).read()
+    self.do_run(src, output, post_build=post)
 
   ### Tests for tools
 
@@ -7697,8 +7731,8 @@ Success!
       }
       ''')
     self.emcc_args += ['--pre-js', 'pre.js']
-    self.do_run(src.replace('CAPITAL_EXIT', '0'), 'hello, world!\ncleanup\nI see exit status: 118', assert_returncode=None)
-    self.do_run(src.replace('CAPITAL_EXIT', '1'), 'hello, world!\ncleanup\nI see exit status: 118', assert_returncode=None)
+    self.do_run(src.replace('CAPITAL_EXIT', '0'), 'hello, world!\ncleanup\nI see exit status: 118', assert_returncode=118)
+    self.do_run(src.replace('CAPITAL_EXIT', '1'), 'hello, world!\ncleanup\nI see exit status: 118', assert_returncode=118)
 
   def test_noexitruntime(self):
     src = r'''
@@ -7861,13 +7895,13 @@ Module['onRuntimeInitialized'] = function() {
 
   @parameterized({
     'normal': ([], True),
-    'removelist_a': (['-s', 'ASYNCIFY_REMOVE_LIST=["foo(int, double)"]'], False),
-    'removelist_b': (['-s', 'ASYNCIFY_REMOVE_LIST=["bar()"]'], True),
-    'removelist_c': (['-s', 'ASYNCIFY_REMOVE_LIST=["baz()"]'], False),
-    'onlylist_a': (['-s', 'ASYNCIFY_ONLY_LIST=["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()","bar()"]'], True),
-    'onlylist_b': (['-s', 'ASYNCIFY_ONLY_LIST=["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()"]'], True),
-    'onlylist_c': (['-s', 'ASYNCIFY_ONLY_LIST=["main","__original_main","foo(int, double)","baz()","c_baz"]'], False),
-    'onlylist_d': (['-s', 'ASYNCIFY_ONLY_LIST=["foo(int, double)","baz()","c_baz","Structy::funcy()"]'], False),
+    'removelist_a': (['-s', 'ASYNCIFY_REMOVE=["foo(int, double)"]'], False),
+    'removelist_b': (['-s', 'ASYNCIFY_REMOVE=["bar()"]'], True),
+    'removelist_c': (['-s', 'ASYNCIFY_REMOVE=["baz()"]'], False),
+    'onlylist_a': (['-s', 'ASYNCIFY_ONLY=["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()","bar()"]'], True),
+    'onlylist_b': (['-s', 'ASYNCIFY_ONLY=["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()"]'], True),
+    'onlylist_c': (['-s', 'ASYNCIFY_ONLY=["main","__original_main","foo(int, double)","baz()","c_baz"]'], False),
+    'onlylist_d': (['-s', 'ASYNCIFY_ONLY=["foo(int, double)","baz()","c_baz","Structy::funcy()"]'], False),
     'onlylist_b_response': ([], True,  '["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()"]'),
     'onlylist_c_response': ([], False, '["main","__original_main","foo(int, double)","baz()","c_baz"]'),
   })
@@ -7876,7 +7910,7 @@ Module['onRuntimeInitialized'] = function() {
   def test_asyncify_lists(self, args, should_pass, response=None):
     if response is not None:
       create_test_file('response.file', response)
-      self.emcc_args += ['-s', 'ASYNCIFY_ONLY_LIST=@response.file']
+      self.emcc_args += ['-s', 'ASYNCIFY_ONLY=@response.file']
     self.set_setting('ASYNCIFY', 1)
     self.emcc_args += args
     try:
@@ -7891,7 +7925,7 @@ Module['onRuntimeInitialized'] = function() {
   @parameterized({
     'normal': ([], True),
     'ignoreindirect': (['-s', 'ASYNCIFY_IGNORE_INDIRECT'], False),
-    'add': (['-s', 'ASYNCIFY_IGNORE_INDIRECT', '-s', 'ASYNCIFY_ADD_LIST=["main","virt()"]'], True),
+    'add': (['-s', 'ASYNCIFY_IGNORE_INDIRECT', '-s', 'ASYNCIFY_ADD=["main","virt()"]'], True),
   })
   @no_asan('asan is not compatible with asyncify stack operations; may also need to not instrument asan_c_load_4, TODO')
   @no_fastcomp('new asyncify only')
@@ -7975,10 +8009,10 @@ Module['onRuntimeInitialized'] = function() {
       return True
 
     def verify_working(args=['0']):
-      self.assertContained('foo_end', run_js('src.cpp.o.js', args=args))
+      self.assertContained('foo_end\n', run_js('src.cpp.o.js', args=args))
 
     def verify_broken(args=['0']):
-      self.assertNotContained('foo_end', run_js('src.cpp.o.js', args=args, stderr=STDOUT, assert_returncode=None))
+      self.assertNotContained('foo_end\n', run_js('src.cpp.o.js', args=args, stderr=STDOUT, assert_returncode=None))
 
     # the first-loaded wasm will not reach the second call, since we call it after lazy-loading.
     # verify that by changing the first wasm to throw in that function
@@ -8275,8 +8309,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     src = open(path_from_root('tests', 'core', 'test_hello_world.c')).read()
     self.build(src, self.get_dir(), 'src.c')
     output = run_js('src.c.o.js', assert_returncode=None, stderr=STDOUT)
-    self.assertNotContained('failed to asynchronously prepare wasm', output)
-    self.assertContained('hello, world!', output)
+    self.assertStartswith(output, 'hello, world!')
     self.assertContained('ThisFunctionDoesNotExist is not defined', output)
 
   # Tests that building with -s DECLARE_ASM_MODULE_EXPORTS=0 works
@@ -8342,6 +8375,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.maybe_closure()
     self.do_run(open(path_from_root('tests', 'test_global_initializer.cpp')).read(), 't1 > t0: 1')
 
+  @no_wasm2js('wasm2js wasm emulation does not include custom sections')
   @no_fastcomp('return address not supported on fastcomp')
   @no_optimize('return address test cannot work with optimizations')
   def test_return_address(self):
@@ -8657,11 +8691,17 @@ NODEFS is no longer included by default; build with -lnodefs.js
   # are not yet suppored by the wasm engines we test against.
   @also_with_standalone_wasm(impure=True)
   def test_undefined_main(self):
-    # Traditionally in emscripten we allow main to be undefined.  This allows programs with a main
-    # and libraries without a main to be compiled identically.
-    # However we are trying to move away from that model to a more explicit opt-out model. See:
-    # https://github.com/emscripten-core/emscripten/issues/9640
-    if not self.get_setting('LLD_REPORT_UNDEFINED') and not self.get_setting('STRICT') and not self.get_setting('STANDALONE_WASM'):
+    if self.get_setting('STANDALONE_WASM'):
+      # In standalone we don't support implicitly building without main.  The user has to explicitly
+      # opt out (see below).
+      err = self.expect_fail([EMCC, path_from_root('tests', 'core', 'test_ctors_no_main.cpp')] + self.get_emcc_args())
+      self.assertContained('error: undefined symbol: main (referenced by top-level compiled C/C++ code)', err)
+      self.assertContained('warning: To build in STANDALONE_WASM mode without a main(), use emcc --no-entry', err)
+    elif not self.get_setting('LLD_REPORT_UNDEFINED') and not self.get_setting('STRICT'):
+      # Traditionally in emscripten we allow main to be implicitly undefined.  This allows programs
+      # with a main and libraries without a main to be compiled identically.
+      # However we are trying to move away from that model to a more explicit opt-out model. See:
+      # https://github.com/emscripten-core/emscripten/issues/9640
       self.do_run_in_out_file_test('tests', 'core', 'test_ctors_no_main')
 
       # Disabling IGNORE_MISSING_MAIN should cause link to fail due to missing main
@@ -8698,6 +8738,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.assertContained('cannot change built-in settings values with a -jsD directive', self.expect_fail([EMCC, '-jsDWASM=0']))
 
   # Tests <emscripten/stack.h> API
+  @no_asan('stack allocation sizes are no longer predictable')
   def test_emscripten_stack(self):
     self.emcc_args += ['-lstack.js']
     self.set_setting('TOTAL_STACK', 4 * 1024 * 1024)

@@ -2045,9 +2045,6 @@ def emscript_wasm_backend(infile, outfile, memfile, temp_files, DEBUG):
   pre = None
 
   invoke_funcs = metadata['invokeFuncs']
-  if shared.Settings.RELOCATABLE:
-    invoke_funcs.append('invoke_X')
-
   try:
     del forwarded_json['Variables']['globals']['_llvm_global_ctors'] # not a true variable
   except KeyError:
@@ -2093,7 +2090,7 @@ def finalize_wasm(temp_files, infile, outfile, memfile, DEBUG):
 
   # tell binaryen to look at the features section, and if there isn't one, to use MVP
   # (which matches what llvm+lld has given us)
-  if shared.Settings.DEBUG_LEVEL >= 2 or shared.Settings.PROFILING_FUNCS or shared.Settings.EMIT_SYMBOL_MAP or shared.Settings.ASYNCIFY_ONLY_LIST or shared.Settings.ASYNCIFY_REMOVE_LIST or shared.Settings.ASYNCIFY_ADD_LIST:
+  if shared.Settings.DEBUG_LEVEL >= 2 or shared.Settings.PROFILING_FUNCS or shared.Settings.EMIT_SYMBOL_MAP or shared.Settings.ASYNCIFY_ONLY or shared.Settings.ASYNCIFY_REMOVE or shared.Settings.ASYNCIFY_ADD:
     args.append('-g')
   if shared.Settings.WASM_BIGINT:
     args.append('--bigint')

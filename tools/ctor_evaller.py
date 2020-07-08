@@ -270,7 +270,7 @@ console.log(JSON.stringify([numSuccessful, Array.prototype.slice.call(heap.subar
     mylog.log_cmd(shared.NODE_JS + [temp_file], stdout=out_file_handle, stderr=err_file_handle)
     proc = subprocess.Popen(shared.NODE_JS + [temp_file], stdout=out_file_handle, stderr=err_file_handle, universal_newlines=True)
     try:
-      shared.timeout_run(proc, timeout=10, full_output=True, throw_on_failure=False)
+      shared.timeout_run(proc, timeout=10, full_output=True, check=False)
     except Exception as e:
       if 'Timed out' not in str(e):
         raise
@@ -317,7 +317,7 @@ def eval_ctors_wasm(js, wasm_file, num):
   logger.debug('wasm ctor cmd: ' + str(cmd))
   proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
   try:
-    err = shared.timeout_run(proc, timeout=10, full_output=True, throw_on_failure=False)
+    err = shared.timeout_run(proc, timeout=10, full_output=True, check=False)
   except Exception as e:
     if 'Timed out' not in str(e):
       raise
