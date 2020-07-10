@@ -60,6 +60,7 @@ sys.path.append(__rootpath__)
 import clang_native
 import jsrun
 import parallel_testsuite
+from jsrun import NON_ZERO
 from tools.shared import EM_CONFIG, TEMP_DIR, EMCC, EMXX, DEBUG
 from tools.shared import LLVM_TARGET, ASM_JS_TARGET, EMSCRIPTEN_TEMP_DIR
 from tools.shared import WASM_TARGET, SPIDERMONKEY_ENGINE, WINDOWS
@@ -821,11 +822,10 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     if EMTEST_VERBOSE:
       print("Running '%s' under '%s'" % (filename, engine))
     try:
-      with chdir(self.get_dir()):
-        jsrun.run_js(filename, engine, args,
-                     stdout=open(stdout, 'w'),
-                     stderr=open(stderr, 'w'),
-                     assert_returncode=assert_returncode)
+      jsrun.run_js(filename, engine, args,
+                   stdout=open(stdout, 'w'),
+                   stderr=open(stderr, 'w'),
+                   assert_returncode=assert_returncode)
     except subprocess.CalledProcessError as e:
       error = e
 
@@ -842,7 +842,10 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
       print(ret, end='')
       print('-- end program output --')
     if error:
-      self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
+      if assert_returncode == NON_ZERO:
+        self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
+      else:
+        self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
 
     #  We should pass all strict mode checks
     self.assertNotContained('strict warning:', ret)
@@ -945,7 +948,7 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
                   configure_args=[], make=['make'], make_args=None,
                   env_init={}, cache_name_extra='', native=False):
     if make_args is None:
-      make_args = ['-j', str(multiprocessing.cpu_count())]
+      make_args = ['-j', str(building.get_num_cores())]
 
     build_dir = self.get_build_dir()
     output_dir = self.get_dir()
@@ -1715,9 +1718,6 @@ class BrowserCore(RunnerCore):
     filename_is_src = '\n' in filename
     src = filename if filename_is_src else ''
     original_args = args[:]
-    if 'USE_PTHREADS=1' in args and self.is_wasm_backend():
-        # wasm2js does not support threads yet
-        also_asmjs = False
     if 'WASM=0' not in args:
       # Filter out separate-asm, which is implied by wasm
       args = [a for a in args if a != '--separate-asm']
@@ -1753,6 +1753,7 @@ class BrowserCore(RunnerCore):
 
     # Tests can opt into being run under asmjs as well
     if 'WASM=0' not in args and (also_asmjs or self.also_asmjs):
+      print('WASM=0')
       self.btest(filename, expected, reference, force_c, reference_slack, manual_reference, post_build,
                  original_args + ['-s', 'WASM=0'], outfile, message, also_proxied=False, timeout=timeout)
 

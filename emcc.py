@@ -391,7 +391,7 @@ def expand_byte_size_suffixes(value):
   many bytes that is and returns it as an integer.
   """
   value = value.strip()
-  match = re.fullmatch(r'(\d+)\s*([kmgt]?b)?', value, re.I)
+  match = re.match(r'^(\d+)\s*([kmgt]?b)?$', value, re.I)
   if not match:
     exit_with_error("invalid byte size `%s`.  Valid suffixes are: kb, mb, gb, tb" % value)
   value, suffix = match.groups()
@@ -1204,24 +1204,23 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         newargs[i] = ''
     newargs = [a for a in newargs if a]
 
-    if has_dash_c or has_dash_S:
+    if has_dash_c or has_dash_S or has_dash_E:
       if has_dash_c:
         if '-emit-llvm' in newargs:
           final_suffix = '.bc'
         else:
           final_suffix = options.default_object_extension
+        target = target_basename + final_suffix
       elif has_dash_S:
         if '-emit-llvm' in newargs:
           final_suffix = '.ll'
         else:
           final_suffix = '.s'
-      target = target_basename + final_suffix
+        target = target_basename + final_suffix
 
       if len(input_files) > 1 and specified_target:
-        exit_with_error('cannot specify -o with -c/-S and multiple source files')
+        exit_with_error('cannot specify -o with -c/-S/-E and multiple source files')
 
-    if has_dash_E:
-      final_suffix = '.eout' # not bitcode, not js; but just result from preprocessing stage of the input file
     if '-M' in newargs or '-MM' in newargs:
       final_suffix = '.mout' # not bitcode, not js; but just dependency rule of the input file
 
@@ -1575,11 +1574,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.ERROR_ON_UNDEFINED_SYMBOLS = 0
       shared.Settings.WARN_ON_UNDEFINED_SYMBOLS = 0
 
-    if shared.Settings.WARN_ON_UNDEFINED_SYMBOLS:
-      diagnostics.enable_warning('undefined', shared.Settings.ERROR_ON_UNDEFINED_SYMBOLS)
-    else:
-      diagnostics.disable_warning('undefined')
-
     if shared.Settings.ASYNCIFY:
       if not shared.Settings.WASM_BACKEND:
         exit_with_error('ASYNCIFY has been removed from fastcomp. There is a new implementation which can be used in the upstream wasm backend.')
@@ -1909,12 +1903,14 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         exit_with_error('MEM_INIT_METHOD is not supported in wasm. Memory will be embedded in the wasm binary if threads are not used, and included in a separate file if threads are used.')
       if shared.Settings.WASM2JS:
         shared.Settings.MAYBE_WASM2JS = 1
-        # wasm2js does not support passive segments or atomics
-        if shared.Settings.USE_PTHREADS:
-          exit_with_error('WASM2JS does not yet support pthreads')
-        # in wasm2js, keep the mem init in the wasm itself if we can and if the
-        # options wouldn't tell a js build to use a separate mem init file
-        shared.Settings.MEM_INIT_IN_WASM = not options.memory_init_file or shared.Settings.SINGLE_FILE
+        # when using wasm2js, if the memory segments are in the wasm then they
+        # end up converted by wasm2js into base64 encoded JS. alternatively, we
+        # can use a .mem file like asm.js used to.
+        # generally we follow what the options tell us to do (which is to use
+        # a .mem file in most cases, since it is binary & compact). however, for
+        # pthreads we must keep the memory segments in the wasm as they will be
+        # passive segments which the .mem format cannot handle.
+        shared.Settings.MEM_INIT_IN_WASM = not options.memory_init_file or shared.Settings.SINGLE_FILE or shared.Settings.USE_PTHREADS
       else:
         # wasm includes the mem init in the wasm binary. The exception is
         # wasm2js, which behaves more like js.
@@ -2157,22 +2153,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           return CXX
         return CC
 
-      # Precompiled headers support
-      if has_header_inputs:
-        headers = [header for _, header in input_files]
-        for header in headers:
-          if not header.endswith(HEADER_ENDINGS):
-            exit_with_error('cannot mix precompile headers with non-header inputs: ' + str(headers) + ' : ' + header)
-          cxx = use_cxx(header)
-          compiler = get_compiler(cxx)
-          base_cflags = shared.get_cflags(args, cxx)
-          cmd = [compiler] + base_cflags + cflags + compile_args + [header]
-          if specified_target:
-            cmd += ['-o', specified_target]
-          cmd = system_libs.process_args(cmd, shared.Settings)
-          logger.debug("running (for precompiled headers): " + cmd[0] + ' ' + ' '.join(cmd[1:]))
-          return run_process(cmd, check=False).returncode
-
       def get_clang_command(src_file):
         cxx = use_cxx(src_file)
         base_cflags = shared.get_cflags(args, cxx)
@@ -2193,6 +2173,27 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           # output the dependency rule. Warning: clang and gcc behave differently
           # with -MF! (clang seems to not recognize it)
           logger.debug(('just preprocessor ' if has_dash_E else 'just dependencies: ') + ' '.join(cmd))
+          shared.print_compiler_stage(cmd)
+          rtn = run_process(cmd, check=False).returncode
+          if rtn:
+            return rtn
+        return 0
+
+      # Precompiled headers support
+      if has_header_inputs:
+        headers = [header for _, header in input_files]
+        for header in headers:
+          if not header.endswith(HEADER_ENDINGS):
+            exit_with_error('cannot mix precompile headers with non-header inputs: ' + str(headers) + ' : ' + header)
+          cxx = use_cxx(header)
+          compiler = get_compiler(cxx)
+          base_cflags = shared.get_cflags(args, cxx)
+          cmd = [compiler] + base_cflags + cflags + compile_args + [header]
+          if specified_target:
+            cmd += ['-o', specified_target]
+          cmd = system_libs.process_args(cmd, shared.Settings)
+          logger.debug("running (for precompiled headers): " + cmd[0] + ' ' + ' '.join(cmd[1:]))
+          shared.print_compiler_stage(cmd)
           return run_process(cmd, check=False).returncode
 
       def get_object_filename(input_file):
