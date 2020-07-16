@@ -812,12 +812,13 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     wat = self.get_wasm_text(wasm)
     return ('(export "%s"' % name) in wat
 
-  def run_generated_code(self, engine, filename, args=[], output_nicerizer=None, assert_returncode=0):
+  def run_js(self, filename, engine=None, args=[], output_nicerizer=None, assert_returncode=0):
     # use files, as PIPE can get too full and hang us
     stdout = self.in_dir('stdout')
     stderr = self.in_dir('stderr')
     # Make sure that we produced proper line endings to the .js file we are about to run.
-    self.assertEqual(line_endings.check_line_endings(filename), 0)
+    if not filename.endswith('.wasm'):
+      self.assertEqual(line_endings.check_line_endings(filename), 0)
     error = None
     if EMTEST_VERBOSE:
       print("Running '%s' under '%s'" % (filename, engine))
@@ -886,13 +887,17 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
                                       fromfile=fromfile, tofile=tofile)
     diff = ''.join([a.rstrip() + '\n' for a in diff_lines])
     if EMTEST_VERBOSE:
-      print("Expected to have '%s' == '%s'" % limit_size(values[0]), limit_size(y))
+      print("Expected to have '%s' == '%s'" % (limit_size(values[0]), limit_size(y)))
     fail_message = 'Unexpected difference:\n' + limit_size(diff)
     if not EMTEST_VERBOSE:
       fail_message += '\nFor full output run with EMTEST_VERBOSE=1.'
     if msg:
       fail_message += '\n' + msg
     self.fail(fail_message)
+
+  def assertIdenticalUrlEncoded(self, expected, actual, **kwargs):
+    """URL decodes the `actual` parameter before checking for equality."""
+    self.assertIdentical(expected, unquote(actual), **kwargs)
 
   def assertTextDataContained(self, text1, text2):
     text1 = text1.replace('\r\n', '\n')
@@ -1267,7 +1272,7 @@ class RunnerCore(RunnerMeta('TestCase', (unittest.TestCase,), {})):
     if len(engines) == 0:
       self.skipTest('No JS engine present to run this test with. Check %s and the paths therein.' % EM_CONFIG)
     for engine in engines:
-      js_output = self.run_generated_code(engine, js_file, args, output_nicerizer=output_nicerizer, assert_returncode=assert_returncode)
+      js_output = self.run_js(js_file, engine, args, output_nicerizer=output_nicerizer, assert_returncode=assert_returncode)
       js_output = js_output.replace('\r\n', '\n')
       if expected_output:
         try:
@@ -1566,7 +1571,7 @@ class BrowserCore(RunnerCore):
         else:
           # verify the result, and try again if we should do so
           try:
-            self.assertIdentical(expectedResult, output)
+            self.assertIdenticalUrlEncoded(expectedResult, output)
           except Exception as e:
             if tries_left > 0:
               print('[test error (see below), automatically retrying]')

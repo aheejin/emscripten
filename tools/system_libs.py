@@ -678,13 +678,12 @@ class libcompiler_rt(Library):
   cflags = ['-O2', '-fno-builtin']
   src_dir = ['system', 'lib', 'compiler-rt', 'lib', 'builtins']
   if shared.Settings.WASM_BACKEND:
-    filelist = shared.path_from_root('system', 'lib', 'compiler-rt', 'filelist.txt')
-    src_files = open(filelist).read().splitlines()
+    src_files = glob_in_path(src_dir, '*.c')
     src_files.append(shared.path_from_root('system', 'lib', 'compiler-rt', 'extras.c'))
     src_files.append(shared.path_from_root('system', 'lib', 'compiler-rt', 'stack_ops.s'))
   else:
     src_files = ['divdc3.c', 'divsc3.c', 'muldc3.c', 'mulsc3.c']
-  src_files.append('emscripten_setjmp.c')
+  src_files.append(shared.path_from_root('system', 'lib', 'compiler-rt', 'emscripten_setjmp.c'))
 
 
 class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
@@ -716,7 +715,7 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
     # musl modules
     ignore = [
         'ipc', 'passwd', 'thread', 'signal', 'sched', 'ipc', 'time', 'linux',
-        'aio', 'exit', 'legacy', 'mq', 'process', 'search', 'setjmp', 'env',
+        'aio', 'exit', 'legacy', 'mq', 'search', 'setjmp', 'env',
         'ldso', 'conf'
     ]
 
@@ -729,6 +728,8 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
         'usleep.c', 'alarm.c', 'syscall.c', '_exit.c', 'popen.c',
         'getgrouplist.c', 'initgroups.c', 'wordexp.c', 'timer_create.c',
         'faccessat.c',
+        # 'process' exclusion
+        'fork.c', 'vfork.c', 'posix_spawn.c', 'execve.c', 'waitid.c', 'system.c'
     ]
 
     ignore += LIBC_SOCKETS
@@ -1006,7 +1007,6 @@ class libcxx(NoBCLibrary, NoExceptLibrary, MTLibrary):
     'vector.cpp',
     os.path.join('experimental', 'memory_resource.cpp'),
     os.path.join('filesystem', 'directory_iterator.cpp'),
-    os.path.join('filesystem', 'int128_builtins.cpp'),
     os.path.join('filesystem', 'operations.cpp')
   ]
 
@@ -1321,12 +1321,13 @@ class libubsan_minimal_rt_wasm(CompilerRTWasmLibrary, MTLibrary):
 
   includes = [['system', 'lib', 'compiler-rt', 'lib']]
   src_dir = ['system', 'lib', 'compiler-rt', 'lib', 'ubsan_minimal']
-  src_files = ['ubsan_minimal_handlers.cpp']
+  src_files = ['ubsan_minimal_handlers.cc']
 
 
 class libsanitizer_common_rt_wasm(CompilerRTWasmLibrary, MTLibrary):
   name = 'libsanitizer_common_rt_wasm'
-  includes = [['system', 'lib', 'libc', 'musl', 'src', 'internal']]
+  includes = [['system', 'lib', 'libc', 'musl', 'src', 'internal'],
+              ['system', 'lib', 'compiler-rt', 'lib']]
   never_force = True
 
   src_dir = ['system', 'lib', 'compiler-rt', 'lib', 'sanitizer_common']
@@ -2004,22 +2005,32 @@ def dependency_order(port_list):
   return stack
 
 
-def get_needed_ports(settings):
-  # Start with directly needed ports, and transitively add dependencies
-  needed = set(p for p in ports.ports if p.needed(settings))
-
+def resolve_dependencies(port_set, settings):
   def add_deps(node):
     node.process_dependencies(settings)
     for d in node.deps:
       dep = ports.ports_by_name[d]
-      if dep not in needed:
-        needed.add(dep)
+      if dep not in port_set:
+        port_set.add(dep)
         add_deps(dep)
 
-  for port in list(needed):
+  for port in list(port_set):
     add_deps(port)
 
+
+def get_needed_ports(settings):
+  # Start with directly needed ports, and transitively add dependencies
+  needed = set(p for p in ports.ports if p.needed(settings))
+  resolve_dependencies(needed, settings)
   return needed
+
+
+def build_port(port_name, settings):
+  port = ports.ports_by_name[port_name]
+  port_set = set((port,))
+  resolve_dependencies(port_set, settings)
+  for port in dependency_order(port_set):
+    port.get(Ports, settings, shared)
 
 
 def process_args(args, settings):
@@ -2036,15 +2047,6 @@ def process_args(args, settings):
     args += port.process_args(Ports)
 
   return args
-
-
-# get a single port
-def get_port(name, settings):
-  port = ports.ports_by_name[name]
-  if hasattr(port, "process_dependencies"):
-    port.process_dependencies(settings)
-  # ports return their output files, which will be linked, or a txt file
-  return [f for f in port.get(Ports, settings, shared) if not f.endswith('.txt')]
 
 
 def show_ports():
