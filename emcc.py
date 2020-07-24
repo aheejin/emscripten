@@ -797,8 +797,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
   # This check comes after check_sanity because test_sanity expects this.
   if not args:
-    logger.warning('no input files')
-    return 1
+    exit_with_error('no input files')
 
   if '-dumpmachine' in args:
     print(shared.get_llvm_target())
@@ -986,6 +985,12 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # This needs to run before other cmdline flags have been parsed, so that
     # warnings are properly printed during arg parse.
     newargs = diagnostics.capture_warnings(newargs)
+
+    if not shared.CONFIG_FILE:
+      diagnostics.warning('deprecated', 'Specifying EM_CONFIG as a python literal is deprecated. Please use a file instead.')
+
+    if sys.version_info < (3, 0, 0) and 'EMCC_ALLOW_PYTHON2' not in os.environ:
+      diagnostics.warning('deprecated', 'Support for running emscripten with python2 is deprecated.  Please update to python3 as soon as possible (See https://github.com/emscripten-core/emscripten/issues/7198')
 
     for i in range(len(newargs)):
       if newargs[i] in ('-l', '-L', '-I'):
