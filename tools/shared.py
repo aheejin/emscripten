@@ -1103,12 +1103,6 @@ def verify_settings():
       # Requesting both Wasm and Wasm2JS support
       Settings.WASM2JS = 1
 
-    if Settings.CYBERDWARF:
-      exit_with_error('emcc: CYBERDWARF is not supported by the LLVM wasm backend')
-
-    if Settings.EMULATED_FUNCTION_POINTERS:
-      exit_with_error('emcc: EMULATED_FUNCTION_POINTERS is not meaningful with the wasm backend.')
-
 
 def print_compiler_stage(cmd):
   """Emulate the '-v' of clang/gcc by printing the name of the sub-command
@@ -1232,7 +1226,7 @@ class JS(object):
     settings = settings or Settings
     if sig == 'i':
       return '0'
-    elif sig == 'f' and settings.get('PRECISE_F32'):
+    elif sig == 'f':
       return 'Math_fround(0)'
     elif sig == 'j':
       if settings:
@@ -1252,7 +1246,7 @@ class JS(object):
       return value + '|0'
     if sig in JS.FLOAT_SIGS and convert_from == 'i':
       value = '(' + value + '|0)'
-    if sig == 'f' and settings.get('PRECISE_F32'):
+    if sig == 'f':
       if ffi_arg:
         return '+Math_fround(' + value + ')'
       elif ffi_result:

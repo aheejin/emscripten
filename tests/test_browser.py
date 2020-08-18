@@ -2686,6 +2686,23 @@ Module["preRun"].push(function () {
   def test_webgl2_pbo(self):
     self.btest(path_from_root('tests', 'webgl2_pbo.cpp'), args=['-s', 'MAX_WEBGL_VERSION=2', '-lGL'], expected='0')
 
+  @no_firefox('fails on CI likely due to GPU drivers there')
+  @requires_graphics_hardware
+  def test_webgl2_sokol_mipmap(self):
+    self.btest(path_from_root('tests', 'third_party', 'sokol', 'mipmap-emsc.c'), args=['-s', 'MAX_WEBGL_VERSION=2', '-lGL', '-O1'],
+               reference=os.path.join('third_party', 'sokol', 'mipmap-emsc.png'), reference_slack=2)
+
+  @no_firefox('fails on CI likely due to GPU drivers there')
+  @requires_graphics_hardware
+  def test_webgl2_sokol_mrt(self):
+    self.btest(path_from_root('tests', 'third_party', 'sokol', 'mrt-emcc.c'), args=['-s', 'MAX_WEBGL_VERSION=2', '-lGL'],
+               reference=os.path.join('third_party', 'sokol', 'mrt-emcc.png'))
+
+  @requires_graphics_hardware
+  def test_webgl2_sokol_arraytex(self):
+    self.btest(path_from_root('tests', 'third_party', 'sokol', 'arraytex-emsc.c'), args=['-s', 'MAX_WEBGL_VERSION=2', '-lGL'],
+               reference=os.path.join('third_party', 'sokol', 'arraytex-emsc.png'))
+
   def test_sdl_touch(self):
     for opts in [[], ['-O2', '-g1', '--closure', '1']]:
       print(opts)
@@ -2700,17 +2717,6 @@ Module["preRun"].push(function () {
     for opts in [[], ['-O2', '-g1', '--closure', '1']]:
       print(opts)
       self.btest(path_from_root('tests', 'test_sdl_mousewheel.c'), args=opts + ['-DAUTOMATE_SUCCESS=1', '-lSDL', '-lGL'], expected='0')
-
-  @no_wasm_backend('asm.js-specific')
-  def test_codemods(self):
-    # tests asm.js client-side code modifications
-    for opt_level in [0, 2]:
-      print('opt level', opt_level)
-      opts = ['-O' + str(opt_level), '-s', 'WASM=0']
-      # sanity checks, building with and without precise float semantics generates different results
-      self.btest(path_from_root('tests', 'codemods.cpp'), expected='2', args=opts)
-      self.btest(path_from_root('tests', 'codemods.cpp'), expected='1', args=opts + ['-s', 'PRECISE_F32=1'])
-      self.btest(path_from_root('tests', 'codemods.cpp'), expected='1', args=opts + ['-s', 'PRECISE_F32=2', '--separate-asm']) # empty polyfill, but browser has support, so semantics are like float
 
   @no_fastcomp("no asyncify support")
   def test_wget(self):
@@ -3206,19 +3212,20 @@ window.close = function() {
     self.btest('sdl2_mixer_wav.c', expected='1', args=['--preload-file', 'sound.wav', '-s', 'USE_SDL=2', '-s', 'USE_SDL_MIXER=2', '-s', 'INITIAL_MEMORY=33554432'])
 
   @parameterized({
-    'ogg': ('ogg', 'alarmvictory_1.ogg'),
-    'mp3': ('mp3', 'pudinha.mp3'),
+    'wav': ([],         '0',            'the_entertainer.wav'),
+    'ogg': (['ogg'],    'MIX_INIT_OGG', 'alarmvictory_1.ogg'),
+    'mp3': (['mp3'],    'MIX_INIT_MP3', 'pudinha.mp3'),
   })
   @requires_sound_hardware
-  def test_sdl2_mixer_music(self, fmt, music_name):
+  def test_sdl2_mixer_music(self, formats, flags, music_name):
     shutil.copyfile(path_from_root('tests', 'sounds', music_name), music_name)
     self.btest('sdl2_mixer_music.c', expected='1', args=[
       '--preload-file', music_name,
       '-DSOUND_PATH=' + json.dumps(music_name),
-      '-DFLAGS=' + ('MIX_INIT_' + fmt.upper() if fmt else '0'),
+      '-DFLAGS=' + flags,
       '-s', 'USE_SDL=2',
       '-s', 'USE_SDL_MIXER=2',
-      '-s', 'SDL2_MIXER_FORMATS=' + json.dumps([fmt] if fmt else []),
+      '-s', 'SDL2_MIXER_FORMATS=' + json.dumps(formats),
       '-s', 'INITIAL_MEMORY=33554432'
     ])
 
@@ -3652,12 +3659,11 @@ window.close = function() {
     # Therefore perform very extensive testing of different codegen modes to catch any problems.
     for opt in [[], ['-O1'], ['-O2'], ['-O3'], ['-O3', '-s', 'AGGRESSIVE_VARIABLE_ELIMINATION=1'], ['-Os']]:
       for debug in [[], ['-g1'], ['-g2'], ['-g4']]:
-        for f32 in [[], ['-s', 'PRECISE_F32=1', '--separate-asm', '-s', 'WASM=0']]:
-          args = opt + debug + f32
-          print(args)
-          if self.is_wasm_backend() and '--separate-asm' in args or 'AGGRESSIVE_VARIABLE_ELIMINATION=1' in args:
-            continue
-          self.btest(path_from_root('tests', 'pthread', 'test_pthread_gcc_atomic_fetch_and_op.cpp'), expected='0', args=args + ['-s', 'INITIAL_MEMORY=64MB', '-s', 'USE_PTHREADS=1', '-s', 'PTHREAD_POOL_SIZE=8'])
+        args = opt + debug
+        print(args)
+        if self.is_wasm_backend() and 'AGGRESSIVE_VARIABLE_ELIMINATION=1' in args:
+          continue
+        self.btest(path_from_root('tests', 'pthread', 'test_pthread_gcc_atomic_fetch_and_op.cpp'), expected='0', args=args + ['-s', 'INITIAL_MEMORY=64MB', '-s', 'USE_PTHREADS=1', '-s', 'PTHREAD_POOL_SIZE=8'])
 
   # 64 bit version of the above test.
   @requires_threads

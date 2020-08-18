@@ -29,8 +29,8 @@
 //
 // In general it is best to pass the same arguments at both compile and link
 // time, as whether wasm object files are used or not affects when codegen
-// happens (without wasm object files, or when using fastcomp, codegen is all
-// during link; otherwise, it is during compile). Flags affecting codegen must
+// happens (without wasm object files, codegen is done entirely during
+// link; otherwise, it is during compile). Flags affecting codegen must
 // be passed when codegen happens, so to let a build easily switch when codegen
 // happens (LTO vs normal), pass the flags at both times. The flags are also
 // annotated in this file:
@@ -149,12 +149,6 @@ var MALLOC = "dlmalloc";
 // [link]
 var ABORTING_MALLOC = 1;
 
-// If 1, generated a version of memcpy() and memset() that unroll their
-// copy sizes. If 0, optimizes for size instead to generate a smaller memcpy.
-// This flag only has effect when targeting asm.js.
-// [fastcomp-only]
-var FAST_UNROLLED_MEMCPY_AND_MEMSET = 1;
-
 // The initial amount of memory to use. Using more memory than this will
 // cause us to expand the heap, which can be costly with typed arrays:
 // we need to copy the old heap into a new one in that case.
@@ -238,55 +232,11 @@ var ALLOW_TABLE_GROWTH = 0;
 // default, any other value will be used as an override
 var GLOBAL_BASE = -1;
 
-// where the stack will begin. -1 means use the default. if the stack cannot
-// start at the value specified here, it may start at a higher location.
-// this is useful when debugging two builds that may differ in their static
-// allocations, by forcing the stack to start in the same place their
-// memory usage patterns would be the same.
-
-// How to load and store 64-bit doubles.  A potential risk is that doubles may
-// be only 32-bit aligned. Forcing 64-bit alignment in Clang itself should be
-// able to solve that, or as a workaround in DOUBLE_MODE 1 we will carefully
-// load in parts, in a way that requires only 32-bit alignment. In DOUBLE_MODE 0
-// we will simply store and load doubles as 32-bit floats, so when they are
-// stored/loaded they will truncate from 64 to 32 bits, and lose precision. This
-// is faster, and might work for some code (but probably that code should just
-// use floats and not doubles anyhow).  Note that a downside of DOUBLE_MODE 1 is
-// that we currently store the double in parts, then load it aligned, and that
-// load-store will make JS engines alter it if it is being stored to a typed
-// array for security reasons. That will 'fix' the number from being a NaN or an
-// infinite number.
-// [fastcomp-only]
-var DOUBLE_MODE = 1;
-
 // Warn at compile time about instructions that LLVM tells us are not fully
 // aligned.  This is useful to find places in your code where you might refactor
 // to ensure proper alignment.  This is currently only supported in asm.js, not
 // wasm.
 var WARN_UNALIGNED = 0;
-
-// 0: Use JS numbers for floating-point values. These are 64-bit and do not model C++
-//    floats exactly, which are 32-bit.
-// 1: Model C++ floats precisely, using Math.fround, polyfilling when necessary. This
-//    can be slow if the polyfill is used on heavy float32 computation. See note on
-//    browser support below.
-// 2: Model C++ floats precisely using Math.fround if available in the JS engine, otherwise
-//    use an empty polyfill. This will have much less of a speed penalty than using the full
-//    polyfill in cases where engine support is not present. In addition, we can
-//    remove the empty polyfill calls themselves on the client when generating html,
-//    which should mean that this gives you the best of both worlds of 0 and 1, and is
-//    therefore recommended, *unless* you need a guarantee of proper float32 precision
-//    (in that case, use option 1).
-// XXX Note: To optimize float32-using code, we use the 'const' keyword in the emitted
-//           code. This allows us to avoid unnecessary calls to Math.fround, which would
-//           slow down engines not yet supporting that function. 'const' is present in
-//           all modern browsers, including Firefox, Chrome and Safari, but in IE is only
-//           present in IE11 and above. Therefore if you need to support legacy versions of
-//           IE, you should not enable PRECISE_F32 1 or 2.
-// [fastcomp-only]
-// With upstream backend and WASM=0, JS output always uses Math.fround for consistent
-// behavior with WebAssembly.
-var PRECISE_F32 = 0;
 
 // Whether closure compiling is being run on this output
 var USE_CLOSURE_COMPILER = 0;
@@ -336,8 +286,7 @@ var SAFE_HEAP = 0;
 var SAFE_HEAP_LOG = 0;
 
 // In asm.js mode, we cannot simply add function pointers to function tables, so
-// we reserve some slots for them. An alternative to this is to use
-// EMULATED_FUNCTION_POINTERS, in which case we don't need to reserve.
+// we reserve some slots for them.
 // [fastcomp-only]
 var RESERVED_FUNCTION_POINTERS = 0;
 
@@ -346,27 +295,6 @@ var RESERVED_FUNCTION_POINTERS = 0;
 // compares function pointers across different types.
 // [fastcomp-only]
 var ALIASING_FUNCTION_POINTERS = 0;
-
-// asm.js: By default we implement function pointers using asm.js function
-// tables, which is very fast. With this option, we implement them more flexibly
-// by emulating them: we call out into JS, which handles the function tables.
-//  1: Full emulation. This means you can modify the
-//     table in JS fully dynamically, not just add to
-//     the end.
-//  2: Optimized emulation. Assumes once something is
-//     added to the table, it will not change. This allows
-//     dynamic linking while keeping performance fast,
-//     as we can do a fast call into the internal table
-//     if the fp is in the right range. Shared modules
-//     (MAIN_MODULE, SIDE_MODULE) do this by default.
-//     This requires RELOCATABLE to be set.
-// wasm:
-// By default we use a wasm Table for function pointers, which is fast and
-// efficient. When enabling emulation, we also use the Table *outside* the wasm
-// module, exactly as when emulating in asm.js, just replacing the plain JS
-// array with a Table.
-// [fastcomp-only]
-var EMULATED_FUNCTION_POINTERS = 0;
 
 // Allows function pointers to be cast, wraps each call of an incorrect type
 // with a runtime correction.  This adds overhead and should not be used
@@ -1532,14 +1460,6 @@ var ELIMINATE_DUPLICATE_FUNCTIONS_PASSES = 5;
 // to optimize ctors with lowest priority. We do know that, and can optimize all
 // the ctors.
 var EVAL_CTORS = 0;
-
-// see http://kripken.github.io/emscripten-site/docs/debugging/CyberDWARF.html
-// [fastcomp-only]
-var CYBERDWARF = 0;
-
-// Path to the CyberDWARF debug file passed to the compiler
-// [fastcomp-only]
-var BUNDLED_CD_DEBUG_FILE = "";
 
 // Is enabled, use the JavaScript TextDecoder API for string marshalling.
 // Enabled by default, set this to 0 to disable.
