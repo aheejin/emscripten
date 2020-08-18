@@ -54,70 +54,6 @@ def access_quote(prop):
     return '.' + prop
 
 
-def emscript_fastcomp(infile, outfile, memfile, temp_files, DEBUG):
-  """Runs the emscripten LLVM-to-JS compiler.
-
-  Args:
-    infile: The path to the input LLVM assembly file.
-    outfile: An open file object where the output is written.
-  """
-
-  assert shared.Settings.ASM_JS, 'fastcomp is asm.js-only (mode 1 or 2)'
-
-  success = False
-
-  try:
-
-    # Overview:
-    #   * Run LLVM backend to emit JS. JS includes function bodies, memory initializer,
-    #     and various metadata
-    #   * Run compiler.js on the metadata to emit the shell js code, pre/post-ambles,
-    #     JS library dependencies, etc.
-
-    # metadata is modified by reference in some of the below
-    # these functions are split up to force variables to go out of scope and allow
-    # memory to be reclaimed
-
-    with ToolchainProfiler.profile_block('get_and_parse_backend'):
-      backend_output = compile_js(infile, temp_files, DEBUG)
-      funcs, metadata, mem_init = parse_fastcomp_output(backend_output, DEBUG)
-      fixup_metadata_tables(metadata)
-      funcs = fixup_functions(funcs, metadata)
-    with ToolchainProfiler.profile_block('compiler_glue'):
-      glue, forwarded_data = compiler_glue(metadata, temp_files, DEBUG)
-
-    with ToolchainProfiler.profile_block('function_tables_and_exports'):
-      (post, function_table_data, bundled_args) = (
-          function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data, outfile, DEBUG))
-    with ToolchainProfiler.profile_block('write_output_file'):
-      finalize_output(outfile, post, function_table_data, bundled_args, metadata, DEBUG)
-    success = True
-
-  finally:
-    outfile.close()
-    if not success:
-      shared.try_delete(outfile.name) # remove partial output
-
-
-def compile_js(infile, temp_files, DEBUG):
-  """Compile infile with asm.js backend, return the contents of the compiled js"""
-  with temp_files.get_file('.4.js') as temp_js:
-    backend_cmd = create_backend_cmd(infile, temp_js)
-
-    if DEBUG:
-      logger.debug('emscript: llvm backend: ' + ' '.join(backend_cmd))
-      t = time.time()
-    shared.print_compiler_stage(backend_cmd)
-    with ToolchainProfiler.profile_block('emscript_llvm_backend'):
-      shared.check_call(backend_cmd)
-    if DEBUG:
-      logger.debug('  emscript: llvm backend took %s seconds' % (time.time() - t))
-
-    # Split up output
-    backend_output = open(temp_js).read()
-  return backend_output
-
-
 def parse_fastcomp_output(backend_output, DEBUG):
   start_funcs_marker = '// EMSCRIPTEN_START_FUNCTIONS'
   end_funcs_marker = '// EMSCRIPTEN_END_FUNCTIONS'
@@ -428,21 +364,6 @@ def function_tables_and_exports(funcs, metadata, mem_init, glue, forwarded_data,
   return (post, function_table_data, bundled_args)
 
 
-def finalize_output(outfile, post, function_table_data, bundled_args, metadata, DEBUG):
-  function_table_sigs = function_table_data.keys()
-  module = create_module_asmjs(function_table_sigs, metadata, *bundled_args)
-
-  if DEBUG:
-    logger.debug('emscript: python processing: finalize')
-    t = time.time()
-
-  write_output_file(outfile, post, module)
-  module = None
-
-  if DEBUG:
-    logger.debug('  emscript: python processing: finalize took %s seconds' % (time.time() - t))
-
-
 # Given JS code that consists only exactly of a series of "var a = ...;\n var b = ...;" statements,
 # this function collapses the redundant 'var ' statements at the beginning of each line to a
 # single var a =..., b=..., c=...; statement.
@@ -482,59 +403,6 @@ def create_global_initializer(initializers):
   return global_initializer
 
 
-def create_module_asmjs(function_table_sigs, metadata,
-                        funcs_js, asm_setup, the_global, sending, receiving, asm_global_vars,
-                        asm_global_funcs, pre_tables, final_function_tables, exports):
-  receiving += create_named_globals(metadata)
-  runtime_funcs = create_runtime_funcs_asmjs(exports, metadata)
-
-  asm_start_pre = create_asm_start_pre(asm_setup, the_global, sending, metadata)
-  memory_views = create_memory_views(metadata)
-  asm_temp_vars = create_asm_temp_vars(metadata)
-  asm_runtime_thread_local_vars = create_asm_runtime_thread_local_vars()
-
-  stack = ''
-  if not shared.Settings.RELOCATABLE and not (shared.Settings.WASM and shared.Settings.SIDE_MODULE):
-    if 'STACKTOP' in shared.Settings.ASM_PRIMITIVE_VARS:
-      stack += apply_memory('  var STACKTOP = {{{ STACK_BASE }}};\n')
-    if 'STACK_MAX' in shared.Settings.ASM_PRIMITIVE_VARS:
-      stack += apply_memory('  var STACK_MAX = {{{ STACK_MAX }}};\n')
-
-  if 'tempFloat' in shared.Settings.ASM_PRIMITIVE_VARS:
-    temp_float = '  var tempFloat = %s;\n' % 'Math_fround(0)'
-  else:
-    temp_float = ''
-  f0_fround = '  const f0 = Math_fround(0);\n'
-
-  replace_memory = create_replace_memory(metadata)
-
-  start_funcs_marker = '\n// EMSCRIPTEN_START_FUNCS\n'
-
-  asm_end = create_asm_end(exports)
-
-  asm_variables = collapse_redundant_vars(memory_views + asm_global_vars + asm_temp_vars + asm_runtime_thread_local_vars + '\n' + asm_global_funcs + stack + temp_float + f0_fround)
-  asm_global_initializer = create_global_initializer(metadata['initializers'])
-
-  module = [
-    asm_start_pre,
-    asm_variables,
-    replace_memory,
-    start_funcs_marker,
-    asm_global_initializer
-  ] + runtime_funcs + funcs_js + [
-    '\n  ',
-    pre_tables, final_function_tables, asm_end,
-    '\n', receiving, ';\n'
-  ]
-
-  if shared.Settings.SIDE_MODULE:
-    module.append('''
-parentModule['registerFunctions'](%s, Module);
-''' % str([str(f) for f in function_table_sigs]))
-
-  return module
-
-
 def write_output_file(outfile, post, module):
   for i in range(len(module)): # do this loop carefully to save memory
     module[i] = normalize_line_endings(module[i])
@@ -542,49 +410,6 @@ def write_output_file(outfile, post, module):
 
   post = normalize_line_endings(post)
   outfile.write(post)
-
-
-def create_backend_cmd(infile, temp_js):
-  """Create asm.js backend command from settings dict"""
-  args = [
-    shared.LLVM_COMPILER, infile, '-march=js', '-filetype=asm', '-o', temp_js,
-    '-emscripten-stack-size=%d' % shared.Settings.TOTAL_STACK,
-    '-O%s' % shared.Settings.OPT_LEVEL,
-  ]
-  if shared.Settings.USE_PTHREADS:
-    args += ['-emscripten-enable-pthreads']
-  if shared.Settings.WARN_UNALIGNED:
-    args += ['-emscripten-warn-unaligned']
-  if shared.Settings.RESERVED_FUNCTION_POINTERS > 0:
-    args += ['-emscripten-reserved-function-pointers=%d' % shared.Settings.RESERVED_FUNCTION_POINTERS]
-  if shared.Settings.ASSERTIONS > 0:
-    args += ['-emscripten-assertions=%d' % shared.Settings.ASSERTIONS]
-  if shared.Settings.ALIASING_FUNCTION_POINTERS == 0:
-    args += ['-emscripten-no-aliasing-function-pointers']
-  if shared.Settings.EMULATE_FUNCTION_POINTER_CASTS:
-    args += ['-emscripten-emulate-function-pointer-casts']
-  if shared.Settings.RELOCATABLE:
-    args += ['-emscripten-relocatable']
-    args += ['-emscripten-global-base=0']
-  elif shared.Settings.GLOBAL_BASE >= 0:
-    args += ['-emscripten-global-base=%d' % shared.Settings.GLOBAL_BASE]
-  if shared.Settings.SIDE_MODULE:
-    args += ['-emscripten-side-module']
-  if shared.Settings.LEGALIZE_JS_FFI != 1:
-    args += ['-emscripten-legalize-javascript-ffi=0']
-  if shared.Settings.DISABLE_EXCEPTION_CATCHING != 1:
-    args += ['-enable-emscripten-cpp-exceptions']
-    if shared.Settings.DISABLE_EXCEPTION_CATCHING == 2:
-      args += ['-emscripten-cpp-exceptions-whitelist=' + ','.join(shared.Settings.EXCEPTION_CATCHING_ALLOWED or ['fake'])]
-  if not shared.Settings.EXIT_RUNTIME:
-    args += ['-emscripten-no-exit-runtime']
-  if shared.Settings.WORKAROUND_IOS_9_RIGHT_SHIFT_BUG:
-    args += ['-emscripten-asmjs-work-around-ios-9-right-shift-bug']
-  if shared.Settings.WASM:
-    args += ['-emscripten-wasm']
-    if building.is_wasm_only():
-      args += ['-emscripten-only-wasm']
-  return args
 
 
 def optimize_syscalls(declares, DEBUG):
@@ -646,10 +471,6 @@ def update_settings_glue(metadata, DEBUG):
   if shared.Settings.SIDE_MODULE:
     # we don't need any JS library contents in side modules
     shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE = []
-
-  if metadata.get('cantValidate') and shared.Settings.ASM_JS != 2:
-    diagnostics.warning('almost-asm', 'disabling asm.js validation due to use of non-supported features: ' + metadata['cantValidate'])
-    shared.Settings.ASM_JS = 2
 
   all_funcs = shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE + [shared.JS.to_nice_ident(d) for d in metadata['declares']]
   implemented_funcs = [x[1:] for x in metadata['implementedFunctions']]
@@ -858,9 +679,15 @@ def get_all_implemented(forwarded_json, metadata):
 
 
 def report_missing_symbols(all_implemented, pre):
+  required_symbols = set(shared.Settings.USER_EXPORTED_FUNCTIONS)
+  # In standalone mode a request for `_main` is interpreted as a request for `_start`
+  # so don't warn about mossing main.
+  if shared.Settings.STANDALONE_WASM and '_main' in required_symbols:
+    required_symbols.discard('_main')
+
   # the initial list of missing functions are that the user explicitly exported
   # but were not implemented in compiled code
-  missing = list(set(shared.Settings.USER_EXPORTED_FUNCTIONS) - all_implemented)
+  missing = list(required_symbols - all_implemented)
 
   for requested in missing:
     if ('function ' + asstr(requested)) in pre:
@@ -1092,10 +919,6 @@ def make_function_tables_defs(implemented_functions, all_implemented, function_t
     start = raw.index('[')
     end = raw.rindex(']')
     body = raw[start + 1:end].split(',')
-    for j in range(shared.Settings.RESERVED_FUNCTION_POINTERS):
-      curr = 'jsCall_%s_%s' % (sig, j)
-      body[1 + j] = curr
-      implemented_functions.add(curr)
     Counter.next_item = 0
 
     def fix_item(item):
@@ -1199,16 +1022,6 @@ function dynCall_%s(index%s%s) {
 }
 ''' % (sig, ',' if len(sig) > 1 else '', args, arg_coercions, ret))
 
-    ffi_args = ','.join([shared.JS.make_coercion('a' + str(i), sig[i], ffi_arg=True) for i in range(1, len(sig))])
-    for i in range(shared.Settings.RESERVED_FUNCTION_POINTERS):
-      jsret = ('return ' if sig[0] != 'v' else '') + shared.JS.make_coercion('jsCall_%s(%d%s%s)' % (sig, i, ',' if ffi_args else '', ffi_args), sig[0], ffi_result=True)
-      function_tables_impls.append('''
-function jsCall_%s_%s(%s) {
-  %s
-  %s;
-}
-
-''' % (sig, i, args, arg_coercions, jsret))
   return function_tables_impls
 
 
@@ -1331,16 +1144,7 @@ def create_asm_setup(debug_tables, function_table_data, invoke_function_names, m
     ''' % (fullname, key, check(barename), side, barename, barename, sig, key, key)
 
   asm_setup += create_invoke_wrappers(invoke_function_names)
-  asm_setup += setup_function_pointers(function_table_sigs)
 
-  return asm_setup
-
-
-def setup_function_pointers(function_table_sigs):
-  asm_setup = ''
-  for sig in function_table_sigs:
-    if shared.Settings.RESERVED_FUNCTION_POINTERS:
-      asm_setup += '\n' + shared.JS.make_jscall(sig) + '\n'
   return asm_setup
 
 
@@ -1363,9 +1167,6 @@ def create_basic_funcs(function_table_sigs, invoke_function_names):
 
   basic_funcs += invoke_function_names
 
-  for sig in function_table_sigs:
-    if shared.Settings.RESERVED_FUNCTION_POINTERS:
-      basic_funcs.append('jsCall_%s' % sig)
   return basic_funcs
 
 
@@ -1641,33 +1442,6 @@ function SAFE_FT_MASK(value, mask) {
 ''' % {'brk_check': brk_check})
 
   return funcs
-
-
-def create_asm_start_pre(asm_setup, the_global, sending, metadata):
-  shared_array_buffer = ''
-  if shared.Settings.USE_PTHREADS and not shared.Settings.WASM:
-    shared_array_buffer = "asmGlobalArg['Atomics'] = Atomics;"
-
-  module_global = 'var asmGlobalArg = ' + the_global + ';'
-  module_library = 'var asmLibraryArg = ' + sending + ';'
-
-  asm_function_top = ('// EMSCRIPTEN_START_ASM\n'
-                      'var asm = (/** @suppress {uselessCode} */ function(global, env, buffer) {')
-
-  use_asm = "'almost asm';"
-  if shared.Settings.ASM_JS == 1:
-    use_asm = "'use asm';"
-
-  lines = [
-    asm_setup,
-    module_global,
-    shared_array_buffer,
-    module_library,
-    asm_function_top,
-    use_asm,
-    create_first_in_asm(),
-  ]
-  return '\n'.join(lines)
 
 
 def create_asm_temp_vars(metadata):
@@ -2445,7 +2219,7 @@ def run(infile, outfile, memfile):
 
   outfile_obj = open(outfile, 'w')
 
-  emscripter = emscript_wasm_backend if shared.Settings.WASM_BACKEND else emscript_fastcomp
+  emscripter = emscript_wasm_backend
   return temp_files.run_and_clean(lambda: emscripter(
       infile, outfile_obj, memfile, temp_files, shared.DEBUG)
   )

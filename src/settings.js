@@ -269,14 +269,6 @@ var IGNORE_CLOSURE_COMPILER_ERRORS = 0;
 // [compile+link]
 var INLINING_LIMIT = 0;
 
-// Run aggressiveVariableElimination in js-optimizer.js
-// [fastcomp-only]
-var AGGRESSIVE_VARIABLE_ELIMINATION = 0;
-
-// Whether to simplify ifs in js-optimizer.js
-// [fastcomp-only]
-var SIMPLIFY_IFS = 1;
-
 // Check each write to the heap, for example, this will give a clear
 // error on what would be segfaults in a native build (like dereferencing
 // 0). See runtime_safe_heap.js for the actual checks performed.
@@ -284,17 +276,6 @@ var SAFE_HEAP = 0;
 
 // Log out all SAFE_HEAP operations
 var SAFE_HEAP_LOG = 0;
-
-// In asm.js mode, we cannot simply add function pointers to function tables, so
-// we reserve some slots for them.
-// [fastcomp-only]
-var RESERVED_FUNCTION_POINTERS = 0;
-
-// Whether to allow function pointers to alias if they have a different type.
-// This can greatly decrease table sizes in asm.js, but can break code that
-// compares function pointers across different types.
-// [fastcomp-only]
-var ALIASING_FUNCTION_POINTERS = 0;
 
 // Allows function pointers to be cast, wraps each call of an incorrect type
 // with a runtime correction.  This adds overhead and should not be used
@@ -617,11 +598,9 @@ var NODEJS_CATCH_EXIT = 1;
 // make the process exit immediately with a non-0 return code.
 var NODEJS_CATCH_REJECTION = 1;
 
-// Whether to enable asyncify transformation
-// This allows to inject some async functions to the C code that appear to be sync
-// e.g. emscripten_sleep
-// On fastcomp this uses the Asyncify IR transform.
-// On upstream this uses the Asyncify pass in Binaryen.
+// Whether to transform the code using asyncify. This makes it possible to
+// call JS functions from synchronous-looking code in C/C++.
+// See https://emscripten.org/docs/porting/asyncify.html
 var ASYNCIFY = 0;
 
 // Imports which can do an sync operation, in addition to the default ones that
@@ -1040,16 +1019,6 @@ var DETERMINISTIC = 0;
 // code, allowing better dead code elimination and minification.
 var MODULARIZE = 0;
 
-// If we separate out asm.js with the --separate-asm option,
-// this is the name of the variable where the generated asm.js
-// Module is assigned to. This name can either be a property
-// of Module, or a freestanding variable name, like "var asmJs".
-// If you are XHRing in multiple asm.js built files, use this option to
-// assign the generated asm.js modules to different variable names
-// so that they do not conflict. Default name is 'Module["asm"]' if a custom
-// name is not passed in.
-var SEPARATE_ASM_MODULE_NAME = '';
-
 // Export using an ES6 Module export rather than a UMD export.  MODULARIZE must
 // be enabled for ES6 exports.
 var EXPORT_ES6 = 0;
@@ -1062,21 +1031,6 @@ var USE_ES6_IMPORT_META = 1;
 // If 1, will just time how long main() takes to execute, and not print out
 // anything at all whatsoever. This is useful for benchmarking.
 var BENCHMARK = 0;
-
-// If 1, generate code in asm.js format. If 2, emits the same code except for
-// omitting 'use asm'.
-// [fastcomp-only]
-var ASM_JS = 1;
-
-// If 1, will finalize the final emitted code, including operations that prevent
-// later js optimizer passes from running, like converting +5 into 5.0 (the js
-// optimizer sees 5.0 as just 5).
-// [fastcomp-only]
-var FINALIZE_ASM_JS = 1;
-
-// see emcc --separate-asm
-// [fastcomp-only]
-var SEPARATE_ASM = 0;
 
 // JS library functions on this list are not converted to JS, and calls to them
 // are turned into abort()s. This is potentially useful for reducing code size.
@@ -1130,8 +1084,8 @@ var EMSCRIPTEN_TRACING = 0;
 // for GLFW3.
 var USE_GLFW = 2;
 
-// Whether to use compile code to WebAssembly. Set this to 0 to compile to
-// asm.js in fastcomp, or JS in upstream.
+// Whether to use compile code to WebAssembly. Set this to 0 to compile to JS
+// instead of wasm.
 //
 // Note that in upstream, WASM=0 behaves very similarly to WASM=1, in particular
 // startup can be either async or sync, so flags like WASM_ASYNC_COMPILATION
@@ -1183,10 +1137,9 @@ var WASM = 1;
 // or specify a list of EXPORTED_FUNCTIONS that does not include `main`.
 var STANDALONE_WASM = 0;
 
-// Whether to use the WebAssembly backend that is in development in LLVM.  You
-// should not set this yourself, instead set EMCC_WASM_BACKEND=1 in the
-// environment.
-var WASM_BACKEND = 0;
+// Soon to be legacy setting for controlling whether to use WebAssembly backend.
+// There is no need to set this manually.
+var WASM_BACKEND = 1;
 
 // An optional comma-separated list of script hooks to run after binaryen,
 // in binaryen's /scripts dir.
@@ -1202,17 +1155,6 @@ var BINARYEN_SCRIPTS = "";
 // not useful on large and complex projects, but in a small and simple enough
 // codebase it may help reduce code size a little bit.
 var BINARYEN_IGNORE_IMPLICIT_TRAPS = 0;
-
-// How we handle wasm operations that may trap, which includes integer
-// div/rem of 0 and float-to-int of values too large to fit in an int.
-//   js: do exactly what js does. this can be slower.
-//   clamp: avoid traps by clamping to a reasonable value. this can be
-//          faster than "js".
-//   allow: allow creating operations that can trap. this is the most
-//          compact, as we just emit a single wasm operation, with no
-//          guards to trapping values, and also often the fastest.
-// [fastcomp-only]
-var BINARYEN_TRAP_MODE = "allow";
 
 // A comma-separated list of extra passes to run in the binaryen optimizer,
 // Setting this does not override/replace the default passes. It is appended at
@@ -1411,19 +1353,6 @@ var PTHREADS_DEBUG = 0;
 
 // If true, building against Emscripten's asm.js/wasm heap memory profiler.
 var MEMORYPROFILER = 0;
-
-// Duplicate function elimination. This coalesces function bodies that are
-// identical, which can happen e.g. if two methods have different C/C++ or LLVM
-// types, but end up identical at the asm.js level (all pointers are the same as
-// int32_t in asm.js, for example).
-//
-// This option is quite slow to run, as it processes and hashes all methods in
-// the codebase in multiple passes.
-//
-// [fastcomp-only]
-var ELIMINATE_DUPLICATE_FUNCTIONS = 0; // disabled by default
-var ELIMINATE_DUPLICATE_FUNCTIONS_DUMP_EQUIVALENT_FUNCTIONS = 0;
-var ELIMINATE_DUPLICATE_FUNCTIONS_PASSES = 5;
 
 // This tries to evaluate global ctors at compile-time, applying their effects
 // into the mem init file. This saves running code during startup, and also
@@ -1747,6 +1676,9 @@ var ASM_PRIMITIVE_VARS = ['__THREW__', 'threwValue', 'setjmpId', 'tempInt', 'tem
 // First element in the list is the canonical/fixed value going forward.
 // This allows existing build systems to keep specifying one of the supported
 // settings, for backwards compatibility.
+// When a setting has been removed, and we want to error on all values of it,
+// we can set POSSIBLE_VALUES to an impossible value (like "disallowed" for a
+// numeric setting, or -1 for a string setting).
 var LEGACY_SETTINGS = [
   ['BINARYEN', 'WASM'],
   ['BINARYEN_ASYNC_COMPILATION', 'WASM_ASYNC_COMPILATION'],
@@ -1755,10 +1687,13 @@ var LEGACY_SETTINGS = [
   ['PGO', [0], 'pgo no longer supported'],
   ['QUANTUM_SIZE', [4], 'altering the QUANTUM_SIZE is not supported'],
   ['FUNCTION_POINTER_ALIGNMENT', [2], 'Starting from Emscripten 1.37.29, no longer available (https://github.com/emscripten-core/emscripten/pull/6091)'],
+  // Reserving function pointers is not needed - allowing table growth allows any number of new functions to be added.
+  ['RESERVED_FUNCTION_POINTERS', 'ALLOW_TABLE_GROWTH'],
   ['BUILD_AS_SHARED_LIB', [0], 'Starting from Emscripten 1.38.16, no longer available (https://github.com/emscripten-core/emscripten/pull/7433)'],
   ['SAFE_SPLIT_MEMORY', [0], 'Starting from Emscripten 1.38.19, SAFE_SPLIT_MEMORY codegen is no longer available (https://github.com/emscripten-core/emscripten/pull/7465)'],
   ['SPLIT_MEMORY', [0], 'Starting from Emscripten 1.38.19, SPLIT_MEMORY codegen is no longer available (https://github.com/emscripten-core/emscripten/pull/7465)'],
   ['BINARYEN_METHOD', ['native-wasm'], 'Starting from Emscripten 1.38.23, Emscripten now always builds either to Wasm (-s WASM=1 - default), or to asm.js (-s WASM=0), other methods are not supported (https://github.com/emscripten-core/emscripten/pull/7836)'],
+  ['BINARYEN_TRAP_MODE', [-1], 'The wasm backend does not support a trap mode (it always clamps, in effect)'],
   ['PRECISE_I64_MATH', [1, 2], 'Starting from Emscripten 1.38.26, PRECISE_I64_MATH is always enabled (https://github.com/emscripten-core/emscripten/pull/7935)'],
   ['MEMFS_APPEND_TO_TYPED_ARRAYS', [1], 'Starting from Emscripten 1.38.26, MEMFS_APPEND_TO_TYPED_ARRAYS=0 is no longer supported. MEMFS no longer supports using JS arrays for file data (https://github.com/emscripten-core/emscripten/pull/7918)'],
   ['ERROR_ON_MISSING_LIBRARIES', [1], 'missing libraries are always an error now'],
@@ -1766,6 +1701,9 @@ var LEGACY_SETTINGS = [
   ['SKIP_STACK_IN_SMALL', [0, 1], 'SKIP_STACK_IN_SMALL is no longer needed as the backend can optimize it directly'],
   ['SAFE_STACK', [0], 'Replace SAFE_STACK=1 with STACK_OVERFLOW_CHECK=2'],
   ['MEMORY_GROWTH_STEP', 'MEMORY_GROWTH_LINEAR_STEP'],
+  ['ELIMINATE_DUPLICATE_FUNCTIONS', [0, 1], 'Duplicate function elimination for wasm is handled automatically by binaryen'],
+  ['ELIMINATE_DUPLICATE_FUNCTIONS_DUMP_EQUIVALENT_FUNCTIONS', [0], 'Duplicate function elimination for wasm is handled automatically by binaryen'],
+  ['ELIMINATE_DUPLICATE_FUNCTIONS_PASSES', [5], 'Duplicate function elimination for wasm is handled automatically by binaryen'],
   // WASM_OBJECT_FILES is handled in emcc.py, supporting both 0 and 1 for now.
   ['WASM_OBJECT_FILES', [0, 1], 'For LTO, use -flto or -fto=thin instead; to disable LTO, just do not pass WASM_OBJECT_FILES=1 as 1 is the default anyhow'],
   ['TOTAL_MEMORY', 'INITIAL_MEMORY'],
@@ -1773,7 +1711,17 @@ var LEGACY_SETTINGS = [
   ['BINARYEN_MEM_MAX', 'MAXIMUM_MEMORY'],
   ['BINARYEN_PASSES', [''], 'Use BINARYEN_EXTRA_PASSES to add additional passes'],
   ['SWAPPABLE_ASM_MODULE', [0], 'Fully swappable asm modules are no longer supported'],
+  ['ASM_JS', [1], 'asm.js output is not supported any more'],
+  ['FINALIZE_ASM_JS', [0, 1], 'asm.js output is not supported any more'],
   ['ASYNCIFY_WHITELIST', 'ASYNCIFY_ONLY'],
   ['ASYNCIFY_BLACKLIST', 'ASYNCIFY_REMOVE'],
   ['EXCEPTION_CATCHING_WHITELIST', 'EXCEPTION_CATCHING_ALLOWED'],
+  ['SEPARATE_ASM', [0], 'Separate asm.js only made sense for fastcomp with asm.js output'],
+  ['SEPARATE_ASM_MODULE_NAME', [''], 'Separate asm.js only made sense for fastcomp with asm.js output'],
+  ['FAST_UNROLLED_MEMCPY_AND_MEMSET', [0, 1], 'The wasm backend implements memcpy/memset in C'],
+  ['DOUBLE_MODE', [0, 1], 'The wasm backend always implements doubles normally'],
+  ['PRECISE_F32', [0, 1, 2], 'The wasm backend always implements floats normally'],
+  ['ALIASING_FUNCTION_POINTERS', [0, 1], 'The wasm backend always uses a single index space for function pointers, in a single Table'],
+  ['AGGRESSIVE_VARIABLE_ELIMINATION', [0, 1], 'Wasm ignores asm.js-specific optimization flags'],
+  ['SIMPLIFY_IFS', [1], 'Wasm ignores asm.js-specific optimization flags'],
 ];
