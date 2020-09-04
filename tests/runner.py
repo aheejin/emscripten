@@ -105,7 +105,7 @@ EMTEST_SKIP_SLOW = os.getenv('EMTEST_SKIP_SLOW')
 
 EMTEST_LACKS_NATIVE_CLANG = os.getenv('EMTEST_LACKS_NATIVE_CLANG')
 
-EMTEST_VERBOSE = int(os.getenv('EMTEST_VERBOSE', '0'))
+EMTEST_VERBOSE = int(os.getenv('EMTEST_VERBOSE', '0')) or shared.DEBUG
 
 if EMTEST_VERBOSE:
   logging.root.setLevel(logging.DEBUG)
@@ -575,7 +575,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     dirname, basename = os.path.split(filename)
     output = shared.unsuffixed(basename) + suffix
     cmd = [compiler, filename, '-o', output] + self.get_emcc_args(main_file=True) + \
-        ['-I' + dirname, '-I' + os.path.join(dirname, 'include')] + \
+        ['-I.', '-I' + dirname, '-I' + os.path.join(dirname, 'include')] + \
         ['-I' + include for include in includes] + \
         libraries
 
@@ -1042,9 +1042,12 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
         f.write(src)
     self._build_and_run(filename, expected_output, **kwargs)
 
+  def do_runf(self, filename, expected_output, **kwargs):
+    self._build_and_run(filename, expected_output, **kwargs)
+
   ## Just like `do_run` but with filename of expected output
-  def do_run_from_file(self, filename, expected_output, **kwargs):
-    self._build_and_run(filename, open(expected_output).read(), **kwargs)
+  def do_run_from_file(self, filename, expected_output_filename, **kwargs):
+    self._build_and_run(filename, open(expected_output_filename).read(), **kwargs)
 
   def do_run_in_out_file_test(self, *path, **kwargs):
     srcfile = path_from_root(*path)

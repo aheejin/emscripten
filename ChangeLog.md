@@ -17,17 +17,27 @@ See docs/process.md for how version tagging works.
 
 Current Trunk
 -------------
-- Only strip the LLVM producer's section in release builds. In `-O0` builds, we
-  try to leave the wasm from LLVM unmodified as much as possible, so if it
-  emitted the producers section, it will be there. Normally that only matters
-  in release builds, which is not changing here. If you want to not have a
-  producer's section in debug builds, you can remove it a tool like
-  `wasm-opt --strip-producers` (which is what Emscripten still does in release
-  builds, as always) or use `llvm-objcopy`.
-- Only strip debug info in release builds + when `-g` is not present. Previously
-  even in an `-O0` build without `-g` we would strip it. This was not documented
-  behavior, and has no effect on program behavior, but may be noticeable
-  if you inspect a build output with `-O0`.
+- Remove `ALLOC_DYNAMIC` and deprecate `dynamicAlloc`. (#12057, which also
+  removes the internal `DYNAMICTOP_PTR` API.)
+- Use `__indirect_function_table` as the import name for the table, which is
+  what LLVM does.
+
+2.0.2: 09/02/2020
+-----------------
+- Simplify Fetch C API error handling: we used to check if the error code was
+  0 and switch that to 404, but that only really helps `file://` URLs, which
+  are not very useful for testing anyhow for other reasons (like not working
+  in chrome), and it made things more complex. The behavior has been changed
+  to be simpler and just leave the browser's error code as it is.
+- Enable `--no-heap-copy` file packager option by default, and remove the old
+  default behavior entirely. That is the behavior we should have had from the
+  beginning as it is more memory-efficient. (#12027)
+- `--no-entry` is now required in `STANDALONE_WASM` mode when building a reactor
+  (application without a main function).  Previously exporting a list of
+  functions that didn't include `_main` would imply this.  Now the list of
+  `EXPORTED_FUNCTIONS` is not relevant in the deciding the type of application
+  to build. (#12020)
+- Allow polymorphic types to be used without RTTI when using embind. (#10914)
 - Do not remove `__original_main` using `--inline-main`. We used to do this
   so that it didn't show up in stack traces (which could be confusing because
   it is added by the linker - it's not in the source code). But this has had
@@ -37,7 +47,7 @@ Current Trunk
   to add `__original_main` to there (since you are doing manual fine-tuning of
   the list of functions, which depends on the wasm's internals). Note that this
   should not matter in `-O2+` anyhow as normal inlining generally removes
-  `__original_main`.
+  `__original_main`. (#11995)
 
 2.0.1: 08/21/2020
 -----------------
@@ -448,7 +458,7 @@ v1.39.5: 12/20/2019
 - Default `DISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR` to 1. See #9895.
   With this change the old deprecated HTML5 API event target lookup behavior is
   disabled. There is no "Module.canvas" object, no magic "null" default handling,
-  and DOM element 'target' parameters are taken to refer to CSS selectors, instead 
+  and DOM element 'target' parameters are taken to refer to CSS selectors, instead
   of referring to DOM IDs. For more information see:
   <https://groups.google.com/forum/#!msg/emscripten-discuss/xScZ_LRIByk/_gEy67utDgAJ>
 - WASI API updated from `wasi_unstable` to `wasi_snapshot_preview1`. This
@@ -1915,7 +1925,7 @@ v1.34.5: 8/18/2015
  - Fixed issues with building the optimizer on 32-bit Windows (#3673)
  - Increased optimizer stack size on Windows to 10MB (#3679)
  - Added support for passing multiple input files to opt, to speed up
-   optimization and linking in opt.  
+   optimization and linking in opt.
  - Full list of changes:
     - Emscripten: https://github.com/emscripten-core/emscripten/compare/1.34.4...1.34.5
     - Emscripten-LLVM: https://github.com/emscripten-core/emscripten-fastcomp/compare/1.34.4...1.34.5
@@ -2399,7 +2409,7 @@ v1.29.2: 1/16/2015
  - Fixed an issue with SDL audio queueing stability, which would queue audio too
    eagerly and cause stutter in some applications (#3122, #3124)
  - Enabled native JS optimizer to be built automatically on Windows, requires
-   VS2012 or VS2013. 
+   VS2012 or VS2013.
  - Improve error message to reflect the fact that DLOPEN_SUPPORT is currently
    not available (#2365)
  - Improve SIMD load and store support.
@@ -2732,7 +2742,7 @@ v1.23.1: 8/26/2014
  - Removed the support for using Web Audio ScriptProcessorNode to stream audio.
  - Improved SDL audio streaming by using the main rAF() callback instead of a
    separate setTimeout() callback to schedule the audio data.
- - Deprecated compiling without typed arrays support. 
+ - Deprecated compiling without typed arrays support.
  - Migrated to using musl PRNG functions. Fixes reported bugs about the quality of randomness (#2341)
  - Improved SIMD support for the experimental Ecmascript SIMD spec.
  - Full list of changes:
@@ -3210,7 +3220,7 @@ v1.17.0: 5/6/2014
 
 v1.16.0: 4/16/2014
 ------------------
- - Removed browser warnings message in VFS library about replacing __proto__ performance issue. 
+ - Removed browser warnings message in VFS library about replacing __proto__ performance issue.
  - Full list of changes:
     - Emscripten: https://github.com/emscripten-core/emscripten/compare/1.15.1...1.16.0
     - Emscripten-LLVM: no changes.
@@ -3221,7 +3231,7 @@ v1.15.1: 4/15/2014
  - Added support for SDL2 touch api.
  - Added new user-controllable emdind-related define #define
    EMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES, which allows optimizing embind for minimal
-   size when std::type_info is not needed. 
+   size when std::type_info is not needed.
  - Fixed issues with CMake support where CMAKE_AR and CMAKE_RANLIB were not
    accessible from CMakeLists.txt files.
  - Full list of changes:
@@ -3418,7 +3428,7 @@ v1.11.0: 2/14/2014
 v1.10.4: 2/10/2014
 ------------------
  - Added support for legacy GL emulation in fastcomp.
- - Deprecated the --split-js compiler option. This is not supported in fastcomp. 
+ - Deprecated the --split-js compiler option. This is not supported in fastcomp.
  - Full list of changes: https://github.com/emscripten-core/emscripten/compare/1.10.3...1.10.4
 
 v1.10.3: 2/9/2014
@@ -3698,7 +3708,7 @@ v1.7.3: 11/12/2013
    lose precision in the function call.
  - Added support for joysticks in SDL via the Gamepad API
  - Full list of changes: https://github.com/emscripten-core/emscripten/compare/1.7.2...1.7.3
- 
+
 v1.7.2: 11/9/2013
 ------------------
  - The compiler now always generates a .js file that contains the generated
@@ -3713,7 +3723,7 @@ v1.7.2: 11/9/2013
  - Added a new command line parameter --no-heap-copy to compiler and file
    packager that can be used to optimize VFS memory usage at startup.
  - Updated libcxx to revision 194185, 2013-11-07.
- - Improvements to various library support. 
+ - Improvements to various library support.
  - Full list of changes: https://github.com/emscripten-core/emscripten/compare/1.7.1...1.7.2
 
 v1.7.1: 10/24/2013
@@ -3810,7 +3820,7 @@ v1.6.0: 9/21/2013
  - Enable support for %[] pattern in scanf.
  - Added dependency tracking support to linked .js files in CMake toolchain.
  - The hex prefix 0x is now properly handled in sscanf (#1632).
- - Simplify internal compiler operations by removing the internal framework.js. 
+ - Simplify internal compiler operations by removing the internal framework.js.
  - Full list of changes: https://github.com/emscripten-core/emscripten/compare/1.5.9...1.6.0
 
 v1.5.9: 9/15/2013
@@ -4035,7 +4045,7 @@ v1.3.3: 3/23/2013
 
 v1.3.2: 3/22/2013
 ------------------
- - Fix issues with fgets. 
+ - Fix issues with fgets.
  - Add support for non-fullscreen pointer lock.
  - Improve OpenAL support.
  - Full list of changes: https://github.com/emscripten-core/emscripten/compare/1.3.1...1.3.2
