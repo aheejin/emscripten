@@ -71,7 +71,8 @@ var LibraryManager = {
       'library_html5.js',
       'library_stack_trace.js',
       'library_wasi.js',
-      'library_int53.js'
+      'library_int53.js',
+      'library_dylink.js'
     ];
 
     if (!EXCEPTION_HANDLING) {
@@ -428,8 +429,6 @@ function exportRuntime() {
     'FS_createDevice',
     'FS_unlink',
     'dynamicAlloc',
-    'loadDynamicLibrary',
-    'loadWebAssemblyModule',
     'getLEB',
     'getFunctionTables',
     'alignFunctionTables',
@@ -545,7 +544,6 @@ var PassManager = {
     print('\n//FORWARDED_DATA:' + JSON.stringify({
       Functions: Functions,
       EXPORTED_FUNCTIONS: EXPORTED_FUNCTIONS,
-      STATIC_BUMP: STATIC_BUMP, // updated with info from JS
       ATINITS: ATINITS.join('\n'),
       ATMAINS: ATMAINS.join('\n'),
       ATEXITS: ATEXITS.join('\n'),

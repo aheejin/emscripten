@@ -117,9 +117,6 @@ var WASM_TEXT_FILE = '';
 // name of the file containing wasm binary, if relevant
 var WASM_BINARY_FILE = '';
 
-// name of the file containing asm.js code, if relevant
-var ASMJS_CODE_FILE = '';
-
 // name of the file containing the pthread *.worker.js, if relevant
 var PTHREAD_WORKER_FILE = '';
 
@@ -131,11 +128,6 @@ var MEM_INIT_IN_WASM = 0;
 // If set to 1, src/base64Utils.js will be included in the bundle.
 // This is set internally when needed (SINGLE_FILE)
 var SUPPORT_BASE64_EMBEDDING = 0;
-
-// the total static allocation, that is, how much to bump the start of memory
-// for static globals. received from the backend, and possibly increased due
-// to JS static allocations
-var STATIC_BUMP = -1;
 
 // the total initial wasm table size.
 var WASM_TABLE_SIZE = 0;
@@ -200,3 +192,6 @@ var EXPECT_MAIN = 1;
 var EXPORT_READY_PROMISE = 1;
 
 var USE_LEGACY_DYNCALLS = 0;
+
+// struct_info that is either generated or cached
+var STRUCT_INFO = '';
