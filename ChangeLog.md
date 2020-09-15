@@ -17,6 +17,17 @@ See docs/process.md for how version tagging works.
 
 Current Trunk
 -------------
+- Stop including `malloc` and `free` by default. If you need access to them from
+  JS, you must export them manually using
+  `-s EXPORTED_FUNCTIONS=['_malloc', ..]`.
+- Stop running Binaryen optimizations in `-O1`. This makes `-O1` builds a little
+  larger but they compile a lot faster, which makes more sense in a "compromise"
+  build (in between `-O0` and higher optimization levels suitable for release
+  builds). (#12178)
+- Add `ERROR_ON_WASM_CHANGES_AFTER_LINK` option that errors if we need to do
+  any work in `wasm-emscripten-finalize` or `wasm-opt` after linking. This
+  can verify the link is maximally fast and also does no DWARF rewriting.
+  (#12173)
 
 2.0.3: 09/10/2020
 -----------------
@@ -35,6 +46,14 @@ Current Trunk
 - Use `__indirect_function_table` as the import name for the table, which is
   what LLVM does.
 - Remove `BINARYEN_SCRIPTS` setting.
+- The default output format is now executable JavaScript.  Previously we would
+  default to output objecting files unless, for example, the output name ended
+  in `.js`.  This is contrary to behaviour of clang and gcc.  Now emscripten
+  will always produce and executable unless the `-c`, `-r` or `-shared` flags
+  are given.  This is true even when the name of the output file ends in `.o`.
+  e.g, `emcc foo.c -o foo.o` will produce a JavaScript file called `foo.o`.
+  This might surprise some users (although it matches the behavior of existing
+  toolchains) so we now produce a warning in this case.
 
 2.0.2: 09/02/2020
 -----------------

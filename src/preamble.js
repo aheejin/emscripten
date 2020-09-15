@@ -187,6 +187,22 @@ function cwrap(ident, returnType, argTypes, opts) {
   }
 }
 
+#if ASSERTIONS
+// We used to include malloc/free by default in the past. Show a helpful error in
+// builds with assertions.
+#if !('_malloc' in IMPLEMENTED_FUNCTIONS)
+function _malloc() {
+  abort("malloc() called but not included in the build - add '_malloc' to EXPORTED_FUNCTIONS");
+}
+#endif // malloc
+#if !('_free' in IMPLEMENTED_FUNCTIONS)
+function _free() {
+  // Show a helpful error since we used to include free by default in the past.
+  abort("free() called but not included in the build - add '_free' to EXPORTED_FUNCTIONS");
+}
+#endif // free
+#endif // ASSERTIONS
+
 var ALLOC_NORMAL = 0; // Tries to use _malloc()
 var ALLOC_STACK = 1; // Lives for the duration of the current function call
 var ALLOC_NONE = 2; // Do not allocate
@@ -221,7 +237,7 @@ function allocate(slab, types, allocator, ptr) {
   if (allocator == ALLOC_NONE) {
     ret = ptr;
   } else {
-    ret = [_malloc,
+    ret = [{{{ ('_malloc' in IMPLEMENTED_FUNCTIONS) ? '_malloc' : 'null' }}},
 #if DECLARE_ASM_MODULE_EXPORTS
     stackAlloc,
 #else
@@ -340,39 +356,12 @@ assert(DYNAMIC_BASE % 16 === 0, 'heap must start aligned');
 #endif
 
 #if RELOCATABLE
-// We support some amount of allocation during startup in the case of
-// dynamic linking, which needs to allocate memory for dynamic libraries that
-// are loaded. That has to happen before the main program can start to run,
-// because the main program needs those linked in before it runs (so we can't
-// use normally malloc from the main program to do these allocations).
-
-// Allocate memory no even if malloc isn't ready yet.
-function getMemory(size) {
-  if (!runtimeInitialized) return dynamicAlloc(size);
-  return _malloc(size);
-}
-
 // To support such allocations during startup, track them on __heap_base and
 // then when the main module is loaded it reads that value and uses it to
 // initialize sbrk (the main module is relocatable itself, and so it does not
 // have __heap_base hardcoded into it - it receives it from JS as an extern
 // global, basically).
 Module['___heap_base'] = DYNAMIC_BASE;
-
-function dynamicAlloc(size) {
-  // After the runtime is initialized, we must only use sbrk() normally.
-  assert(!runtimeInitialized);
-#if USE_PTHREADS
-  assert(!ENVIRONMENT_IS_PTHREAD); // this function is not thread-safe
-#endif
-  var ret = Module['___heap_base'];
-  var end = (ret + size + 15) & -16;
-#if ASSERTIONS
-  assert(end <= HEAP8.length, 'failure to dynamicAlloc - memory growth etc. is not supported there, call malloc/sbrk directly or increase INITIAL_MEMORY');
-#endif
-  Module['___heap_base'] = end;
-  return ret;
-}
 #endif // RELOCATABLE
 
 #if USE_PTHREADS
