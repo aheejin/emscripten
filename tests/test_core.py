@@ -1234,11 +1234,8 @@ int main() {
       self.set_setting('SAFE_HEAP', safe)
       self.do_run_in_out_file_test('tests', 'core', 'test_exceptions_2.cpp')
 
+  @with_both_exception_handling
   def test_exceptions_3(self):
-    # TODO remove this line and restore @with_both_exception_handling
-    # https://github.com/WebAssembly/binaryen/issues/3114
-    self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
-
     src = r'''
 #include <iostream>
 #include <stdexcept>
@@ -4480,8 +4477,8 @@ res64 - external 64\n''', header='''
     create_test_file('third.cpp', 'extern "C" int sidef() { return 36; }')
     create_test_file('fourth.cpp', 'extern "C" int sideg() { return 17; }')
 
-    self.run_process([EMCC, '-c', 'third.cpp', '-o', 'third.o'] + self.get_emcc_args())
-    self.run_process([EMCC, '-c', 'fourth.cpp', '-o', 'fourth.o'] + self.get_emcc_args())
+    self.run_process([EMCC, '-fPIC', '-c', 'third.cpp', '-o', 'third.o'] + self.get_emcc_args())
+    self.run_process([EMCC, '-fPIC', '-c', 'fourth.cpp', '-o', 'fourth.o'] + self.get_emcc_args())
     self.run_process([EMAR, 'rc', 'libfourth.a', 'fourth.o'])
 
     self.dylink_test(main=r'''
@@ -7679,7 +7676,7 @@ Module['onRuntimeInitialized'] = function() {
           if (typeof STACK_BASE === 'number' &&
               typeof STACK_MAX === 'number' &&
               typeof STACKTOP === 'number' &&
-              typeof DYNAMIC_BASE === 'number') {
+              typeof Module['___heap_base'] === 'number') {
              out('able to run memprof');
            } else {
              out('missing the required variables to run memprof');
@@ -7687,7 +7684,7 @@ Module['onRuntimeInitialized'] = function() {
         }
       });
     ''')
-    self.emcc_args += ['--js-library', 'lib.js']
+    self.emcc_args += ['--memoryprofiler', '--js-library', 'lib.js']
     self.do_runf('main.cpp', 'able to run memprof')
 
   def test_fs_dict(self):

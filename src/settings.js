@@ -861,7 +861,7 @@ var PROXY_TO_WORKER_FILENAME = '';
 // PROXY_TO_PTHREAD and non-PROXY_TO_PTHREAD modes with main() always getting
 // the same amount of stack.
 //
-// This proxies Module['canvas'], if present, and if OFFSCREEN_CANVAS support
+// This proxies Module['canvas'], if present, and if OFFSCREENCANVAS_SUPPORT
 // is enabled. This has to happen because this is the only chance - this browser
 // main thread does the only pthread_create call that happens on
 // that thread, so it's the only chance to transfer the canvas from there.
@@ -1300,9 +1300,6 @@ var ALLOW_BLOCKING_ON_MAIN_THREAD = 1;
 
 // If true, add in debug traces for diagnosing pthreads related issues.
 var PTHREADS_DEBUG = 0;
-
-// If true, building against Emscripten's asm.js/wasm heap memory profiler.
-var MEMORYPROFILER = 0;
 
 // This tries to evaluate global ctors at compile-time, applying their effects
 // into the mem init file. This saves running code during startup, and also
