@@ -17,6 +17,19 @@ See docs/process.md for how version tagging works.
 
 Current Trunk
 -------------
+- The WebAssembly table is now created and exported by the generated wasm
+  module rather then constructed by the JS glue code.  This is an implemention
+  detail that should not affect most users. (#12296)
+- Add `getentropy` in `sys/random.h`, and use that from libc++'s
+  `random_device`. This is more efficient, see #12240.
+- Fixed `ABORT_ON_WASM_EXCEPTIONS` to work with the recent dynCall changes where
+  functions can be called via the WASM table directly, bypassing WASM exports.
+- Add `ASYNCIFY_ADVISE` to output which functions have been instrumented for
+  Asyncify mode, and why they need to be handled.
+
+2.0.4: 09/16/2020
+-----------------
+- First release with Bazel support.
 - Stop including `malloc` and `free` by default. If you need access to them from
   JS, you must export them manually using
   `-s EXPORTED_FUNCTIONS=['_malloc', ..]`.
@@ -36,7 +49,7 @@ Current Trunk
   asmjs/fastcomp backend).
 - Remove `ALLOC_DYNAMIC` and deprecate `dynamicAlloc`. (#12057, which also
   removes the internal `DYNAMICTOP_PTR` API.)
-- Add `ABORT_ON_EXCEPTIONS` which will abort when an unhandled WASM exception
+- Add `ABORT_ON_WASM_EXCEPTIONS` which will abort when an unhandled WASM exception
   is encountered. This makes the Emscripten program behave more like a native
   program where the OS would terminate the process and no further code can be
   executed when an unhandled exception (e.g. out-of-bounds memory access) happens.

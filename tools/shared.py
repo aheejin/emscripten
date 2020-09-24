@@ -37,7 +37,7 @@ MACOS = sys.platform == 'darwin'
 LINUX = sys.platform.startswith('linux')
 DEBUG = int(os.environ.get('EMCC_DEBUG', '0'))
 EXPECTED_NODE_VERSION = (4, 1, 1)
-EXPECTED_BINARYEN_VERSION = 95
+EXPECTED_BINARYEN_VERSION = 97
 EXPECTED_LLVM_VERSION = "12.0"
 SIMD_INTEL_FEATURE_TOWER = ['-msse', '-msse2', '-msse3', '-mssse3', '-msse4.1', '-msse4.2', '-mavx']
 SIMD_NEON_FLAGS = ['-mfpu=neon']
@@ -820,7 +820,7 @@ def emsdk_cflags(user_args, cxx):
   return c_opts + include_directive(c_include_paths)
 
 
-def get_asmflags(user_args):
+def get_asmflags():
   return ['-target', get_llvm_target()]
 
 
@@ -1072,11 +1072,6 @@ class FilenameReplacementStrings:
 
 
 class JS(object):
-  memory_initializer_pattern = r'/\* memory initializer \*/ allocate\(\[([\d, ]*)\], "i8", ALLOC_NONE, ([\d+\.GLOBAL_BASEHgb]+)\);'
-  no_memory_initializer_pattern = r'/\* no memory initializer \*/'
-
-  global_initializers_pattern = r'/\* global initializers \*/ __ATINIT__.push\((.+)\);'
-
   emscripten_license = '''\
 /**
  * @license
@@ -1559,6 +1554,3 @@ verify_settings()
 Cache = cache.Cache(CACHE)
 
 PRINT_STAGES = int(os.getenv('EMCC_VERBOSE', '0'))
-
-# compatibility with existing emcc, etc. scripts
-chunkify = cache.chunkify

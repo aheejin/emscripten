@@ -482,9 +482,6 @@ def lld_flags_for_executable(external_symbol_list):
   # wasm module arrives)
   if not Settings.STANDALONE_WASM:
     cmd.append('--import-memory')
-    cmd.append('--import-table')
-  else:
-    cmd.append('--export-table')
 
   if Settings.USE_PTHREADS:
     cmd.append('--shared-memory')
@@ -503,6 +500,10 @@ def lld_flags_for_executable(external_symbol_list):
     else:
       cmd.append('--no-gc-sections')
       cmd.append('--export-dynamic')
+  else:
+    cmd.append('--export-table')
+    if Settings.ALLOW_TABLE_GROWTH:
+      cmd.append('--growable-table')
 
   if Settings.LINKABLE:
     cmd.append('--export-all')
@@ -890,7 +891,7 @@ def acorn_optimizer(filename, passes, extra_info=None, return_output=False):
 
 # evals ctors. if binaryen_bin is provided, it is the dir of the binaryen tool
 # for this, and we are in wasm mode
-def eval_ctors(js_file, binary_file, binaryen_bin='', debug_info=False):
+def eval_ctors(js_file, binary_file, debug_info=False): # noqa
   logger.debug('Ctor evalling in the wasm backend is disabled due to https://github.com/emscripten-core/emscripten/issues/9527')
   return
   # TODO re-enable
@@ -1144,6 +1145,7 @@ def metadce(js_file, wasm_file, minify_whitespace, debug_info):
       'reaches': [],
       'root': True
     })
+  if not Settings.RELOCATABLE:
     graph.append({
       'export': '__indirect_function_table',
       'name': 'emcc$export$__indirect_function_table',

@@ -6,7 +6,6 @@
 """Utilties for manipulating WebAssembly binaries from python.
 """
 
-import re
 import math
 import logging
 
@@ -28,7 +27,7 @@ EMSCRIPTEN_METADATA_MAJOR, EMSCRIPTEN_METADATA_MINOR = (0, 3)
 # change, increment EMSCRIPTEN_ABI_MINOR if EMSCRIPTEN_ABI_MAJOR == 0
 # or the ABI change is backwards compatible, otherwise increment
 # EMSCRIPTEN_ABI_MAJOR and set EMSCRIPTEN_ABI_MINOR = 0.
-EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR = (0, 27)
+EMSCRIPTEN_ABI_MAJOR, EMSCRIPTEN_ABI_MINOR = (0, 28)
 
 
 def toLEB(x):
@@ -59,18 +58,14 @@ def readLEB(buf, offset):
   return (result, offset)
 
 
-def add_emscripten_metadata(js_file, wasm_file):
+def add_emscripten_metadata(wasm_file):
   WASM_PAGE_SIZE = 65536
 
   mem_size = shared.Settings.INITIAL_MEMORY // WASM_PAGE_SIZE
-  table_size = shared.Settings.WASM_TABLE_SIZE
   global_base = shared.Settings.GLOBAL_BASE
+  dynamic_base = shared.Settings.LEGACY_DYNAMIC_BASE
 
-  js = open(js_file).read()
-  m = re.search(r"(^|\s)DYNAMIC_BASE\s+=\s+(\d+)", js)
-  dynamic_base = int(m.group(2))
-
-  logger.debug('creating wasm emscripten metadata section with mem size %d, table size %d' % (mem_size, table_size,))
+  logger.debug('creating wasm emscripten metadata section with mem size %d' % mem_size)
   name = b'\x13emscripten_metadata' # section name, including prefixed size
   contents = (
     # metadata section version
@@ -87,7 +82,7 @@ def add_emscripten_metadata(js_file, wasm_file):
     toLEB(1) +
 
     toLEB(mem_size) +
-    toLEB(table_size) +
+    toLEB(0) +
     toLEB(global_base) +
     toLEB(dynamic_base) +
     # dynamictopPtr, always 0 now
@@ -122,7 +117,7 @@ def add_dylink_section(wasm_file, needed_dynlibs):
   # TODO read mem_align from existing "dylink" section.
   mem_align = 1
   mem_size = shared.Settings.STATIC_BUMP
-  table_size = shared.Settings.WASM_TABLE_SIZE
+  table_size = 0
   mem_align = int(math.log(mem_align, 2))
   logger.debug('creating wasm dynamic library with mem size %d, table size %d, align %d' % (mem_size, table_size, mem_align))
 

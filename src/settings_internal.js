@@ -62,9 +62,12 @@ var EMBIND = 0;
 // Whether the main() function reads the argc/argv parameters.
 var MAIN_READS_PARAMS = 1;
 
-// The computed initial value of the program break (the sbrk position), which
-// is called DYNAMIC_BASE as it is the start of dynamically-allocated memory.
-var DYNAMIC_BASE = -1;
+// Computed during emscripten for the purpose of writing to emscripten_metadata
+// section.
+// TODO(sbc): Remove this.  If emscripten doesn't need it then neither should
+// any other loader.
+// See https://github.com/emscripten-core/emscripten/issues/12231
+var LEGACY_DYNAMIC_BASE = -1;
 
 // List of functions implemented in compiled code; received from the backend.
 var IMPLEMENTED_FUNCTIONS = [];
@@ -126,7 +129,7 @@ var MEM_INIT_IN_WASM = 0;
 // This is set internally when needed (SINGLE_FILE)
 var SUPPORT_BASE64_EMBEDDING = 0;
 
-// the total initial wasm table size.
+// the total initial wasm table size, only used in RELOCATABLE mode
 var WASM_TABLE_SIZE = 0;
 
 // the possible environments the code may run in.
