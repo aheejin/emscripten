@@ -1855,8 +1855,6 @@ int f() {
        ['unsignPointers']),
       (path_from_root('tests', 'optimizer', 'test-asanify.js'), open(path_from_root('tests', 'optimizer', 'test-asanify-output.js')).read(),
        ['asanify']),
-      (path_from_root('tests', 'optimizer', 'test-js-optimizer-minifyGlobals.js'), open(path_from_root('tests', 'optimizer', 'test-js-optimizer-minifyGlobals-output.js')).read(),
-       ['minifyGlobals']),
     ]:
       print(input, passes)
 
@@ -5801,23 +5799,6 @@ int main() {
     self.run_process([EMCC, 'src.c', '-s', 'EXPORTED_FUNCTIONS=["_main", "_treecount"]', '--minify', '0', '-g4', '-Oz'])
     self.assertContained('hello, world!', self.run_js('a.out.js'))
 
-  @no_wasm_backend('MEM_INIT_METHOD not supported under wasm')
-  def test_meminit_crc(self):
-    create_test_file('src.c', r'''
-#include <stdio.h>
-int main() { printf("Mary had a little lamb.\n"); }
-''')
-
-    self.run_process([EMCC, 'src.c', '--memory-init-file', '0', '-s', 'MEM_INIT_METHOD=2', '-s', 'ASSERTIONS=1', '-s', 'WASM=0'])
-    with open('a.out.js') as f:
-      d = f.read()
-    return
-    self.assertContained('Mary had', d)
-    d = d.replace('Mary had', 'Paul had')
-    create_test_file('a.out.js', d)
-    out = self.run_js('a.out.js', assert_returncode=NON_ZERO)
-    self.assertContained('Assertion failed: memory initializer checksum', out)
-
   def test_emscripten_print_double(self):
     create_test_file('src.c', r'''
 #include <stdio.h>
@@ -5905,22 +5886,6 @@ int main() {
                             '-s', 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["alGetError"]',
                             '-s', 'EXPORTED_FUNCTIONS=["_main", "_alGetError"]'], stderr=PIPE).stderr
     self.assertNotContained('function requested to be exported, but not implemented: "_alGetError"', err)
-
-  @no_wasm_backend()
-  def test_almost_asm_warning(self):
-    def run(args, expected):
-      print(args, expected)
-      err = self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'WASM=0'] + args, stderr=PIPE).stderr
-      if expected:
-        self.assertContained('[-Walmost-asm]', err)
-      else:
-        self.assertEqual(err, '')
-
-    run(['-O1', '-s', 'ALLOW_MEMORY_GROWTH=1'], True),  # default
-    # suppress almost-asm warning manually
-    run(['-O1', '-s', 'ALLOW_MEMORY_GROWTH=1', '-Wno-almost-asm'], False),
-    # last warning flag should "win"
-    run(['-O1', '-s', 'ALLOW_MEMORY_GROWTH=1', '-Wno-almost-asm', '-Walmost-asm'], True)
 
   def test_musl_syscalls(self):
     self.run_process([EMCC, path_from_root('tests', 'hello_world.c')])
@@ -9767,3 +9732,11 @@ int main () {
       [EMCC, '-DFOO', '-DBAR', '-DFOOBAR', '-DBARFOO',
        '-o', 'llvm_option_dash_o_output', '-mllvm', '-opt-bisect-limit=1',
        path_from_root('tests', 'hello_world.c')])
+
+  def test_SYSCALL_DEBUG(self):
+    self.set_setting('SYSCALL_DEBUG')
+    self.do_runf(path_from_root('tests', 'hello_world.c'), 'syscall! fd_write')
+
+  def test_LIBRARY_DEBUG(self):
+    self.set_setting('LIBRARY_DEBUG')
+    self.do_runf(path_from_root('tests', 'hello_world.c'), '[library call:_fd_write: 0x1')
