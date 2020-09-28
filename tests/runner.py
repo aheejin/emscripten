@@ -165,6 +165,11 @@ def no_wasm_backend(note=''):
   return unittest.skip(note)
 
 
+def disabled(note=''):
+  assert not callable(note)
+  return unittest.skip(note)
+
+
 def no_windows(note=''):
   assert not callable(note)
   if WINDOWS:
