@@ -458,11 +458,6 @@ def emscript(infile, outfile_js, memfile, temp_files, DEBUG):
     pre = None
 
     invoke_funcs = metadata['invokeFuncs']
-    try:
-      del forwarded_json['Variables']['globals']['_llvm_global_ctors'] # not a true variable
-    except KeyError:
-      pass
-
     sending = create_sending(invoke_funcs, metadata)
     receiving = create_receiving(exports, metadata['initializers'])
 
@@ -756,8 +751,6 @@ def create_sending(invoke_funcs, metadata):
   send_items = set(basic_funcs + invoke_funcs + em_js_funcs + declared_items)
 
   def fix_import_name(g):
-    if g.startswith('Math_'):
-      return g.split('_')[1]
     # Unlike fastcomp the wasm backend doesn't use the '_' prefix for native
     # symbols.  Emscripten currently expects symbols to start with '_' so we
     # artificially add them to the output of emscripten-wasm-finalize and them
