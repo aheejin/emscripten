@@ -1233,7 +1233,8 @@ var SDL2_MIXER_FORMATS = ["ogg"];
 var IN_TEST_HARNESS = 0;
 
 // If true, enables support for pthreads.
-// [compile+link] - affects user code at compile and system libraries at link
+// [compile+link] - affects user code at compile and system libraries at link.
+// This setting is equivalent to `-pthread`, which should be preferred.
 var USE_PTHREADS = 0;
 
 // In web browsers, Workers cannot be created while the main browser thread
@@ -1530,9 +1531,10 @@ var MINIFY_HTML = 1;
 // bisecting.
 var MAYBE_WASM2JS = 0;
 
-// The size of our shadow memory.
-// By default, we have 32 MiB. This supports 256 MiB of real memory.
-var ASAN_SHADOW_SIZE = 33554432;
+// This option is no longer used. The appropriate shadow memory size is now
+// calculated from INITIAL_MEMORY and MAXIMUM_MEMORY. Will be removed in a
+// future release.
+var ASAN_SHADOW_SIZE = -1
 
 // Internal: Tracks whether Emscripten should link in exception throwing (C++
 // 'throw') support library. This does not need to be set directly, but pass

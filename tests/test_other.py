@@ -187,6 +187,13 @@ class other(RunnerCore):
     # any tests for EXPORT_ES6 but once we do this should be enabled.
     # self.assertContained('hello, world!', self.run_js('hello_world.mjs'))
 
+  def test_emcc_output_worker_mjs(self):
+    self.run_process([EMCC, '-o', 'hello_world.mjs', '-pthread', '-O1', path_from_root('tests', 'hello_world.c')])
+    with open('hello_world.mjs') as f:
+      self.assertContained('export default Module;', f.read())
+    with open('hello_world.worker.js') as f:
+      self.assertContained('import(', f.read())
+
   def test_emcc_out_file(self):
     # Verify that "-ofile" works in addition to "-o" "file"
     self.run_process([EMCC, '-c', '-ofoo.o', path_from_root('tests', 'hello_world.c')])
@@ -8486,21 +8493,21 @@ int main(void) {
 
   def test_asan_null_deref(self):
     self.do_smart_test(path_from_root('tests', 'other', 'test_asan_null_deref.c'),
-                       emcc_args=['-fsanitize=address', '-s', 'ALLOW_MEMORY_GROWTH=1'],
+                       emcc_args=['-fsanitize=address', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=314572800'],
                        assert_returncode=NON_ZERO, literals=[
       'AddressSanitizer: null-pointer-dereference on address',
     ])
 
   def test_asan_no_stack_trace(self):
     self.do_smart_test(path_from_root('tests', 'other', 'test_lsan_leaks.c'),
-                       emcc_args=['-fsanitize=address', '-s', 'ALLOW_MEMORY_GROWTH=1', '-DDISABLE_CONTEXT', '-s', 'EXIT_RUNTIME'],
+                       emcc_args=['-fsanitize=address', '-sALLOW_MEMORY_GROWTH=1',  '-sINITIAL_MEMORY=314572800', '-DDISABLE_CONTEXT', '-s', 'EXIT_RUNTIME'],
                        assert_returncode=NON_ZERO, literals=[
       'Direct leak of 3427 byte(s) in 3 object(s) allocated from:',
       'SUMMARY: AddressSanitizer: 3427 byte(s) leaked in 3 allocation(s).',
     ])
 
   def test_asan_pthread_stubs(self):
-    self.do_smart_test(path_from_root('tests', 'other', 'test_asan_pthread_stubs.c'), emcc_args=['-fsanitize=address', '-s', 'ALLOW_MEMORY_GROWTH=1'])
+    self.do_smart_test(path_from_root('tests', 'other', 'test_asan_pthread_stubs.c'), emcc_args=['-fsanitize=address', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=314572800'])
 
   def test_proxy_to_pthread_stack(self):
     with js_engines_modify([NODE_JS + ['--experimental-wasm-threads', '--experimental-wasm-bulk-memory']]):
@@ -8601,7 +8608,7 @@ int main(void) {
     self.do_other_test('mmap_and_munmap_anonymous', emcc_args=['-s', 'NO_FILESYSTEM'])
 
   def test_mmap_and_munmap_anonymous_asan(self):
-    self.do_other_test('mmap_and_munmap_anonymous', emcc_args=['-s', 'NO_FILESYSTEM', '-fsanitize=address', '-s', 'ALLOW_MEMORY_GROWTH=1'])
+    self.do_other_test('mmap_and_munmap_anonymous', emcc_args=['-s', 'NO_FILESYSTEM', '-fsanitize=address', '-s', 'ALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=314572800'])
 
   def test_mmap_memorygrowth(self):
     self.do_other_test('mmap_memorygrowth', ['-s', 'ALLOW_MEMORY_GROWTH=1'])
