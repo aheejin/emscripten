@@ -365,6 +365,7 @@ def parse_config_file():
     'FROZEN_CACHE',
     'CACHE',
     'PORTS',
+    'COMPILER_WRAPPER',
   )
 
   # Only propagate certain settings from the config file.
@@ -1044,7 +1045,7 @@ def is_c_symbol(name):
 def treat_as_user_function(name):
   if name.startswith('dynCall_'):
     return False
-  if name in Settings.WASM_FUNCTIONS_THAT_ARE_NOT_NAME_MANGLED:
+  if name in Settings.WASM_SYSTEM_EXPORTS:
     return False
   return True
 
@@ -1478,6 +1479,7 @@ WASM_ENGINES = []
 CACHE = None
 PORTS = None
 FROZEN_CACHE = False
+COMPILER_WRAPPER = None
 
 # Emscripten compiler spawns other processes, which can reimport shared.py, so
 # make sure that those child processes get the same configuration file by
