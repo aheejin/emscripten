@@ -584,10 +584,10 @@ def backend_binaryen_passes():
     if shared.Settings.ASYNCIFY_IGNORE_INDIRECT:
       passes += ['--pass-arg=asyncify-ignore-indirect']
     else:
-      # if we are not ignoring indirect calls, then we must treat invoke_* as if
-      # they are indirect calls, since that is what they do - we can't see their
-      # targets statically.
-      shared.Settings.ASYNCIFY_IMPORTS += ['invoke_*']
+      # if we are not ignoring indirect calls, then we must treat __invoke_* as
+      # if they are indirect calls, since that is what they do - we can't see
+      # their targets statically.
+      shared.Settings.ASYNCIFY_IMPORTS += ['__invoke_*']
     # with pthreads we may call main through the __call_main mechanism, which can
     # therefore reach anything in the program, so mark it as possibly causing a
     # sleep (the asyncify analysis doesn't look through JS, just wasm, so it can't

@@ -749,7 +749,7 @@ def create_sending(invoke_funcs, metadata):
     # strip them again here.
     # note that we don't do this for EM_JS functions (which, rarely, may have
     # a '_' prefix)
-    if g.startswith('_') and g not in metadata['emJsFuncs']:
+    if g.startswith('_') and (g not in metadata['emJsFuncs'] and g not in metadata['invokeFuncs']): # FIXME
       return g[1:]
     return g
 
@@ -926,7 +926,7 @@ def create_invoke_wrappers(invoke_funcs):
   """Asm.js-style exception handling: invoke wrapper generation."""
   invoke_wrappers = ''
   for invoke in invoke_funcs:
-    sig = invoke[len('invoke_'):]
+    sig = invoke[len('__invoke_'):]
     invoke_wrappers += '\n' + shared.JS.make_invoke(sig) + '\n'
   return invoke_wrappers
 

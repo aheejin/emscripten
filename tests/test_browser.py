@@ -3240,7 +3240,7 @@ window.close = function() {
       print(opts)
       self.btest('browser/async_virtual_2.cpp', '1', args=['-O' + str(opts), '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1', '-profiling'] + self.get_async_args())
 
-  # Test async sleeps in the presence of invoke_* calls, which can happen with
+  # Test async sleeps in the presence of __invoke_* calls, which can happen with
   # longjmp or exceptions.
   @parameterized({
     'O0': ([],), # noqa

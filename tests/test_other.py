@@ -6764,7 +6764,7 @@ int main() {
       text = re.sub(r'param \$\d+', 'param ', text)
       text = re.sub(r' +', ' ', text)
       # print("text: %s" % text)
-      i_legalimport_i64 = re.search(r'\(import.*\$legalimport\$invoke_j.*', text)
+      i_legalimport_i64 = re.search(r'\(import.*\$legalimport\$__invoke_j.*', text)
       e_legalstub_i32 = re.search(r'\(func.*\$legalstub\$dyn.*\(result i32\)', text)
       assert i_legalimport_i64, 'legal import not generated for invoke call'
       assert e_legalstub_i32, 'legal stub not generated for dyncall'
@@ -7958,24 +7958,24 @@ int main () {
         check_size('a.js', 150000)
         check_size('a.wasm', 80000)
 
-  # Checks that C++ exceptions managing invoke_*() wrappers will not be generated if exceptions are disabled
+  # Checks that C++ exceptions managing __invoke_*() wrappers will not be generated if exceptions are disabled
   def test_no_invoke_functions_are_generated_if_exception_catching_is_disabled(self):
     self.skipTest('Skipping other.test_no_invoke_functions_are_generated_if_exception_catching_is_disabled: Enable after new version of fastcomp has been tagged')
     for args in [[], ['-s', 'WASM=0']]:
       self.run_process([EMCC, path_from_root('tests', 'hello_world.cpp'), '-s', 'DISABLE_EXCEPTION_CATCHING=1', '-o', 'a.html'] + args)
       output = open('a.js').read()
       self.assertContained('_main', output) # Smoke test that we actually compiled
-      self.assertNotContained('invoke_', output)
+      self.assertNotContained('__invoke_', output)
 
-  # Verifies that only the minimal needed set of invoke_*() functions will be generated when C++ exceptions are enabled
+  # Verifies that only the minimal needed set of __invoke_*() functions will be generated when C++ exceptions are enabled
   def test_no_excessive_invoke_functions_are_generated_when_exceptions_are_enabled(self):
     self.skipTest('Skipping other.test_no_excessive_invoke_functions_are_generated_when_exceptions_are_enabled: Enable after new version of fastcomp has been tagged')
     for args in [[], ['-s', 'WASM=0']]:
       self.run_process([EMCC, path_from_root('tests', 'invoke_i.cpp'), '-s', 'DISABLE_EXCEPTION_CATCHING=0', '-o', 'a.html'] + args)
       output = open('a.js').read()
-      self.assertContained('invoke_i', output)
-      self.assertNotContained('invoke_ii', output)
-      self.assertNotContained('invoke_v', output)
+      self.assertContained('__invoke_i', output)
+      self.assertNotContained('__invoke_i_i', output)
+      self.assertNotContained('__invoke_v', output)
 
   def test_emscripten_metadata(self):
     self.run_process([EMCC, path_from_root('tests', 'hello_world.c')])

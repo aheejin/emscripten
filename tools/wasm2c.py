@@ -135,24 +135,33 @@ extern void wasmbox_init(void);
     total = total.replace('#include "%s"\n' % header[1], '/* include of %s */\n' % header[1])
   # generate the necessary invokes
   invokes = []
-  for sig in re.findall(r"\/\* import\: 'env' 'invoke_(\w+)' \*\/", total):
+  for sig in re.findall(r"\/\* import\: 'env' '__invoke_(\w+)' \*\/", total):
     all_func_types = get_func_types(total)
+
+    if '_' in sig:
+      result_sig = sig.split('_')[0]
+      param_sig = sig.split('_')[1]
+    else:
+      result_sig = sig
+      param_sig = ''
 
     def name(i):
       return 'a' + str(i)
 
-    wabt_sig = sig[0] + 'i' + sig[1:]
-    typed_args = [s_to_c(sig[i]) + ' ' + name(i) for i in range(1, len(sig))]
+    wabt_sig = result_sig + 'i' + param_sig
+    typed_args = [s_to_c(param_sig[i]) + ' ' + name(i) for i in range(len(param_sig))]
     full_typed_args = ['u32 fptr'] + typed_args
-    types = [s_to_c(sig[i]) for i in range(1, len(sig))]
-    args = [name(i) for i in range(1, len(sig))]
-    c_func_type = s_to_c(sig[0]) + ' (*)(' + (', '.join(types) if types else 'void') + ')'
-    if sig not in all_func_types:
-      exit_with_error('could not find signature ' + sig + ' in function types ' + str(all_func_types))
-    type_index = all_func_types[sig]
+    types = [s_to_c(param_sig[i]) for i in range(len(param_sig))]
+    args = [name(i) for i in range(len(param_sig))]
+    c_func_type = s_to_c(result_sig) + ' (*)(' + (', '.join(types) if types else 'void') + ')'
+    # FIXME
+    sig_wo_underscore = result_sig + param_sig
+    if sig_wo_underscore not in all_func_types:
+      exit_with_error('could not find signature ' + sig_wo_underscore + ' in function types ' + str(all_func_types))
+    type_index = all_func_types[sig_wo_underscore]
 
     invokes.append(r'''
-IMPORT_IMPL(%(return_type)s, Z_envZ_invoke_%(sig)sZ_%(wabt_sig)s, (%(full_typed_args)s), {
+IMPORT_IMPL(%(return_type)s, Z_envZ___invoke_%(sig)sZ_%(wabt_sig)s, (%(full_typed_args)s), {
   VERBOSE_LOG("invoke\n"); // waka
   u32 sp = Z_stackSaveZ_iv();
   if (next_setjmp >= MAX_SETJMP_STACK) {
@@ -173,16 +182,16 @@ IMPORT_IMPL(%(return_type)s, Z_envZ_invoke_%(sig)sZ_%(wabt_sig)s, (%(full_typed_
   %(return)s
 });
 ''' % {
-      'return_type': s_to_c(sig[0]) if sig[0] != 'v' else 'void',
+      'return_type': s_to_c(result_sig) if result_sig != 'v' else 'void',
       'sig': sig,
       'wabt_sig': wabt_sig,
       'full_typed_args': ', '.join(full_typed_args),
       'type_index': type_index,
       'c_func_type': c_func_type,
       'args': (', ' + ', '.join(args)) if args else '',
-      'declare_return': (s_to_c(sig[0]) + ' returned_value = 0;') if sig[0] != 'v' else '',
-      'receive': 'returned_value = ' if sig[0] != 'v' else '',
-      'return': 'return returned_value;' if sig[0] != 'v' else ''
+      'declare_return': (s_to_c(result_sig) + ' returned_value = 0;') if result_sig != 'v' else '',
+      'receive': 'returned_value = ' if result_sig != 'v' else '',
+      'return': 'return returned_value;' if result_sig != 'v' else ''
     })
 
   total += '\n'.join(invokes)

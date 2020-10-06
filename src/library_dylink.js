@@ -215,8 +215,10 @@ var LibraryDylink = {
           if (!resolved) {
             resolved = moduleLocal[mangled];
           }
-          if (!resolved && sym.startsWith('invoke_')) {
-            resolved = createInvokeFunction(sym.split('_')[1]);
+          if (!resolved && sym.startsWith('__invoke_')) {
+            // FIXME
+            sig = sym.split('__invoke_')[1].replace('_', '')
+            resolved = createInvokeFunction(sig);
           }
 #if ASSERTIONS
           assert(resolved, 'missing linked ' + type + ' `' + sym + '`. perhaps a side module was not linked in? if this global was expected to arrive from a system library, try to build the MAIN_MODULE with EMCC_FORCE_STDLIBS=1 in the environment');

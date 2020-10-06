@@ -1207,6 +1207,10 @@ function jsCall_%s(index%s) {
 
   @staticmethod
   def make_dynCall(sig, args):
+    # FIXME Rename dynCalls in the same way as invokes. This is an interim
+    # temporary fix
+    sig = sig.replace('_', '')
+
     # wasm2c and asyncify are not yet compatible with direct wasm table calls
     if Settings.USE_LEGACY_DYNCALLS or not JS.is_legal_sig(sig):
       args = ','.join(args)
@@ -1221,8 +1225,9 @@ function jsCall_%s(index%s) {
 
   @staticmethod
   def make_invoke(sig, named=True):
-    legal_sig = JS.legalize_sig(sig) # TODO: do this in extcall, jscall?
-    args = ['index'] + ['a' + str(i) for i in range(1, len(legal_sig))]
+    legal_sig = JS.legalize_sig(sig)
+    num_args = len(legal_sig) - legal_sig.count('_') - 1
+    args = ['index'] + ['a' + str(i) for i in range(num_args)]
     ret = 'return ' if sig[0] != 'v' else ''
     body = '%s%s;' % (ret, JS.make_dynCall(sig, args))
     # C++ exceptions are numbers, and longjmp is a string 'longjmp'
@@ -1231,7 +1236,7 @@ function jsCall_%s(index%s) {
     else:
       rethrow = "if (e !== e+0) throw e;"
 
-    name = (' invoke_' + sig) if named else ''
+    name = (' __invoke_' + sig) if named else ''
     ret = '''\
 function%s(%s) {
   var sp = stackSave();
