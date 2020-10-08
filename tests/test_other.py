@@ -100,8 +100,10 @@ def parse_wasm(filename):
     line = line.strip()
     if line.startswith('(import '):
       line = line.strip('()')
-      name = line.split()[2].strip('"')
-      imports.append(name)
+      parts = line.split()
+      module = parts[1].strip('"')
+      name = parts[2].strip('"')
+      imports.append('%s.%s' % (module, name))
     if line.startswith('(export '):
       line = line.strip('()')
       name = line.split()[1].strip('"')
@@ -1716,7 +1718,17 @@ int f() {
       self.assertGreater(len(js), 100 * SLACK)
 
   def test_js_optimizer(self):
-    ACORN_PASSES = ['JSDCE', 'AJSDCE', 'applyImportAndExportNameChanges', 'emitDCEGraph', 'applyDCEGraphRemovals', 'growableHeap', 'unsignPointers', 'asanify']
+    ACORN_PASSES = [
+      'JSDCE',
+      'AJSDCE',
+      'applyImportAndExportNameChanges',
+      'emitDCEGraph',
+      'applyDCEGraphRemovals',
+      'growableHeap',
+      'unsignPointers',
+      'asanify',
+      'safeHeap'
+    ]
     for input, expected, passes in [
       (path_from_root('tests', 'optimizer', 'test-js-optimizer-minifyLocals.js'), open(path_from_root('tests', 'optimizer', 'test-js-optimizer-minifyLocals-output.js')).read(),
        ['minifyLocals']),
@@ -1760,6 +1772,8 @@ int f() {
        ['unsignPointers']),
       (path_from_root('tests', 'optimizer', 'test-asanify.js'), open(path_from_root('tests', 'optimizer', 'test-asanify-output.js')).read(),
        ['asanify']),
+      (path_from_root('tests', 'optimizer', 'test-safeHeap.js'), open(path_from_root('tests', 'optimizer', 'test-safeHeap-output.js')).read(),
+       ['safeHeap']),
     ]:
       print(input, passes)
 
@@ -6642,10 +6656,9 @@ int main() {
     'export_nothing':
           (['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],    [], [],     43), # noqa
     # we don't metadce with linkable code! other modules may want stuff
-    # don't compare the # of functions in a main module, which changes a lot
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'], [], [],  10652, True, True, True, False), # noqa
+    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'], [], [],  10309), # noqa
   })
   def test_metadce_hello(self, *args):
     self.run_metadce_test('hello_world.cpp', *args)
@@ -8036,6 +8049,11 @@ int main () {
         test(['-s', 'WASM=0'], closure, opt)
         test(['-s', 'WASM_ASYNC_COMPILATION=0'], closure, opt)
 
+  # TODO: Debug why the code size is different on Windows. Also, for some
+  # unknown reason (at time of writing), this test is not skipped on the Windows
+  # autoroller, despite the bot being correctly configured to skip this test.
+  # The no_windows decorator also solves that problem.
+  @no_windows("Code size is slightly different on Windows")
   def test_minimal_runtime_code_size(self):
     smallest_code_size_args = ['-s', 'MINIMAL_RUNTIME=2',
                                '-s', 'ENVIRONMENT=web',
@@ -8317,6 +8335,12 @@ int main () {
     self.assertContained('ReferenceError: SPLIT_MEMORY is not defined', self.expect_fail(cmd + ['-s', 'STRICT=1']))
     with env_modify({'EMCC_STRICT': '1'}):
       self.assertContained('ReferenceError: SPLIT_MEMORY is not defined', self.expect_fail(cmd))
+
+  def test_strict_mode_link_cxx(self):
+    # In strict mode C++ programs fail to link unless run with `em++`.
+    self.run_process([EMXX, '-sSTRICT', path_from_root('tests', 'hello_libcxx.cpp')])
+    err = self.expect_fail([EMCC, '-sSTRICT', path_from_root('tests', 'hello_libcxx.cpp')])
+    self.assertContained('error: undefined symbol:', err)
 
   def test_safe_heap_log(self):
     self.set_setting('SAFE_HEAP')

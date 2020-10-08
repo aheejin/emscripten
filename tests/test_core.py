@@ -24,7 +24,7 @@ from tools.shared import NODE_JS, V8_ENGINE, JS_ENGINES, SPIDERMONKEY_ENGINE, PY
 from tools import shared, building
 from runner import RunnerCore, path_from_root, requires_native_clang
 from runner import skip_if, no_wasm_backend, needs_dlfcn, no_windows, is_slow_test, create_test_file, parameterized
-from runner import js_engines_modify, wasm_engines_modify, env_modify, with_env_modify
+from runner import js_engines_modify, wasm_engines_modify, env_modify, with_env_modify, disabled
 from runner import NON_ZERO
 import clang_native
 
@@ -102,14 +102,6 @@ def with_both_exception_handling(f):
   metafunc._parameterize = {'': (False,),
                             'wasm_eh': (True,)}
   return metafunc
-
-
-def no_wasm(note=''):
-  assert not callable(note)
-
-  def decorated(f):
-    return skip_if(f, 'is_wasm', note)
-  return decorated
 
 
 def no_wasm2js(note=''):
@@ -2721,7 +2713,7 @@ The current type of b is: 9
     self.do_run(src, '|65830|')
 
   @needs_dlfcn
-  @no_wasm('EM_ASM in shared wasm modules, stored inside the wasm somehow')
+  @disabled('EM_ASM in not yet supported in SIDE_MODULE')
   def test_dlfcn_em_asm(self):
     self.prep_dlfcn_lib()
     create_test_file('liblib.cpp', '''
@@ -3059,10 +3051,6 @@ Var: 42
   def test_dlfcn_self(self):
     self.set_setting('MAIN_MODULE')
     self.set_setting('EXPORT_ALL')
-    # TODO(https://github.com/emscripten-core/emscripten/issues/11121)
-    # We link with C++ stdlibs, even when linking with emcc for historical reasons.  We can remove
-    # this if this issues is fixed.
-    self.emcc_args.append('-nostdlib++')
 
     def get_data_export_count(wasm):
       wat = self.get_wasm_text(wasm)
@@ -3609,11 +3597,13 @@ ok
     if auto_load:
       self.set_setting('RUNTIME_LINKED_LIBS', ['liblib.so'])
       self.emcc_args += main_emcc_args
+      if force_c:
+        self.emcc_args.append('-nostdlib++')
 
     if isinstance(main, list):
       # main is just a library
       try_delete('src.js')
-      self.run_process([EMCC] + main + self.emcc_args + self.serialize_settings() + ['-o', 'src.js'])
+      self.run_process([EMCC] + main + self.get_emcc_args() + ['-o', 'src.js'])
       self.do_run('src.js', expected, no_build=True, **kwargs)
     else:
       self.do_run(main, expected, force_c=force_c, **kwargs)
@@ -3640,7 +3630,7 @@ ok
       int sidey() {
         return 11;
       }
-    ''', 'other says 11.', 'extern "C" int sidey();', need_reverse=need_reverse)
+    ''', 'other says 11.', 'int sidey();', force_c=True, need_reverse=need_reverse)
 
   @needs_dlfcn
   def test_dylink_basics(self):
@@ -3686,7 +3676,7 @@ ok
       void* get_address() {
         return (void*)&puts;
       }
-    ''', 'success', header='extern "C" void* get_address();')
+    ''', 'success', header='void* get_address();', force_c=True)
 
   @needs_dlfcn
   def test_dylink_floats(self):
@@ -3699,13 +3689,13 @@ ok
       }
     ''', '''
       float sidey() { return 11.5; }
-    ''', 'other says 12.50')
+    ''', 'other says 12.50', force_c=True)
 
   @needs_dlfcn
   def test_dylink_printfs(self):
     self.dylink_test(r'''
       #include <stdio.h>
-      extern "C" void sidey();
+     void sidey();
       int main() {
         printf("hello from main\n");
         sidey();
@@ -3713,10 +3703,10 @@ ok
       }
     ''', r'''
       #include <stdio.h>
-      extern "C" void sidey() {
+      void sidey() {
         printf("hello from side\n");
       }
-    ''', 'hello from main\nhello from side\n')
+    ''', 'hello from main\nhello from side\n', force_c=True)
 
   # Verify that a function pointer can be passed back and forth and invoked
   # on both sides.
@@ -3741,7 +3731,7 @@ ok
       intfunc sidey(intfunc f) { f(1); return f; }
       ''',
       expected='hello from funcptr: 1\nhello from funcptr: 0\n',
-      header='typedef void (*intfunc)(int );')
+      header='typedef void (*intfunc)(int );', force_c=True)
 
   @needs_dlfcn
   # test dynamic linking of a module with multiple function pointers, stored
@@ -3767,77 +3757,7 @@ ok
       void sidey(voidfunc f) { f(); }
       ''',
       expected='hello 0\nhello 1\nhello 2\n',
-      header='typedef void (*voidfunc)(); void sidey(voidfunc f);')
-
-  @no_wasm('uses function tables in an asm.js specific way')
-  @needs_dlfcn
-  def test_dylink_asmjs_funcpointers(self):
-    self.dylink_test(
-      main=r'''
-      #include "header.h"
-      #include <emscripten.h>
-      void left1() { printf("left1\n"); }
-      void left2() { printf("left2\n"); }
-      voidfunc getleft1() { return left1; }
-      voidfunc getleft2() { return left2; }
-      int main(int argc, char **argv) {
-        printf("main\n");
-        EM_ASM({
-          // make the function table sizes a non-power-of-two
-          var newSize = alignFunctionTables();
-          //out('old size of function tables: ' + newSize);
-          while ((newSize & 3) !== 3) {
-            Module['FUNCTION_TABLE_v'].push(0);
-            newSize = alignFunctionTables();
-          }
-          //out('new size of function tables: ' + newSize);
-          // when masked, the two function pointers 1 and 2 should not happen to fall back to the right place
-          assert(((newSize+1) & 3) !== 1 || ((newSize+2) & 3) !== 2);
-          loadDynamicLibrary('liblib.so');
-        });
-        volatilevoidfunc f;
-        f = (volatilevoidfunc)left1;
-        f();
-        f = (volatilevoidfunc)left2;
-        f();
-        f = (volatilevoidfunc)getright1();
-        f();
-        f = (volatilevoidfunc)getright2();
-        f();
-        second();
-        return 0;
-      }
-      ''',
-      side=r'''
-      #include "header.h"
-      void right1() { printf("right1\n"); }
-      void right2() { printf("right2\n"); }
-      voidfunc getright1() { return right1; }
-      voidfunc getright2() { return right2; }
-      void second() {
-        printf("second\n");
-        volatilevoidfunc f;
-        f = (volatilevoidfunc)getleft1();
-        f();
-        f = (volatilevoidfunc)getleft2();
-        f();
-        f = (volatilevoidfunc)right1;
-        f();
-        f = (volatilevoidfunc)right2;
-        f();
-      }
-      ''',
-      expected='main\nleft1\nleft2\nright1\nright2\nsecond\nleft1\nleft2\nright1\nright2\n',
-      header='''
-      #include <stdio.h>
-      typedef void (*voidfunc)();
-      typedef volatile voidfunc volatilevoidfunc;
-      voidfunc getleft1();
-      voidfunc getleft2();
-      voidfunc getright1();
-      voidfunc getright2();
-      void second();
-      ''', need_reverse=False, auto_load=False)
+      header='typedef void (*voidfunc)(); void sidey(voidfunc f);', force_c=True)
 
   @needs_dlfcn
   def test_dylink_funcpointers_wrapper(self):
@@ -3864,7 +3784,7 @@ ok
       #include <emscripten.h>
       typedef void (*charfunc)(const char*);
       extern charfunc get();
-      ''')
+      ''', force_c=True)
 
   @needs_dlfcn
   def test_dylink_static_funcpointer_float(self):
@@ -3886,7 +3806,7 @@ ok
       int sidey(floatfunc f) { f(56.78); return 1; }
       ''',
       expected='hello 1: 56.779999\ngot: 1\nhello 1: 12.340000\n',
-      header='typedef float (*floatfunc)(float);')
+      header='typedef float (*floatfunc)(float);', force_c=True)
 
   @needs_dlfcn
   def test_dylink_global_init(self):
@@ -3960,7 +3880,7 @@ ok
         x += y;
         return x;
       }
-    ''', 'other says 175a1ddee82b8c31.')
+    ''', 'other says 175a1ddee82b8c31.', force_c=True)
 
   @all_engines
   @needs_dlfcn
@@ -3994,14 +3914,14 @@ ok
         x = 18 - x;
         return x;
       }
-    ''', 'other says -1311768467750121224.\nmy fp says: 43.\nmy second fp says: 43.')
+    ''', 'other says -1311768467750121224.\nmy fp says: 43.\nmy second fp says: 43.', force_c=True)
 
   @needs_dlfcn
   @also_with_wasm_bigint
   def test_dylink_i64_c(self):
     self.dylink_test(r'''
-      #include <cstdio>
-      #include <cinttypes>
+      #include <stdio.h>
+      #include <inttypes.h>
       #include "header.h"
 
       typedef int32_t (*fp_type_32)(int32_t, int32_t, int32_t);
@@ -4043,10 +3963,10 @@ res32 - external 32
 res64 - internal 64
 res64 - external 64\n''', header='''
       #include <emscripten.h>
-      #include <cstdint>
+      #include <stdint.h>
       EMSCRIPTEN_KEEPALIVE int32_t function_ret_32(int32_t i, int32_t j, int32_t k);
       EMSCRIPTEN_KEEPALIVE int64_t function_ret_64(int32_t i, int32_t j, int32_t k);
-    ''')
+    ''', force_c=True)
 
   @needs_dlfcn
   @also_with_wasm_bigint
@@ -4113,7 +4033,7 @@ res64 - external 64\n''', header='''
       }
     ''', side=r'''
       int x = 123;
-    ''', expected=['extern is 123.\n'])
+    ''', expected=['extern is 123.\n'], force_c=True)
 
   @needs_dlfcn
   def test_dylink_global_var_modded(self):
@@ -4149,7 +4069,7 @@ res64 - external 64\n''', header='''
         strcpy(ret, temp);
         temp[1] = 'x';
         puts(ret);
-        printf("pow_two: %d.\n", int(pow_two(5.9)));
+        printf("pow_two: %d.\n", (int)pow_two(5.9));
         return 0;
       }
     ''', side=r'''
@@ -4162,7 +4082,7 @@ res64 - external 64\n''', header='''
       double pow_two(double x) {
         return pow(2, x);
       }
-    ''', expected=['hello through side\n\npow_two: 59.'])
+    ''', expected=['hello through side\n\npow_two: 59.'], force_c=True)
 
   @needs_dlfcn
   def test_dylink_jslib(self):
@@ -4174,7 +4094,7 @@ res64 - external 64\n''', header='''
       });
     ''')
     self.dylink_test(header=r'''
-      extern "C" { extern double test_lib_func(int input); }
+      extern double test_lib_func(int input);
     ''', main=r'''
       #include <stdio.h>
       #include "header.h"
@@ -4197,7 +4117,7 @@ res64 - external 64\n''', header='''
         printf("main2 sed: %u, %c\n", temp, temp/2);
         return test_lib_func(temp);
       }
-    ''', expected='other says 45.2', main_emcc_args=['--js-library', 'lib.js'])
+    ''', expected='other says 45.2', main_emcc_args=['--js-library', 'lib.js'], force_c=True)
 
   @needs_dlfcn
   def test_dylink_many_postsets(self):
@@ -4228,7 +4148,7 @@ res64 - external 64\n''', header='''
       void more() {
         test();
       }
-    ''', expected=['simple.\nsimple.\nsimple.\nsimple.\n'])
+    ''', expected=['simple.\nsimple.\nsimple.\nsimple.\n'], force_c=True)
 
   @needs_dlfcn
   def test_dylink_postsets_chunking(self):
@@ -4262,7 +4182,7 @@ res64 - external 64\n''', header='''
       #include "header.h"
 
       int global_var = 12345;
-    ''', expected=['12345\n'])
+    ''', expected=['12345\n'], force_c=True)
 
   @needs_dlfcn
   def test_dylink_syslibs(self): # one module uses libcxx, need to force its inclusion when it isn't the main
@@ -4485,25 +4405,25 @@ res64 - external 64\n''', header='''
   @needs_dlfcn
   def test_dylink_dot_a(self):
     # .a linking must force all .o files inside it, when in a shared module
-    create_test_file('third.cpp', 'extern "C" int sidef() { return 36; }')
-    create_test_file('fourth.cpp', 'extern "C" int sideg() { return 17; }')
+    create_test_file('third.c', 'int sidef() { return 36; }')
+    create_test_file('fourth.c', 'int sideg() { return 17; }')
 
-    self.run_process([EMCC, '-fPIC', '-c', 'third.cpp', '-o', 'third.o'] + self.get_emcc_args())
-    self.run_process([EMCC, '-fPIC', '-c', 'fourth.cpp', '-o', 'fourth.o'] + self.get_emcc_args())
+    self.run_process([EMCC, '-fPIC', '-c', 'third.c', '-o', 'third.o'] + self.get_emcc_args())
+    self.run_process([EMCC, '-fPIC', '-c', 'fourth.c', '-o', 'fourth.o'] + self.get_emcc_args())
     self.run_process([EMAR, 'rc', 'libfourth.a', 'fourth.o'])
 
     self.dylink_test(main=r'''
       #include <stdio.h>
       #include <emscripten.h>
-      extern "C" int sidef();
-      extern "C" int sideg();
+      int sidef();
+      int sideg();
       int main() {
         printf("sidef: %d, sideg: %d.\n", sidef(), sideg());
       }
     ''',
                      # contents of libfourth.a must be included, even if they aren't referred to!
                      side=['libfourth.a', 'third.o'],
-                     expected=['sidef: 36, sideg: 17.\n'])
+                     expected=['sidef: 36, sideg: 17.\n'], force_c=True)
 
   @needs_dlfcn
   def test_dylink_spaghetti(self):
@@ -7041,9 +6961,7 @@ someweirdtext
     no_maps_filename = 'no-maps.out.js'
 
     assert '-g4' not in self.emcc_args
-    building.emcc('src.cpp',
-                  self.serialize_settings() + self.emcc_args + self.emcc_args,
-                  out_filename)
+    building.emcc('src.cpp', self.get_emcc_args(), out_filename)
     # the file name may find its way into the generated code, so make sure we
     # can do an apples-to-apples comparison by compiling with the same file name
     shutil.move(out_filename, no_maps_filename)
@@ -7053,7 +6971,7 @@ someweirdtext
     self.emcc_args.append('-g4')
 
     building.emcc(os.path.abspath('src.cpp'),
-                  self.serialize_settings() + self.emcc_args + self.emcc_args,
+                  self.get_emcc_args(),
                   out_filename,
                   stderr=PIPE)
     map_referent = out_filename if not self.get_setting('WASM') else wasm_filename
@@ -7131,9 +7049,7 @@ someweirdtext
     js_filename = 'a.out.js'
     wasm_filename = 'a.out.wasm'
 
-    building.emcc('src.cpp',
-                  self.serialize_settings() + self.emcc_args,
-                  js_filename)
+    building.emcc('src.cpp', self.get_emcc_args(), js_filename)
 
     LLVM_DWARFDUMP = os.path.join(LLVM_ROOT, 'llvm-dwarfdump')
     out = self.run_process([LLVM_DWARFDUMP, wasm_filename, '-all'], stdout=PIPE).stdout
@@ -7270,8 +7186,7 @@ someweirdtext
 
     self.do_run_in_out_file_test('tests', 'core', 'modularize_closure_pre.c', post_build=post)
 
-  @no_wasm('wasmifying destroys debug info and stack tracability')
-  @no_wasm2js('source maps support')
+  @no_wasm2js('symbol names look different wasm2js backtraces')
   def test_emscripten_log(self):
     self.banned_js_engines = [V8_ENGINE] # v8 doesn't support console.log
     self.emcc_args += ['-s', 'DEMANGLE_SUPPORT=1']
@@ -7280,10 +7195,9 @@ someweirdtext
     self.emcc_args += ['-DRUN_FROM_JS_SHELL']
     self.do_run_in_out_file_test('tests', 'emscripten_log', 'emscripten_log.cpp')
     # test closure compiler as well
-    if self.run_name == 'asm2':
-      print('closure')
-      self.emcc_args += ['--closure', '1', '-g1'] # extra testing
-      self.do_run_in_out_file_test('tests', 'emscripten_log', 'emscripten_log_with_closure')
+    print('closure')
+    self.emcc_args += ['--closure', '1', '-g1'] # extra testing
+    self.do_run_in_out_file_test('tests', 'emscripten_log', 'emscripten_log_with_closure.cpp')
 
   def test_float_literals(self):
     self.do_run_in_out_file_test('tests', 'test_float_literals.cpp')
@@ -8147,6 +8061,11 @@ NODEFS is no longer included by default; build with -lnodefs.js
                  post_build=post,
                  expected_output='hello, world!')
 
+  def test_safe_heap_user_js(self):
+    self.set_setting('SAFE_HEAP', 1)
+    self.do_runf(path_from_root('tests', 'core', 'test_safe_heap_user_js.c'),
+                 expected_output=['abort(segmentation fault storing 1 bytes to address 0)'], assert_returncode=NON_ZERO)
+
   def test_safe_stack(self):
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('TOTAL_STACK', 65536)
@@ -8182,7 +8101,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
         int a[2048];
         f(a);
       }
-    ''', ['abort(stack overflow)', '__handle_stack_overflow'], assert_returncode=NON_ZERO)
+    ''', ['abort(stack overflow)', '__handle_stack_overflow'], assert_returncode=NON_ZERO, force_c=True)
 
   def test_fpic_static(self):
     self.emcc_args.append('-fPIC')

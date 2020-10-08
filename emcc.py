@@ -2101,8 +2101,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if not shared.Settings.SIDE_MODULE: # shared libraries/side modules link no C libraries, need them in parent
         extra_files_to_link = system_libs.get_ports(shared.Settings)
         if '-nostdlib' not in newargs and '-nodefaultlibs' not in newargs:
-          # TODO(sbc): Only set link_as_cxx when run_via_emxx
-          link_as_cxx = '-nostdlib++' not in newargs
+          link_as_cxx = run_via_emxx
+          # Traditionally we always link as C++.  For compatibility we continue to do that,
+          # unless running in strict mode.
+          if not shared.Settings.STRICT and '-nostdlib++' not in newargs:
+            link_as_cxx = True
           extra_files_to_link += system_libs.calculate([f for _, f in sorted(temp_files)] + extra_files_to_link, link_as_cxx, forced=forced_stdlibs)
         linker_inputs += extra_files_to_link
 
@@ -2701,6 +2704,9 @@ def do_binaryen(target, options, wasm_target):
 
     if shared.Settings.USE_ASAN:
       final_js = building.instrument_js_for_asan(final_js)
+
+    if shared.Settings.SAFE_HEAP:
+      final_js = building.instrument_js_for_safe_heap(final_js)
 
     if shared.Settings.OPT_LEVEL >= 2 and shared.Settings.DEBUG_LEVEL <= 2:
       # minify the JS
