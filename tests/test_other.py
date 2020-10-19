@@ -6577,7 +6577,7 @@ int main() {
 
     if expected_size is not None:
       # measure the wasm size without the name section
-      self.run_process([wasm_opt, 'a.out.wasm', '--strip-debug', '-o', 'a.out.nodebug.wasm'])
+      self.run_process([wasm_opt, 'a.out.wasm', '--strip-debug', '--all-features', '-o', 'a.out.nodebug.wasm'])
       wasm_size = os.path.getsize('a.out.nodebug.wasm')
       ratio = abs(wasm_size - expected_size) / float(expected_size)
       print('  seen wasm size: %d (expected: %d), ratio to expected: %f' % (wasm_size, expected_size, ratio))
@@ -9448,3 +9448,17 @@ exec "$@"
     stderr = self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '-pthread', '-sMODULARIZE'], stderr=PIPE, check=False).stderr
     self.assertContained('pthreads + MODULARIZE currently require you to set -s EXPORT_NAME=Something (see settings.js) to Something != Module, so that the .worker.js file can work',
                          stderr)
+
+  def test_jslib_clobber_i(self):
+    # Regression check for an issue we have where a library clobbering the global `i` variable could
+    # prevent processing of further libraries.
+    create_test_file('lib1.js', 'for (var i = 0; i < 100; i++) {}')
+    create_test_file('lib2.js', '''
+      mergeInto(LibraryManager.library, {
+       foo: function() { }
+      });
+      ''')
+    self.run_process([EMCC, path_from_root('tests', 'hello_world.c'),
+                      '-s', 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[foo]',
+                      '--js-library=lib1.js',
+                      '--js-library=lib2.js'])

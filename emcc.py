@@ -258,10 +258,6 @@ class EmccOptions(object):
     self.relocatable = False
 
 
-def use_source_map():
-  return shared.Settings.DEBUG_LEVEL >= 4
-
-
 def will_metadce():
   # The metadce JS parsing code does not currently support the JS that gets generated
   # when assertions are enabled.
@@ -306,7 +302,7 @@ def embed_memfile():
           (shared.Settings.MEM_INIT_METHOD == 0 and
            (not shared.Settings.MAIN_MODULE and
             not shared.Settings.SIDE_MODULE and
-            not use_source_map())))
+            not shared.Settings.GENERATE_SOURCE_MAP)))
 
 
 def expand_byte_size_suffixes(value):
@@ -657,6 +653,12 @@ def make_js_executable(script):
     pass # can fail if e.g. writing the executable to /dev/null
 
 
+def do_replace(input_, pattern, replacement):
+  if pattern not in input_:
+    exit_with_error('expected to find pattern in input JS: %s' % pattern)
+  return input_.replace(pattern, replacement)
+
+
 run_via_emxx = False
 
 
@@ -892,7 +894,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       options.memory_init_file = shared.Settings.OPT_LEVEL >= 2
 
     # TODO: support source maps with js_transform
-    if options.js_transform and use_source_map():
+    if options.js_transform and shared.Settings.GENERATE_SOURCE_MAP:
       logger.warning('disabling source maps because a js transform is being done')
       shared.Settings.DEBUG_LEVEL = 3
 
@@ -1185,7 +1187,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         if '_main' not in shared.Settings.USER_EXPORTED_FUNCTIONS:
           shared.Settings.EXPECT_MAIN = 0
       else:
-        assert(not shared.Settings.EXPORTED_FUNCTIONS)
+        assert not shared.Settings.EXPORTED_FUNCTIONS
         shared.Settings.EXPORTED_FUNCTIONS = ['_main']
 
     if shared.Settings.STANDALONE_WASM:
@@ -1292,7 +1294,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$preloadDylibs']
     elif shared.Settings.SIDE_MODULE:
       assert not shared.Settings.MAIN_MODULE
-      # memory init file is not supported with asm.js side modules, must be executable synchronously (for dlopen)
+      # memory init file is not supported with side modules, must be executable synchronously (for dlopen)
       options.memory_init_file = False
 
     if shared.Settings.MAIN_MODULE or shared.Settings.SIDE_MODULE:
@@ -1704,14 +1706,18 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if shared.Settings.SINGLE_FILE:
       # placeholder strings for JS glue, to be replaced with subresource locations in do_binaryen
-      shared.Settings.WASM_BINARY_FILE = shared.FilenameReplacementStrings.WASM_BINARY_FILE
+      shared.Settings.WASM_BINARY_FILE = '<<< WASM_BINARY_FILE >>>'
     else:
       # set file locations, so that JS glue can find what it needs
       shared.Settings.WASM_BINARY_FILE = shared.JS.escape_for_js_string(os.path.basename(wasm_target))
+      shared.Settings.GENERATE_SOURCE_MAP = shared.Settings.DEBUG_LEVEL >= 4
+
     if options.use_closure_compiler == 2 and not shared.Settings.WASM2JS:
       exit_with_error('closure compiler mode 2 assumes the code is asm.js, so not meaningful for wasm')
+
     if any(s.startswith('MEM_INIT_METHOD=') for s in settings_changes):
       exit_with_error('MEM_INIT_METHOD is not supported in wasm. Memory will be embedded in the wasm binary if threads are not used, and included in a separate file if threads are used.')
+
     if shared.Settings.WASM2JS:
       shared.Settings.MAYBE_WASM2JS = 1
       # when using wasm2js, if the memory segments are in the wasm then they
@@ -1837,7 +1843,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     options.binaryen_passes += backend_binaryen_passes()
 
-    if shared.Settings.WASM2JS and use_source_map():
+    if shared.Settings.WASM2JS and shared.Settings.GENERATE_SOURCE_MAP:
       exit_with_error('wasm2js does not support source maps yet (debug in wasm for now)')
 
     if shared.Settings.NODE_CODE_CACHING:
@@ -2001,7 +2007,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         shared.print_compiler_stage(cmd)
         shared.check_call(cmd)
         if output_file not in ('-', os.devnull):
-          assert(os.path.exists(output_file))
+          assert os.path.exists(output_file)
 
         # HACK (aheejin): for easy debugging
         #shared.Building.llvm_opt(output_file, ['-mem2reg', '-simplifycfg'],
@@ -2155,6 +2161,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     wasm_only = shared.Settings.SIDE_MODULE or final_suffix in WASM_ENDINGS
 
+    if shared.Settings.MEM_INIT_IN_WASM:
+      memfile = None
+    else:
+      memfile = shared.replace_or_append_suffix(target, '.mem')
+
     with ToolchainProfiler.profile_block('emscript'):
       # Emscripten
       logger.debug('LLVM => JS')
@@ -2170,13 +2181,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         final_js = None
       else:
         final_js = tmp_wasm + '.js'
-      emscripten.run(tmp_wasm, final_js, shared.replace_or_append_suffix(target, '.mem'))
+      emscripten.run(tmp_wasm, final_js, memfile)
 
       save_intermediate('original')
 
       # we also received the wasm at this stage
       safe_move(tmp_wasm, wasm_target)
-      if use_source_map():
+      if shared.Settings.GENERATE_SOURCE_MAP:
         safe_move(tmp_wasm + '.map', wasm_source_map_target)
 
     # exit block 'emscript'
@@ -2213,7 +2224,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         with open(final_js, 'w') as f:
           # pre-js code goes right after the Module integration code (so it
           # can use Module), we have a marker for it
-          f.write(src.replace('// {{PRE_JSES}}', fix_windows_newlines(options.pre_js)))
+          f.write(do_replace(src, '// {{PRE_JSES}}', fix_windows_newlines(options.pre_js)))
           f.write(fix_windows_newlines(options.post_js))
         options.pre_js = src = options.post_js = None
         save_intermediate('pre-post')
@@ -2230,19 +2241,18 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # exit block 'source transforms'
     log_time('source transforms')
 
-    with ToolchainProfiler.profile_block('memory initializer'):
-      memfile = None
-      if not shared.Settings.MEM_INIT_IN_WASM:
-         memfile = shared.replace_or_append_suffix(target, '.mem')
-      if memfile:
+    if memfile and not shared.Settings.MINIMAL_RUNTIME:
+      # MINIMAL_RUNTIME doesn't use `var memoryInitializer` but instead expects Module['mem'] to
+      # be loaded before the module.  See src/postamble_minimal.js.
+      with ToolchainProfiler.profile_block('memory initializer'):
         # For the wasm backend, we don't have any memory info in JS. All we need to do
         # is set the memory initializer url.
         src = open(final_js).read()
-        src = src.replace('var memoryInitializer = null;', 'var memoryInitializer = "%s";' % os.path.basename(memfile))
+        src = do_replace(src, '// {{MEM_INITIALIZER}}', 'var memoryInitializer = "%s";' % os.path.basename(memfile))
         open(final_js + '.mem.js', 'w').write(src)
         final_js += '.mem.js'
 
-    log_time('memory initializer')
+      log_time('memory initializer')
 
     with ToolchainProfiler.profile_block('binaryen'):
       do_binaryen(target, options, wasm_target)
@@ -2353,24 +2363,40 @@ def parse_args(newargs):
     # leak into the items in this array, so trim e.g. 'foo.cpp ' -> 'foo.cpp'
     newargs[i] = newargs[i].strip()
     arg = newargs[i]
+    arg_value = None
+
+    def check_flag(value):
+      # Check for and consume a flag
+      if arg == value:
+        newargs[i] = ''
+        return True
+      return False
 
     def check_arg(value):
+      nonlocal arg_value
       if arg.startswith(value) and '=' in arg:
-        exit_with_error('Invalid parameter (do not use "=" with "--" options)')
-      return arg == value
+        arg_value = arg.split('=', 1)[1]
+        newargs[i] = ''
+        return True
+      if arg == value:
+        if len(newargs) <= i + 1:
+          exit_with_error("option '%s' requires an argument" % arg)
+        arg_value = newargs[i + 1]
+        newargs[i] = ''
+        newargs[i + 1] = ''
+        return True
+      return False
 
     def consume_arg():
-      # Consume that option and its argument
-      if len(newargs) <= i + 1:
-        exit_with_error("option '%s' requires an argument" % arg)
-      ret = newargs[i + 1]
-      newargs[i] = ''
-      newargs[i + 1] = ''
-      return ret
+      nonlocal arg_value
+      assert arg_value is not None
+      rtn = arg_value
+      arg_value = None
+      return rtn
 
-    if newargs[i].startswith('-O'):
+    if arg.startswith('-O'):
       # Let -O default to -O2, which is what gcc does.
-      options.requested_level = newargs[i][2:] or '2'
+      options.requested_level = arg[2:] or '2'
       if options.requested_level == 's':
         options.llvm_opts = ['-Os']
         options.requested_level = 2
@@ -2381,15 +2407,15 @@ def parse_args(newargs):
         options.requested_level = 2
         shared.Settings.SHRINK_LEVEL = 2
         settings_changes.append('INLINING_LIMIT=25')
-      shared.Settings.OPT_LEVEL = validate_arg_level(options.requested_level, 3, 'Invalid optimization level: ' + newargs[i], clamp=True)
+      shared.Settings.OPT_LEVEL = validate_arg_level(options.requested_level, 3, 'Invalid optimization level: ' + arg, clamp=True)
     elif check_arg('--js-opts'):
       logger.warning('--js-opts ignored when using llvm backend')
       consume_arg()
     elif check_arg('--llvm-opts'):
       options.llvm_opts = parse_value(consume_arg())
-    elif newargs[i].startswith('-flto'):
-      if '=' in newargs[i]:
-        shared.Settings.LTO = newargs[i].split('=')[1]
+    elif arg.startswith('-flto'):
+      if '=' in arg:
+        shared.Settings.LTO = arg.split('=')[1]
       else:
         shared.Settings.LTO = "full"
     elif check_arg('--llvm-lto'):
@@ -2415,12 +2441,12 @@ def parse_args(newargs):
       if arg != '0':
         exit_with_error('0 is the only supported option for --minify; 1 has been deprecated')
       shared.Settings.DEBUG_LEVEL = max(1, shared.Settings.DEBUG_LEVEL)
-    elif newargs[i].startswith('-g'):
-      options.requested_debug = newargs[i]
-      requested_level = newargs[i][2:] or '3'
+    elif arg.startswith('-g'):
+      options.requested_debug = arg
+      requested_level = arg[2:] or '3'
       if is_int(requested_level):
         # the -gX value is the debug level (-g1, -g2, etc.)
-        shared.Settings.DEBUG_LEVEL = validate_arg_level(requested_level, 4, 'Invalid debug level: ' + newargs[i])
+        shared.Settings.DEBUG_LEVEL = validate_arg_level(requested_level, 4, 'Invalid debug level: ' + arg)
         # if we don't need to preserve LLVM debug info, do not keep this flag
         # for clang
         if shared.Settings.DEBUG_LEVEL < 3:
@@ -2449,13 +2475,11 @@ def parse_args(newargs):
         # debug info during link (during compile, this does not make a
         # difference).
         shared.Settings.DEBUG_LEVEL = 3
-    elif newargs[i] == '-profiling' or newargs[i] == '--profiling':
+    elif check_flag('-profiling') or check_flag('--profiling'):
       shared.Settings.DEBUG_LEVEL = max(shared.Settings.DEBUG_LEVEL, 2)
       options.profiling = True
-      newargs[i] = ''
-    elif newargs[i] == '-profiling-funcs' or newargs[i] == '--profiling-funcs':
+    elif check_flag('-profiling-funcs') or check_flag('--profiling-funcs'):
       options.profiling_funcs = True
-      newargs[i] = ''
     elif newargs[i] == '--tracing' or newargs[i] == '--memoryprofiler':
       if newargs[i] == '--memoryprofiler':
         options.memory_profiler = True
@@ -2463,13 +2487,11 @@ def parse_args(newargs):
       newargs[i] = ''
       settings_changes.append("EMSCRIPTEN_TRACING=1")
       shared.Settings.SYSTEM_JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_trace.js')))
-    elif newargs[i] == '--emit-symbol-map':
+    elif check_flag('--emit-symbol-map'):
       options.emit_symbol_map = True
       shared.Settings.EMIT_SYMBOL_MAP = 1
-      newargs[i] = ''
-    elif newargs[i] == '--bind':
+    elif check_flag('--bind'):
       shared.Settings.EMBIND = 1
-      newargs[i] = ''
       shared.Settings.SYSTEM_JS_LIBRARIES.append((0, shared.path_from_root('src', 'embind', 'emval.js')))
       shared.Settings.SYSTEM_JS_LIBRARIES.append((0, shared.path_from_root('src', 'embind', 'embind.js')))
     elif check_arg('--embed-file'):
@@ -2478,112 +2500,96 @@ def parse_args(newargs):
       options.preload_files.append(consume_arg())
     elif check_arg('--exclude-file'):
       options.exclude_files.append(consume_arg())
-    elif newargs[i].startswith('--use-preload-cache'):
+    elif check_flag('--use-preload-cache'):
       options.use_preload_cache = True
-      newargs[i] = ''
-    elif newargs[i].startswith('--no-heap-copy'):
+    elif check_flag('--no-heap-copy'):
       diagnostics.warning('legacy-settings', 'ignoring legacy flag --no-heap-copy (that is the only mode supported now)')
-      newargs[i] = ''
-    elif newargs[i].startswith('--use-preload-plugins'):
+    elif check_flag('--use-preload-plugins'):
       options.use_preload_plugins = True
-      newargs[i] = ''
-    elif newargs[i] == '--ignore-dynamic-linking':
+    elif check_flag('--ignore-dynamic-linking'):
       options.ignore_dynamic_linking = True
-      newargs[i] = ''
-    elif newargs[i] == '-v':
+    elif arg == '-v':
       shared.PRINT_STAGES = True
       shared.check_sanity(force=True)
     elif check_arg('--shell-file'):
       options.shell_path = consume_arg()
     elif check_arg('--source-map-base'):
       options.source_map_base = consume_arg()
-    elif newargs[i] == '--no-entry':
+    elif check_flag('--no-entry'):
       options.no_entry = True
-      newargs[i] = ''
     elif check_arg('--js-library'):
       shared.Settings.SYSTEM_JS_LIBRARIES.append((i + 1, os.path.abspath(consume_arg())))
-    elif newargs[i] == '--remove-duplicates':
+    elif check_flag('--remove-duplicates'):
       diagnostics.warning('legacy-settings', '--remove-duplicates is deprecated as it is no longer needed. If you cannot link without it, file a bug with a testcase')
-      newargs[i] = ''
-    elif newargs[i] == '--jcache':
+    elif check_flag('--jcache'):
       logger.error('jcache is no longer supported')
-      newargs[i] = ''
-    elif newargs[i] == '--clear-cache':
+    elif check_flag('--clear-cache'):
       logger.info('clearing cache as requested by --clear-cache')
       shared.Cache.erase()
       shared.check_sanity(force=True) # this is a good time for a sanity check
       should_exit = True
-    elif newargs[i] == '--clear-ports':
+    elif check_flag('--clear-ports'):
       logger.info('clearing ports and cache as requested by --clear-ports')
       system_libs.Ports.erase()
       shared.Cache.erase()
       shared.check_sanity(force=True) # this is a good time for a sanity check
       should_exit = True
-    elif newargs[i] == '--show-ports':
+    elif check_flag('--show-ports'):
       system_libs.show_ports()
       should_exit = True
     elif check_arg('--memory-init-file'):
       options.memory_init_file = int(consume_arg())
-    elif newargs[i] == '--proxy-to-worker':
+    elif check_flag('--proxy-to-worker'):
       options.proxy_to_worker = True
-      newargs[i] = ''
-    elif newargs[i] == '--valid-abspath':
-      options.valid_abspaths.append(newargs[i + 1])
-      newargs[i] = ''
-      newargs[i + 1] = ''
-    elif newargs[i] == '--separate-asm':
+    elif check_arg('--valid-abspath'):
+      options.valid_abspaths.append(consume_arg())
+    elif check_flag('--separate-asm'):
       exit_with_error('cannot --separate-asm with the wasm backend, since not emitting asm.js')
-    elif newargs[i].startswith(('-I', '-L')):
-      path_name = newargs[i][2:]
+    elif arg.startswith(('-I', '-L')):
+      path_name = arg[2:]
       if os.path.isabs(path_name) and not is_valid_abspath(options, path_name):
         # Of course an absolute path to a non-system-specific library or header
         # is fine, and you can ignore this warning. The danger are system headers
         # that are e.g. x86 specific and nonportable. The emscripten bundled
         # headers are modified to be portable, local system ones are generally not.
         diagnostics.warning(
-            'absolute-paths', '-I or -L of an absolute path "' + newargs[i] +
+            'absolute-paths', '-I or -L of an absolute path "' + arg +
             '" encountered. If this is to a local system header/library, it may '
             'cause problems (local system files make sense for compiling natively '
             'on your system, but not necessarily to JavaScript).')
-    elif newargs[i] == '--emrun':
+    elif check_flag('--emrun'):
       options.emrun = True
-      newargs[i] = ''
-    elif newargs[i] == '--cpuprofiler':
+    elif check_flag('--cpuprofiler'):
       options.cpu_profiler = True
-      newargs[i] = ''
-    elif newargs[i] == '--threadprofiler':
+    elif check_flag('--threadprofiler'):
       options.thread_profiler = True
       settings_changes.append('PTHREADS_PROFILING=1')
-      newargs[i] = ''
-    elif newargs[i] == '-fno-exceptions':
+    elif arg == '-fno-exceptions':
       shared.Settings.DISABLE_EXCEPTION_CATCHING = 1
       shared.Settings.DISABLE_EXCEPTION_THROWING = 1
       shared.Settings.EXCEPTION_HANDLING = 0
-    elif newargs[i] == '-fexceptions':
+    elif arg == '-fexceptions':
       eh_enabled = True
-    elif newargs[i] == '-fwasm-exceptions':
+    elif arg == '-fwasm-exceptions':
       wasm_eh_enabled = True
-    elif newargs[i] == '-fignore-exceptions':
+    elif arg == '-fignore-exceptions':
       shared.Settings.DISABLE_EXCEPTION_CATCHING = 1
-    elif newargs[i] == '--default-obj-ext':
-      newargs[i] = ''
-      options.default_object_extension = newargs[i + 1]
+    elif check_arg('--default-obj-ext'):
+      options.default_object_extension = consume_arg()
       if not options.default_object_extension.startswith('.'):
         options.default_object_extension = '.' + options.default_object_extension
-      newargs[i + 1] = ''
-    elif newargs[i].startswith("-fsanitize=cfi"):
+    elif arg == '-fsanitize=cfi':
       options.cfi = True
-    elif newargs[i] == "--output_eol":
-      if newargs[i + 1].lower() == 'windows':
+    elif check_arg('--output_eol'):
+      style = consume_arg()
+      if style.lower() == 'windows':
         options.output_eol = '\r\n'
-      elif newargs[i + 1].lower() == 'linux':
+      elif style.lower() == 'linux':
         options.output_eol = '\n'
       else:
-        exit_with_error('Invalid value "' + newargs[i + 1] + '" to --output_eol!')
-      newargs[i] = ''
-      newargs[i + 1] = ''
-    elif newargs[i] == '--generate-config':
-      optarg = newargs[i + 1]
+        exit_with_error('Invalid value "' + style + '" to --output_eol!')
+    elif check_arg('--generate-config'):
+      optarg = consume_arg()
       path = os.path.expanduser(optarg)
       if os.path.exists(path):
         exit_with_error('File ' + optarg + ' passed to --generate-config already exists!')
@@ -2591,46 +2597,44 @@ def parse_args(newargs):
         shared.generate_config(optarg)
       should_exit = True
     # Record USE_PTHREADS setting because it controls whether --shared-memory is passed to lld
-    elif newargs[i] == '-pthread':
+    elif arg == '-pthread':
       settings_changes.append('USE_PTHREADS=1')
-    elif newargs[i] in ('-fno-diagnostics-color', '-fdiagnostics-color=never'):
+    elif arg in ('-fno-diagnostics-color', '-fdiagnostics-color=never'):
       colored_logger.disable()
       diagnostics.color_enabled = False
-    elif newargs[i] == '-fno-rtti':
+    elif arg == '-fno-rtti':
       shared.Settings.USE_RTTI = 0
-    elif newargs[i] == '-frtti':
+    elif arg == '-frtti':
       shared.Settings.USE_RTTI = 1
-
-    # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
-    # exception handling by default when -fexceptions is given when wasm
-    # exception handling becomes stable.
-    if wasm_eh_enabled:
-      shared.Settings.EXCEPTION_HANDLING = 1
-      shared.Settings.DISABLE_EXCEPTION_THROWING = 1
-      shared.Settings.DISABLE_EXCEPTION_CATCHING = 1
-    elif eh_enabled:
-      shared.Settings.EXCEPTION_HANDLING = 0
-      shared.Settings.DISABLE_EXCEPTION_THROWING = 0
-      shared.Settings.DISABLE_EXCEPTION_CATCHING = 0
-    elif newargs[i].startswith('-jsD'):
-      key = newargs[i][4:]
+    elif arg.startswith('-jsD'):
+      key = arg[4:]
       if '=' in key:
         key, value = key.split('=')
       else:
         value = '1'
       if key in shared.Settings.attrs:
-        exit_with_error(newargs[i] + ': cannot change built-in settings values with a -jsD directive. Pass -s ' + key + '=' + value + ' instead!')
+        exit_with_error(arg + ': cannot change built-in settings values with a -jsD directive. Pass -s ' + key + '=' + value + ' instead!')
       user_js_defines += [(key, value)]
       newargs[i] = ''
-    elif newargs[i] == '-shared':
+    elif check_flag('-shared'):
       options.shared = True
-      newargs[i] = ''
-    elif newargs[i] == '-r':
+    elif check_flag('-r'):
       options.relocatable = True
-      newargs[i] = ''
 
   if should_exit:
     sys.exit(0)
+
+  # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
+  # exception handling by default when -fexceptions is given when wasm
+  # exception handling becomes stable.
+  if wasm_eh_enabled:
+    shared.Settings.EXCEPTION_HANDLING = 1
+    shared.Settings.DISABLE_EXCEPTION_THROWING = 1
+    shared.Settings.DISABLE_EXCEPTION_CATCHING = 1
+  elif eh_enabled:
+    shared.Settings.EXCEPTION_HANDLING = 0
+    shared.Settings.DISABLE_EXCEPTION_THROWING = 0
+    shared.Settings.DISABLE_EXCEPTION_CATCHING = 0
 
   newargs = [a for a in newargs if a]
   return options, settings_changes, user_js_defines, newargs
@@ -2648,7 +2652,7 @@ def emit_js_source_maps(target, js_transform_tempfiles):
 def do_binaryen(target, options, wasm_target):
   global final_js
   logger.debug('using binaryen')
-  if use_source_map() and not shared.Settings.SOURCE_MAP_BASE:
+  if shared.Settings.GENERATE_SOURCE_MAP and not shared.Settings.SOURCE_MAP_BASE:
     logger.warning("Wasm source map won't be usable in a browser without --source-map-base")
   # whether we need to emit -g (function name debug info) in the final wasm
   debug_info = shared.Settings.DEBUG_LEVEL >= 2 or options.profiling_funcs
@@ -2663,7 +2667,7 @@ def do_binaryen(target, options, wasm_target):
   # run wasm-opt if we have work for it: either passes, or if we are using
   # source maps (which requires some extra processing to keep the source map
   # but remove DWARF)
-  if options.binaryen_passes or use_source_map():
+  if options.binaryen_passes or shared.Settings.GENERATE_SOURCE_MAP:
     # if we need to strip certain sections, and we have wasm-opt passes
     # to run anyhow, do it with them.
     if strip_debug:
@@ -2780,13 +2784,13 @@ def do_binaryen(target, options, wasm_target):
     wasm2c.do_wasm2c(wasm_target)
 
   # replace placeholder strings with correct subresource locations
-  if final_js and shared.Settings.SINGLE_FILE:
+  if final_js and shared.Settings.SINGLE_FILE and not shared.Settings.WASM2JS:
     js = open(final_js).read()
 
-    if '{{{ WASM_BINARY_DATA }}}' in js:
-      js = js.replace('{{{ WASM_BINARY_DATA }}}', base64_encode(open(wasm_target, 'rb').read()))
-
-    js = js.replace(shared.FilenameReplacementStrings.WASM_BINARY_FILE, shared.JS.get_subresource_location(wasm_target))
+    if shared.Settings.MINIMAL_RUNTIME:
+      js = do_replace(js, '{{{ WASM_BINARY_DATA }}}', base64_encode(open(wasm_target, 'rb').read()))
+    else:
+      js = do_replace(js, '<<< WASM_BINARY_FILE >>>', shared.JS.get_subresource_location(wasm_target))
     shared.try_delete(wasm_target)
     with open(final_js, 'w') as f:
       f.write(js)
@@ -2881,7 +2885,7 @@ def module_export_name_substitution():
     # For Node.js and other shell environments, create an unminified Module object so that
     # loading external .asm.js file that assigns to Module['asm'] works even when Closure is used.
     if shared.Settings.MINIMAL_RUNTIME and (shared.Settings.target_environment_may_be('node') or shared.Settings.target_environment_may_be('shell')):
-      src = 'if(typeof Module==="undefined"){var Module={};}' + src
+      src = 'if(typeof Module==="undefined"){var Module={};}\n' + src
     f.write(src)
   save_intermediate('module_export_name_substitution')
 
@@ -2919,7 +2923,7 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
     script.src = base_js_target
 
   if not shared.Settings.SINGLE_FILE:
-    if options.memory_init_file and not shared.Settings.MEM_INIT_IN_WASM:
+    if memfile and not shared.Settings.MINIMAL_RUNTIME:
       # start to load the memory init file in the HTML, in parallel with the JS
       script.un_src()
       script.inline = ('''
@@ -2991,7 +2995,7 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
     script.src = None
     script.inline = js_contents
 
-  html_contents = shell.replace('{{{ SCRIPT }}}', script.replacement())
+  html_contents = do_replace(shell, '{{{ SCRIPT }}}', script.replacement())
   html_contents = tools.line_endings.convert_line_endings(html_contents, '\n', options.output_eol)
   with open(target, 'wb') as f:
     f.write(asbytes(html_contents))
@@ -3080,12 +3084,9 @@ def generate_worker_js(target, js_target, target_basename):
 def worker_js_script(proxy_worker_filename):
   web_gl_client_src = open(shared.path_from_root('src', 'webGLClient.js')).read()
   idb_store_src = open(shared.path_from_root('src', 'IDBStore.js')).read()
-  proxy_client_src = (
-    open(shared.path_from_root('src', 'proxyClient.js')).read()
-    .replace('{{{ filename }}}', proxy_worker_filename)
-    .replace('{{{ IDBStore.js }}}', idb_store_src)
-  )
-
+  proxy_client_src = open(shared.path_from_root('src', 'proxyClient.js')).read()
+  proxy_client_src = do_replace(proxy_client_src, '{{{ filename }}}', proxy_worker_filename)
+  proxy_client_src = do_replace(proxy_client_src, '{{{ IDBStore.js }}}', idb_store_src)
   return web_gl_client_src + '\n' + proxy_client_src
 
 

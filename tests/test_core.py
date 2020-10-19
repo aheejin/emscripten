@@ -1158,6 +1158,7 @@ int main() {
       self.set_setting('DISABLE_EXCEPTION_CATCHING', 1)
       self.do_run_from_file(path_from_root('tests', 'core', 'test_exceptions.cpp'), path_from_root('tests', 'core', 'test_exceptions_uncaught.out'), assert_returncode=NON_ZERO)
 
+  @no_asan('TODO: ASan support in minimal runtime')
   def test_exceptions_minimal_runtime(self):
     self.set_setting('EXCEPTION_DEBUG', 1)
     self.set_setting('EXIT_RUNTIME', 1)
@@ -3353,7 +3354,7 @@ ok
     self.build_dlfcn_lib('liblib.c')
 
     self.prep_dlfcn_main()
-    src = r'''
+    create_test_file('main.c', r'''
       #include <assert.h>
       #include <stdio.h>
       #include <dlfcn.h>
@@ -3381,9 +3382,9 @@ ok
 
         return 0;
       }
-      '''
+      ''')
     self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_malloc', '_free'])
-    self.do_run(src, '''go!
+    self.do_runf('main.c', '''go!
 pre 1
 pre 2
 pre 3
@@ -5068,6 +5069,7 @@ main( int argv, char ** argc ) {
       self.do_runf(path_from_root('tests', 'utf8_invalid.cpp'), 'OK.')
 
   # Test that invalid character in UTF8 does not cause decoding to crash.
+  @no_asan('TODO: ASan support in minimal runtime')
   def test_minimal_runtime_utf8_invalid(self):
     self.set_setting('EXTRA_EXPORTED_RUNTIME_METHODS', ['UTF8ToString', 'stringToUTF8'])
     for decoder_mode in [[], ['-s', 'TEXTDECODER=1']]:
@@ -5271,10 +5273,8 @@ main( int argv, char ** argc ) {
   @no_windows("Windows throws EPERM rather than EACCES or EINVAL")
   @unittest.skipIf(WINDOWS or os.geteuid() == 0, "Root access invalidates this test by being able to write on readonly files")
   def test_unistd_truncate_noderawfs(self):
-    # FIXME
-    self.skipTest('fails on some node versions and OSes, e.g. 10.13.0 on linux')
-
-    self.emcc_args += ['-s', 'NODERAWFS=1']
+    self.uses_es6 = True
+    self.set_setting('NODERAWFS')
     self.do_run_in_out_file_test('tests', 'unistd', 'truncate.c', js_engines=[NODE_JS])
 
   def test_unistd_swab(self):
@@ -5620,6 +5620,7 @@ int main(void) {
   def test_whets(self):
     self.do_runf(path_from_root('tests', 'whets.cpp'), 'Single Precision C Whetstone Benchmark')
 
+  @no_asan('depends on the specifics of memory size, which for asan we are forced to increase')
   def test_dlmalloc_inline(self):
     self.banned_js_engines = [NODE_JS] # slower, and fail on 64-bit
     # needed with typed arrays
@@ -5629,6 +5630,7 @@ int main(void) {
     self.do_run(src, '*1,0*', args=['200', '1'], force_c=True)
     self.do_run('src.js', '*400,0*', args=['400', '400'], force_c=True, no_build=True)
 
+  @no_asan('depends on the specifics of memory size, which for asan we are forced to increase')
   def test_dlmalloc(self):
     self.banned_js_engines = [NODE_JS] # slower, and fail on 64-bit
     # needed with typed arrays
@@ -6049,101 +6051,108 @@ return malloc(size);
   @needs_make('make')
   @is_slow_test
   def test_openjpeg(self):
-    if '-fsanitize=address' in self.emcc_args:
-      self.set_setting('INITIAL_MEMORY', 128 * 1024 * 1024)
+    def do_test_openjpeg():
+      def line_splitter(data):
+        out = ''
+        counter = 0
 
-    def line_splitter(data):
-      out = ''
-      counter = 0
+        for ch in data:
+          out += ch
+          if ch == ' ' and counter > 60:
+            out += '\n'
+            counter = 0
+          else:
+            counter += 1
 
-      for ch in data:
-        out += ch
-        if ch == ' ' and counter > 60:
-          out += '\n'
-          counter = 0
-        else:
-          counter += 1
+        return out
 
-      return out
+      # remove -g, so we have one test without it by default
+      self.emcc_args = [x for x in self.emcc_args if x != '-g']
 
-    # remove -g, so we have one test without it by default
-    self.emcc_args = [x for x in self.emcc_args if x != '-g']
+      original_j2k = path_from_root('tests', 'openjpeg', 'syntensity_lobby_s.j2k')
+      image_bytes = list(bytearray(open(original_j2k, 'rb').read()))
+      create_test_file('pre.js', """
+        Module.preRun = function() { FS.createDataFile('/', 'image.j2k', %s, true, false, false); };
+        Module.postRun = function() {
+          out('Data: ' + JSON.stringify(MEMFS.getFileDataAsRegularArray(FS.analyzePath('image.raw').object)));
+        };
+        """ % line_splitter(str(image_bytes)))
 
-    original_j2k = path_from_root('tests', 'openjpeg', 'syntensity_lobby_s.j2k')
-    image_bytes = list(bytearray(open(original_j2k, 'rb').read()))
-    create_test_file('pre.js', """
-      Module.preRun = function() { FS.createDataFile('/', 'image.j2k', %s, true, false, false); };
-      Module.postRun = function() {
-        out('Data: ' + JSON.stringify(MEMFS.getFileDataAsRegularArray(FS.analyzePath('image.raw').object)));
-      };
-      """ % line_splitter(str(image_bytes)))
+      shutil.copy(path_from_root('tests', 'third_party', 'openjpeg', 'opj_config.h'), self.get_dir())
 
-    shutil.copy(path_from_root('tests', 'third_party', 'openjpeg', 'opj_config.h'), self.get_dir())
+      lib = self.get_library(os.path.join('third_party', 'openjpeg'),
+                             [os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/index.c.o'.split('/')),
+                              os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/convert.c.o'.split('/')),
+                              os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/__/common/color.c.o'.split('/')),
+                              os.path.join('bin', 'libopenjpeg.a')],
+                             configure=['cmake', '.'],
+                             # configure_args=['--enable-tiff=no', '--enable-jp3d=no', '--enable-png=no'],
+                             make_args=[]) # no -j 2, since parallel builds can fail
 
-    lib = self.get_library(os.path.join('third_party', 'openjpeg'),
-                           [os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/index.c.o'.split('/')),
-                            os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/convert.c.o'.split('/')),
-                            os.path.sep.join('codec/CMakeFiles/j2k_to_image.dir/__/common/color.c.o'.split('/')),
-                            os.path.join('bin', 'libopenjpeg.a')],
-                           configure=['cmake', '.'],
-                           # configure_args=['--enable-tiff=no', '--enable-jp3d=no', '--enable-png=no'],
-                           make_args=[]) # no -j 2, since parallel builds can fail
+      # We use doubles in JS, so we get slightly different values than native code. So we
+      # check our output by comparing the average pixel difference
+      def image_compare(output, err):
+        # Get the image generated by JS, from the JSON.stringify'd array
+        m = re.search(r'\[[\d, -]*\]', output)
+        self.assertIsNotNone(m, 'Failed to find proper image output in: ' + output)
+        # Evaluate the output as a python array
+        js_data = eval(m.group(0))
 
-    # We use doubles in JS, so we get slightly different values than native code. So we
-    # check our output by comparing the average pixel difference
-    def image_compare(output, err):
-      # Get the image generated by JS, from the JSON.stringify'd array
-      m = re.search(r'\[[\d, -]*\]', output)
-      self.assertIsNotNone(m, 'Failed to find proper image output in: ' + output)
-      # Evaluate the output as a python array
-      js_data = eval(m.group(0))
+        js_data = [x if x >= 0 else 256 + x for x in js_data] # Our output may be signed, so unsign it
 
-      js_data = [x if x >= 0 else 256 + x for x in js_data] # Our output may be signed, so unsign it
+        # Get the correct output
+        true_data = bytearray(open(path_from_root('tests', 'openjpeg', 'syntensity_lobby_s.raw'), 'rb').read())
 
-      # Get the correct output
-      true_data = bytearray(open(path_from_root('tests', 'openjpeg', 'syntensity_lobby_s.raw'), 'rb').read())
+        # Compare them
+        assert(len(js_data) == len(true_data))
+        num = len(js_data)
+        diff_total = js_total = true_total = 0
+        for i in range(num):
+          js_total += js_data[i]
+          true_total += true_data[i]
+          diff_total += abs(js_data[i] - true_data[i])
+        js_mean = js_total / float(num)
+        true_mean = true_total / float(num)
+        diff_mean = diff_total / float(num)
 
-      # Compare them
-      assert(len(js_data) == len(true_data))
-      num = len(js_data)
-      diff_total = js_total = true_total = 0
-      for i in range(num):
-        js_total += js_data[i]
-        true_total += true_data[i]
-        diff_total += abs(js_data[i] - true_data[i])
-      js_mean = js_total / float(num)
-      true_mean = true_total / float(num)
-      diff_mean = diff_total / float(num)
+        image_mean = 83.265
+        # print '[image stats:', js_mean, image_mean, true_mean, diff_mean, num, ']'
+        assert abs(js_mean - image_mean) < 0.01, [js_mean, image_mean]
+        assert abs(true_mean - image_mean) < 0.01, [true_mean, image_mean]
+        assert diff_mean < 0.01, diff_mean
 
-      image_mean = 83.265
-      # print '[image stats:', js_mean, image_mean, true_mean, diff_mean, num, ']'
-      assert abs(js_mean - image_mean) < 0.01, [js_mean, image_mean]
-      assert abs(true_mean - image_mean) < 0.01, [true_mean, image_mean]
-      assert diff_mean < 0.01, diff_mean
+        return output
 
-      return output
+      self.emcc_args += ['--minify', '0'] # to compare the versions
+      self.emcc_args += ['--pre-js', 'pre.js']
 
-    self.emcc_args += ['--minify', '0'] # to compare the versions
-    self.emcc_args += ['--pre-js', 'pre.js']
+      def do_test():
+        self.do_runf(path_from_root('tests', 'third_party', 'openjpeg', 'codec', 'j2k_to_image.c'),
+                     'Successfully generated', # The real test for valid output is in image_compare
+                     args='-i image.j2k -o image.raw'.split(),
+                     libraries=lib,
+                     includes=[path_from_root('tests', 'third_party', 'openjpeg', 'libopenjpeg'),
+                               path_from_root('tests', 'third_party', 'openjpeg', 'codec'),
+                               path_from_root('tests', 'third_party', 'openjpeg', 'common'),
+                               os.path.join(self.get_build_dir(), 'openjpeg')],
+                     output_nicerizer=image_compare)
 
-    def do_test():
-      self.do_runf(path_from_root('tests', 'third_party', 'openjpeg', 'codec', 'j2k_to_image.c'),
-                   'Successfully generated', # The real test for valid output is in image_compare
-                   args='-i image.j2k -o image.raw'.split(),
-                   libraries=lib,
-                   includes=[path_from_root('tests', 'third_party', 'openjpeg', 'libopenjpeg'),
-                             path_from_root('tests', 'third_party', 'openjpeg', 'codec'),
-                             path_from_root('tests', 'third_party', 'openjpeg', 'common'),
-                             os.path.join(self.get_build_dir(), 'openjpeg')],
-                   output_nicerizer=image_compare)
-
-    do_test()
-
-    # extra testing
-    if self.get_setting('ALLOW_MEMORY_GROWTH') == 1:
-      print('no memory growth', file=sys.stderr)
-      self.set_setting('ALLOW_MEMORY_GROWTH', 0)
       do_test()
+
+      # extra testing
+      if self.get_setting('ALLOW_MEMORY_GROWTH') == 1:
+        print('no memory growth', file=sys.stderr)
+        self.set_setting('ALLOW_MEMORY_GROWTH', 0)
+        do_test()
+
+    if '-fsanitize=address' in self.emcc_args:
+      # In ASan mode we need a large initial memory (or else wasm-ld fails).
+      # The OpenJPEG CMake will build several executables (which we need parts
+      # of in our testing, see above), so we must enable the flag for them all.
+      with env_modify({'EMMAKEN_CFLAGS': '-sINITIAL_MEMORY=300MB'}):
+        do_test_openjpeg()
+    else:
+      do_test_openjpeg()
 
   @no_wasm_backend("uses bitcode compiled with asmjs, and we don't have unified triples")
   def test_python(self):
@@ -6468,7 +6477,7 @@ return malloc(size);
       # emulation code. when ASSERTIONS are enabled we show a clear message, but
       # in optimized builds we don't waste code size on that, and the JS engine
       # shows a generic error.
-      expected = 'table.grow is not a function'
+      expected = 'wasmTable.grow is not a function'
 
     self.do_runf(src, expected, assert_returncode=NON_ZERO)
 
@@ -7765,6 +7774,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
       print(occurances)
 
   # Tests that building with -s DECLARE_ASM_MODULE_EXPORTS=0 works
+  @no_asan('TODO: ASan support in minimal runtime')
   def test_minimal_runtime_no_declare_asm_module_exports(self):
     self.set_setting('DECLARE_ASM_MODULE_EXPORTS', 0)
     self.set_setting('WASM_ASYNC_COMPILATION', 0)
@@ -7804,6 +7814,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.do_runf(path_from_root('tests', 'small_hello_world.c'), 'hello')
 
   # Tests global initializer with -s MINIMAL_RUNTIME=1
+  @no_asan('TODO: ASan support in minimal runtime')
   def test_minimal_runtime_global_initializer(self):
     self.set_setting('MINIMAL_RUNTIME', 1)
     self.maybe_closure()
@@ -8061,6 +8072,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
                  post_build=post,
                  expected_output='hello, world!')
 
+  @no_asan('SAFE_HEAP cannot be used with ASan')
   def test_safe_heap_user_js(self):
     self.set_setting('SAFE_HEAP', 1)
     self.do_runf(path_from_root('tests', 'core', 'test_safe_heap_user_js.c'),
@@ -8161,6 +8173,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.do_run_in_out_file_test('tests', 'core', 'test_get_exported_function.cpp')
 
   # Tests the emscripten_get_exported_function() API.
+  @no_asan('TODO: ASan support in minimal runtime')
   def test_minimal_runtime_emscripten_get_exported_function(self):
     # Could also test with -s ALLOW_TABLE_GROWTH=1
     self.set_setting('RESERVED_FUNCTION_POINTERS', 2)
