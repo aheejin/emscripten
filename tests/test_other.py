@@ -297,6 +297,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       os.chdir(last)
       try_delete(path)
 
+  @is_slow_test
   @parameterized({
     'c': [EMCC],
     'cxx': [EMXX]})
@@ -304,7 +305,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # Optimization: emcc src.cpp -o something.js [-Ox]. -O0 is the same as not specifying any optimization setting
     for params, opt_level, obj_params, closure, has_malloc in [ # obj_params are used after compiling first
       (['-o', 'something.js'],                          0, None, 0, 1),
-      (['-o', 'something.js', '-O0'],                   0, None, 0, 0),
+      (['-o', 'something.js', '-O0', '-g'],             0, None, 0, 0),
       (['-o', 'something.js', '-O1'],                   1, None, 0, 0),
       (['-o', 'something.js', '-O1', '-g'],             1, None, 0, 0), # no closure since debug
       (['-o', 'something.js', '-O2'],                   2, None, 0, 1),
@@ -312,15 +313,15 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       (['-o', 'something.js', '-Os'],                   2, None, 0, 1),
       (['-o', 'something.js', '-O3'],                   3, None, 0, 1),
       # and, test compiling first
-      (['-c', '-o', 'something.o'], 0, [],      0, 0),
-      (['-c', '-o', 'something.o', '-O0'], 0, [], 0, 0),
+      (['-c', '-o', 'something.o'],        0, [],      0, 0),
+      (['-c', '-o', 'something.o', '-O0'], 0, [],      0, 0),
       (['-c', '-o', 'something.o', '-O1'], 1, ['-O1'], 0, 0),
       (['-c', '-o', 'something.o', '-O2'], 2, ['-O2'], 0, 0),
       (['-c', '-o', 'something.o', '-O3'], 3, ['-O3'], 0, 0),
-      (['-O1', '-c', '-o', 'something.o'], 1, [], 0, 0),
+      (['-O1', '-c', '-o', 'something.o'], 1, [],      0, 0),
       # non-wasm
       (['-s', 'WASM=0', '-o', 'something.js'],                          0, None, 0, 1),
-      (['-s', 'WASM=0', '-o', 'something.js', '-O0'],                   0, None, 0, 0),
+      (['-s', 'WASM=0', '-o', 'something.js', '-O0', '-g'],             0, None, 0, 0),
       (['-s', 'WASM=0', '-o', 'something.js', '-O1'],                   1, None, 0, 0),
       (['-s', 'WASM=0', '-o', 'something.js', '-O1', '-g'],             1, None, 0, 0), # no closure since debug
       (['-s', 'WASM=0', '-o', 'something.js', '-O2'],                   2, None, 0, 1),
@@ -335,8 +336,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       (['-s', 'WASM=0', '-c', '-o', 'something.o', '-O3'], 3, ['-s', 'WASM=0', '-O3'], 0, 0),
       (['-s', 'WASM=0', '-O1', '-c', '-o', 'something.o'], 1, ['-s', 'WASM=0'],        0, 0),
     ]:
-      if 'WASM=0' in params:
-        continue
       print(params, opt_level, obj_params, closure, has_malloc)
       self.clear()
       keep_debug = '-g' in params
@@ -368,11 +367,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         # closure has not been run, we can do some additional checks. TODO: figure out how to do these even with closure
         assert '._main = ' not in generated, 'closure compiler should not have been run'
         if keep_debug:
-          assert ('switch (label)' in generated or 'switch (label | 0)' in generated) == (opt_level <= 0), 'relooping should be in opt >= 1'
-          assert ('assert(STACKTOP < STACK_MAX' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
+          assert ('assert(INITIAL_INITIAL_MEMORY >= TOTAL_STACK' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
         if 'WASM=0' in params:
-          if opt_level >= 2 and '-g' in params:
-            assert re.search(r'HEAP8\[\$?\w+ ?\+ ?\(+\$?\w+ ?', generated) or re.search(r'HEAP8\[HEAP32\[', generated) or re.search(r'[i$]\d+ & ~\(1 << [i$]\d+\)', generated), 'eliminator should create compound expressions, and fewer one-time vars' # also in -O1, but easier to test in -O2
           looks_unminified = ' = {}' in generated and ' = []' in generated
           looks_minified = '={}' in generated and '=[]' and ';var' in generated
           assert not (looks_minified and looks_unminified)
@@ -2202,6 +2198,12 @@ int f() {
     err = self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '--preload-file', 'data.txt'], stdout=PIPE, stderr=PIPE).stderr
     self.assertEqual(len(err), 0)
 
+  def test_file_packager_returns_error_if_target_equal_to_jsoutput(self):
+    MESSAGE = 'error: TARGET should not be the same value of --js-output'
+    result = self.run_process([PYTHON, FILE_PACKAGER, 'test.data', '--js-output=test.data'], check=False, stdout=PIPE, stderr=PIPE)
+    self.assertEqual(result.returncode, 1)
+    self.assertContained(MESSAGE, result.stderr)
+
   def test_headless(self):
     shutil.copyfile(path_from_root('tests', 'screenshot.png'), 'example.png')
     self.run_process([EMCC, path_from_root('tests', 'sdl_headless.c'), '-s', 'HEADLESS=1'])
@@ -3451,8 +3453,8 @@ int main() {
         for emulate_casts in [0, 1]:
           for relocatable in [0, 1]:
             for wasm in [0, 1]:
-              # TODO: With wasm2js this code always seems to work even without EMULATE_FUNCTION_POINTER_CASTS
-              if wasm == 0:
+              # wasm2js is not compatible with relocatable mode
+              if wasm == 0 and relocatable:
                 continue
               cmd = [EMCC, 'src.cpp', '-O' + str(opts)]
               if not wasm:
@@ -3465,9 +3467,9 @@ int main() {
                 cmd += ['-s', 'RELOCATABLE'] # disables asm-optimized safe heap
               print(cmd)
               self.run_process(cmd)
-              returncode = 0 if emulate_casts else NON_ZERO
+              returncode = 0 if emulate_casts or wasm == 0 else NON_ZERO
               output = self.run_js('a.out.js', assert_returncode=returncode)
-              if emulate_casts:
+              if emulate_casts or wasm == 0:
                 # success!
                 self.assertContained('Hello, world.', output)
               else:
@@ -5410,6 +5412,46 @@ int main(int argc, char** argv) {
     self.assertContained('foo64 -> 64', out)
     self.assertContained('bar -> 0', out)
 
+  def test_dlsym_rtld_default_js_symbol(self):
+    create_test_file('lib.js', '''
+      mergeInto(LibraryManager.library, {
+       foo__sig: 'ii',
+       foo: function(f) { return f + 10; },
+       bar: function(f) { return f + 10; },
+      });
+      ''')
+    create_test_file('main.c', r'''
+#include <stdio.h>
+#include <utime.h>
+#include <sys/types.h>
+#include <dlfcn.h>
+
+typedef int (*func_type_t)(int arg);
+
+int main(int argc, char** argv) {
+  func_type_t fp = (func_type_t)dlsym(RTLD_DEFAULT, argv[1]);
+  if (!fp) {
+    printf("dlsym failed: %s\n", dlerror());
+    return 1;
+  }
+  printf("%s -> %d\n", argv[1], fp(10));
+  return 0;
+}
+''')
+    self.run_process([EMCC, 'main.c',
+                      '--js-library=lib.js',
+                      '-sMAIN_MODULE=2',
+                      '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[foo,bar]',
+                      '-sEXPORTED_FUNCTIONS=[_main,_foo,_bar]'])
+
+    # Fist test the successful use of a JS function with dlsym
+    out = self.run_js('a.out.js', args=['foo'])
+    self.assertContained('foo -> 20', out)
+
+    # Now test the failure case for when __sig is not present
+    out = self.run_js('a.out.js', args=['bar'], assert_returncode=NON_ZERO)
+    self.assertContained('Missing signature argument to addFunction: function _bar', out)
+
   def test_main_module_without_exceptions_message(self):
     # A side module that needs exceptions needs a main module with that
     # support enabled; show a clear message in that case.
@@ -6632,7 +6674,7 @@ int main() {
       self.assertFileContents(filename, data)
 
   @parameterized({
-    'O0': ([],      [], ['waka'],   743), # noqa
+    'O0': ([],      [], ['waka'],   847), # noqa
     'O1': (['-O1'], [], ['waka'],   303), # noqa
     'O2': (['-O2'], [], ['waka'],   265), # noqa
     # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
@@ -6671,7 +6713,7 @@ int main() {
     # we don't metadce with linkable code! other modules may want stuff
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'], [], [],  10309), # noqa
+    'main_module_2': (['-O3', '-s', 'MAIN_MODULE=2'], [], [],  10297), # noqa
   })
   def test_metadce_hello(self, *args):
     self.run_metadce_test('hello_world.cpp', *args)
@@ -6881,7 +6923,8 @@ int main() {
       for x in os.listdir('.'):
         self.assertFalse(x.endswith('.js'))
       self.assertTrue(building.is_wasm(target))
-      self.assertIn(b'dylink', open(target, 'rb').read())
+      wasm_data = open(target, 'rb').read()
+      self.assertEqual(wasm_data.count(b'dylink'), 1)
 
   def test_wasm_backend_lto(self):
     # test building of non-wasm-object-files libraries, building with them, and running them
@@ -8030,13 +8073,19 @@ int main () {
   def test_emscripten_metadata(self):
     self.run_process([EMCC, path_from_root('tests', 'hello_world.c')])
     self.assertNotIn(b'emscripten_metadata', open('a.out.wasm', 'rb').read())
+
     self.run_process([EMCC, path_from_root('tests', 'hello_world.c'),
                       '-s', 'EMIT_EMSCRIPTEN_METADATA'])
     self.assertIn(b'emscripten_metadata', open('a.out.wasm', 'rb').read())
 
+    # Test is standalone mode too.
+    self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '-o', 'out.wasm',
+                      '-s', 'EMIT_EMSCRIPTEN_METADATA'])
+    self.assertIn(b'emscripten_metadata', open('out.wasm', 'rb').read())
+
     # make sure wasm executes correctly
     ret = self.run_process(NODE_JS + ['a.out.js'], stdout=PIPE).stdout
-    self.assertTextDataIdentical('hello, world!\n', ret)
+    self.assertContained('hello, world!\n', ret)
 
   @parameterized({
     'O0': (False, ['-O0']), # noqa
@@ -8121,12 +8170,10 @@ int main () {
 
     hello_world_sources = [path_from_root('tests', 'small_hello_world.c'),
                            '-s', 'RUNTIME_FUNCS_TO_IMPORT=[]',
-                           '-s', 'USES_DYNAMIC_ALLOC=0',
-                           '-s', 'ASM_PRIMITIVE_VARS=[STACKTOP]']
+                           '-s', 'USES_DYNAMIC_ALLOC=0']
     random_printf_sources = [path_from_root('tests', 'hello_random_printf.c'),
                              '-s', 'RUNTIME_FUNCS_TO_IMPORT=[]',
                              '-s', 'USES_DYNAMIC_ALLOC=0',
-                             '-s', 'ASM_PRIMITIVE_VARS=[STACKTOP]',
                              '-s', 'SINGLE_FILE=1']
     hello_webgl_sources = [path_from_root('tests', 'minimal_webgl', 'main.cpp'),
                            path_from_root('tests', 'minimal_webgl', 'webgl.c'),

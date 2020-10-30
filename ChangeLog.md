@@ -23,6 +23,18 @@ Current Trunk
 - dlopen, in conformace with the spec, now checks that one of either RTDL_LAZY
   or RTDL_NOW flags ar set.  Previously, it was possible set nether of these
   without generating an error.
+- Stack state is no longer stored in JavaScript.  The following variables have
+  been replaced with native functions in `<emscripten/stack.h>`:
+  - STACK_BASE
+  - STACK_MAX
+  - STACKTOP
+  - TOTAL_STACK
+- The ABI used for importing symbol by address in dynamic linking (MAIN_MODULE +
+  SIDE_MODULE) is now the same as the ABI used by llvm and wasm-ld.  That is,
+  symbol addresses are imported from the 'GOT.mem' and 'GOT.func' pseudo
+  modules.  As one side effect of this change it is now required that JavaScript
+  functions that are imported by address are now required to have a `__sig`
+  specified in the library JavaScript file.
 
 2.0.8: 10/24/2020
 -----------------
