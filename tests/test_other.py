@@ -161,9 +161,13 @@ class other(RunnerCore):
     for compiler in [EMCC, EMXX]:
       # -v, without input files
       proc = self.run_process([compiler, '-v'], stdout=PIPE, stderr=PIPE)
+      self.assertEqual(proc.stdout, '')
+      # assert that the emcc message comes first.  We had a bug where the sub-process output
+      # from clang would be flushed to stderr first.
+      self.assertContained('emcc (Emscripten gcc/clang-like replacement', proc.stderr)
+      self.assertTrue(proc.stderr.startswith('emcc (Emscripten gcc/clang-like replacement'))
       self.assertContained('clang version %s' % shared.EXPECTED_LLVM_VERSION, proc.stderr)
       self.assertContained('GNU', proc.stderr)
-      self.assertNotContained('this is dangerous', proc.stdout)
       self.assertNotContained('this is dangerous', proc.stderr)
 
   def test_emcc_generate_config(self):
@@ -367,7 +371,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         # closure has not been run, we can do some additional checks. TODO: figure out how to do these even with closure
         assert '._main = ' not in generated, 'closure compiler should not have been run'
         if keep_debug:
-          assert ('assert(INITIAL_INITIAL_MEMORY >= TOTAL_STACK' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
+          assert ('assert(INITIAL_MEMORY >= TOTAL_STACK' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
         if 'WASM=0' in params:
           looks_unminified = ' = {}' in generated and ' = []' in generated
           looks_minified = '={}' in generated and '=[]' and ';var' in generated
@@ -4838,6 +4842,31 @@ int main(void) {
     self.assertNotEqual(result.returncode, 0)
     self.assertContained('Customizing EXPORT_NAME requires that the HTML be customized to use that name', result.stdout)
 
+  def test_modularize_sync_compilation(self):
+    create_test_file('post.js', r'''
+console.log('before');
+var result = Module();
+// It should be an object.
+console.log(typeof result);
+// And it should have the exports that Module has, showing it is Module in fact.
+console.log(typeof result._main);
+// And it should not be a Promise.
+console.log(typeof result.then);
+console.log('after');
+''')
+    self.run_process([EMCC, path_from_root('tests', 'hello_world.c'),
+                      '-s', 'MODULARIZE=1',
+                      '-s', 'WASM_ASYNC_COMPILATION=0',
+                      '--extern-post-js', 'post.js'])
+    self.assertContained('''\
+before
+hello, world!
+object
+function
+undefined
+after
+''', self.run_js('a.out.js'))
+
   def test_export_all_3142(self):
     create_test_file('src.cpp', r'''
 typedef unsigned int Bit32u;
@@ -6675,8 +6704,8 @@ int main() {
 
   @parameterized({
     'O0': ([],      [], ['waka'],   847), # noqa
-    'O1': (['-O1'], [], ['waka'],   303), # noqa
-    'O2': (['-O2'], [], ['waka'],   265), # noqa
+    'O1': (['-O1'], [], ['waka'],   286), # noqa
+    'O2': (['-O2'], [], ['waka'],   245), # noqa
     # in -O3, -Os and -Oz we metadce, and they shrink it down to the minimal output we want
     'O3': (['-O3'], [], [],          62), # noqa
     'Os': (['-Os'], [], [],          62), # noqa
@@ -8273,12 +8302,13 @@ int main () {
           # happens in wasm2js, so it may be platform-nondeterminism in closure
           # compiler).
           # TODO: identify what is causing this. meanwhile allow some amount of slop
-          if js:
-            slop = 30
-          else:
-            slop = 20
-          if size <= expected_size + slop and size >= expected_size - slop:
-            size = expected_size
+          if not os.environ.get('EMTEST_REBASELINE'):
+            if js:
+              slop = 30
+            else:
+              slop = 20
+            if size <= expected_size + slop and size >= expected_size - slop:
+              size = expected_size
 
           # N.B. even though the test code above prints out gzip compressed sizes, regression testing is done against uncompressed sizes
           # this is because optimizing for compressed sizes can be unpredictable and sometimes counterproductive
@@ -9482,6 +9512,10 @@ exec "$@"
     make_executable('wrapper.sh')
     with env_modify({'EM_COMPILER_WRAPPER': './wrapper.sh'}):
       stdout = self.run_process([EMCC, '-c', path_from_root('tests', 'core', 'test_hello_world.c')], stdout=PIPE).stdout
+    self.assertContained('wrapping compiler call: ', stdout)
+    self.assertExists('test_hello_world.o')
+
+    stdout = self.run_process([EMCC, '-c', path_from_root('tests', 'core', 'test_hello_world.c'), '--compiler-wrapper=./wrapper.sh'], stdout=PIPE).stdout
     self.assertContained('wrapping compiler call: ', stdout)
     self.assertExists('test_hello_world.o')
 
