@@ -239,9 +239,6 @@ function allocate(slab, allocator) {
 
 // Memory management
 
-var PAGE_SIZE = {{{ POSIX_PAGE_SIZE }}};
-var WASM_PAGE_SIZE = {{{ WASM_PAGE_SIZE }}};
-
 function alignUp(x, multiple) {
   if (x % multiple > 0) {
     x += multiple - (x % multiple);
@@ -838,7 +835,7 @@ function createWasm() {
 
 #if !RELOCATABLE
     wasmTable = Module['asm']['__indirect_function_table'];
-#if ASSERTIONS
+#if ASSERTIONS && !PURE_WASI
     assert(wasmTable, "table not found in wasm exports");
 #endif
 #endif
@@ -861,7 +858,7 @@ function createWasm() {
     assert(wasmMemory, "memory not found in wasm exports");
 #endif
     updateGlobalBufferAndViews(wasmMemory.buffer);
-#if ASSERTIONS
+#if STACK_OVERFLOW_CHECK
     writeStackCookie();
 #endif
 #endif

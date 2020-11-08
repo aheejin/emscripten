@@ -51,6 +51,7 @@ logger = logging.getLogger('shared')
 diagnostics.add_warning('absolute-paths', enabled=False, part_of_all=False)
 # unused diagnositic flags.  TODO(sbc): remove at some point
 diagnostics.add_warning('almost-asm')
+diagnostics.add_warning('experimental')
 diagnostics.add_warning('invalid-input')
 # Don't show legacy settings warnings by default
 diagnostics.add_warning('legacy-settings', enabled=False, part_of_all=False)
@@ -442,7 +443,7 @@ def generate_sanity():
   return sanity_file_content
 
 
-def perform_sanify_checks():
+def perform_sanity_checks():
   logger.info('(Emscripten: Running sanity checks)')
 
   with ToolchainProfiler.profile_block('sanity compiler_engine'):
@@ -491,8 +492,14 @@ def check_sanity(force=False):
           # the check actually failed, so definitely write out the sanity file, to
           # avoid others later seeing failures too
           force = False
-      elif not force:
-        return # all is well
+      else:
+        if force:
+          logger.debug(f'sanity file up-to-date but check forced: {sanity_file}')
+        else:
+          logger.debug(f'sanity file up-to-date: {sanity_file}')
+          return # all is well
+    else:
+      logger.debug(f'sanity file not found: {sanity_file}')
 
     # some warning, mostly not fatal checks - do them even if EM_IGNORE_SANITY is on
     check_node_version()
@@ -506,7 +513,7 @@ def check_sanity(force=False):
     if not llvm_ok:
       exit_with_error('failing sanity checks due to previous llvm failure')
 
-    perform_sanify_checks()
+    perform_sanity_checks()
 
     if not force:
       # Only create/update this file if the sanity check succeeded, i.e., we got here
@@ -1117,6 +1124,7 @@ def unsuffixed_basename(name):
 
 
 def safe_move(src, dst):
+  logging.debug('move: %s -> %s', src, dst)
   src = os.path.abspath(src)
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
@@ -1126,11 +1134,11 @@ def safe_move(src, dst):
   if dst == os.devnull:
     return
   mylog.log_move(src, dst)
-  logging.debug('move: %s -> %s', src, dst)
   shutil.move(src, dst)
 
 
 def safe_copy(src, dst):
+  logging.debug('copy: %s -> %s', src, dst)
   src = os.path.abspath(src)
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):

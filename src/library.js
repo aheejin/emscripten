@@ -50,7 +50,13 @@ LibraryManager.library = {
   // utime.h
   // ==========================================================================
 
-  utime__deps: ['$FS', '$setErrNo'],
+  $handleFSError__deps: ['$setErrNo'],
+  $handleFSError: function(e) {
+    if (!(e instanceof FS.ErrnoError)) throw e + ' : ' + stackTrace();
+    return setErrNo(e.errno);
+  },
+
+  utime__deps: ['$FS', '$handleFSError'],
   utime__proxy: 'sync',
   utime__sig: 'iii',
   utime: function(path, times) {
@@ -70,12 +76,12 @@ LibraryManager.library = {
       FS.utime(path, time, time);
       return 0;
     } catch (e) {
-      FS.handleFSError(e);
+      handleFSError(e);
       return -1;
     }
   },
 
-  utimes__deps: ['$FS', '$setErrNo'],
+  utimes__deps: ['$FS', '$handleFSError'],
   utimes__proxy: 'sync',
   utimes__sig: 'iii',
   utimes: function(path, times) {
@@ -93,7 +99,7 @@ LibraryManager.library = {
       FS.utime(path, time, time);
       return 0;
     } catch (e) {
-      FS.handleFSError(e);
+      handleFSError(e);
       return -1;
     }
   },
@@ -720,16 +726,6 @@ LibraryManager.library = {
     return limit;
   },
 
-  // ==========================================================================
-  // string.h
-  // ==========================================================================
-
-  memcpy__inline: function(dest, src, num, align) {
-    var ret = '';
-    ret += makeCopyValues(dest, src, num, 'null', null, align);
-    return ret;
-  },
-
 #if MIN_CHROME_VERSION < 45 || MIN_EDGE_VERSION < 14 || MIN_FIREFOX_VERSION < 34 || MIN_IE_VERSION != TARGET_NOT_SUPPORTED || MIN_SAFARI_VERSION < 100101 || STANDALONE_WASM
   // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/copyWithin lists browsers that support TypedArray.prototype.copyWithin, but it
   // has outdated information for Safari, saying it would not support it.
@@ -766,9 +762,6 @@ LibraryManager.library = {
   __assert_func: function(filename, line, func, condition) {
     abort('Assertion failed: ' + (condition ? UTF8ToString(condition) : 'unknown condition') + ', at: ' + [filename ? UTF8ToString(filename) : 'unknown filename', line, func ? UTF8ToString(func) : 'unknown function']);
   },
-
-  terminate__sig: 'vi',
-  terminate: '__cxa_call_unexpected',
 
   __gxx_personality_v0: function() {
   },
@@ -1793,7 +1786,7 @@ LibraryManager.library = {
     error('longjmp support was disabled (SUPPORT_LONGJMP=0), but it is required by the code (either set SUPPORT_LONGJMP=1, or remove uses of it in the project)');
   }],
   // will never be emitted, as the dep errors at compile time
-  longjmp: function() {
+  longjmp: function(env, value) {
     abort('longjmp not supported');
   },
 #endif

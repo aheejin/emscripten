@@ -42,6 +42,12 @@ Current Trunk
   async compilation turned off, so that startup is synchronous, now returns the
   Module object from the factory function (as it would not make sense to return
   a Promise without async startup). See #12647
+- Added experimental support for using emscripten as a post link tool.  In this
+  case the input to emscripten is a single wasm file (for example the output of
+  `wasm-ld`).  When emcc is run with `--post-link` it will take a wasm file as
+  input that perform all the normal post link steps such as finalizing and
+  optimizing the wasm file and generating the JavaScript and/or html that will
+  run it.
 
 2.0.8: 10/24/2020
 -----------------
@@ -62,9 +68,6 @@ Current Trunk
     `emrun filename.html -- --arg-for-page`
   This is standard behaviour for command line parsing and simplifies the
   emrun logic.
-- `emcmake` and `emmake` are no longer opinionated about preferring ming32-make.
-  If you want to use ming32-make then you can do that in the normal way.
-  For example, with cmake, you would use `-G MinGW Makefiles`.
 
 2.0.7: 10/13/2020
 -----------------

@@ -397,7 +397,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     self.clear()
     err = self.expect_fail(cmd + ['-o', 'out.o'])
 
-    self.assertContained('cannot specify -o with -c/-S/-E and multiple source files', err)
+    self.assertContained('cannot specify -o with -c/-S/-E/-M and multiple source files', err)
     self.assertNotExists('twopart_main.o')
     self.assertNotExists('twopart_side.o')
     self.assertNotExists(path_from_root('tests', 'twopart_main.o'))
@@ -1352,10 +1352,11 @@ int f() {
     self.assertEqual(self.run_js('a.out.js').strip(), '')
 
   def test_multidynamic_link(self):
-    # Linking the same dynamic library in statically will error, normally, since we statically link it, causing dupe symbols
+    # Linking the same dynamic library in statically will error, normally, since we statically link
+    # it, causing dupe symbols
 
-    def test(link_cmd, lib_suffix=''):
-      print(link_cmd, lib_suffix)
+    def test(link_flags, lib_suffix):
+      print(link_flags, lib_suffix)
 
       self.clear()
       ensure_dir('libdir')
@@ -1375,14 +1376,14 @@ int f() {
         }
       ''')
 
-      open(os.path.join('libdir', 'libfile.cpp'), 'w').write('''
+      create_test_file(os.path.join('libdir', 'libfile.cpp'), '''
         #include <stdio.h>
         void printey() {
           printf("hello from lib");
         }
       ''')
 
-      open(os.path.join('libdir', 'libother.cpp'), 'w').write('''
+      create_test_file(os.path.join('libdir', 'libother.cpp'), '''
         #include <stdio.h>
         extern void printey();
         void printother() {
@@ -1392,22 +1393,21 @@ int f() {
         }
       ''')
 
-      compiler = [EMCC]
-
       # Build libfile normally into an .so
-      self.run_process(compiler + [os.path.join('libdir', 'libfile.cpp'), '-shared', '-o', os.path.join('libdir', 'libfile.so' + lib_suffix)])
+      self.run_process([EMCC, os.path.join('libdir', 'libfile.cpp'), '-shared', '-o', os.path.join('libdir', 'libfile.so' + lib_suffix)])
       # Build libother and dynamically link it to libfile
-      self.run_process(compiler + [os.path.join('libdir', 'libother.cpp')] + link_cmd + ['-shared', '-o', os.path.join('libdir', 'libother.so')])
+      self.run_process([EMCC, os.path.join('libdir', 'libother.cpp')] + link_flags + ['-shared', '-o', os.path.join('libdir', 'libother.so')])
       # Build the main file, linking in both the libs
-      self.run_process(compiler + [os.path.join('main.cpp')] + link_cmd + ['-lother', '-c'])
+      self.run_process([EMCC, '-Llibdir', os.path.join('main.cpp')] + link_flags + ['-lother', '-c'])
       print('...')
-      # The normal build system is over. We need to do an additional step to link in the dynamic libraries, since we ignored them before
-      self.run_process([EMCC, 'main.o'] + link_cmd + ['-lother', '-s', 'EXIT_RUNTIME=1'])
+      # The normal build system is over. We need to do an additional step to link in the dynamic
+      # libraries, since we ignored them before
+      self.run_process([EMCC, '-Llibdir', 'main.o'] + link_flags + ['-lother', '-s', 'EXIT_RUNTIME=1'])
 
       self.assertContained('*hello from lib\n|hello from lib|\n*', self.run_js('a.out.js'))
 
-    test(['-L' + 'libdir', '-lfile']) # -l, auto detection from library path
-    test(['-L' + 'libdir', self.in_dir('libdir', 'libfile.so.3.1.4.1.5.9')], '.3.1.4.1.5.9') # handle libX.so.1.2.3 as well
+    test(['-lfile'], '') # -l, auto detection from library path
+    test([self.in_dir('libdir', 'libfile.so.3.1.4.1.5.9')], '.3.1.4.1.5.9') # handle libX.so.1.2.3 as well
 
   def test_js_link(self):
     create_test_file('main.cpp', '''
@@ -3358,7 +3358,7 @@ int main()
       self.assertContainedIf(warning, err, suffix in shared_suffixes)
 
   def test_symbol_map(self):
-    UNMINIFIED_HEAP8 = 'var HEAP8 = new global.Int8Array'
+    UNMINIFIED_HEAP8 = 'var HEAP8 = new '
     UNMINIFIED_MIDDLE = 'function middle'
 
     for opts in [['-O2'], ['-O3']]:
@@ -7263,7 +7263,9 @@ end
     # are including a lot of JS without corresponding compiled code for it. This still
     # lets us catch all other errors.
     with env_modify({'EMCC_CLOSURE_ARGS': '--jscomp_off undefinedVars'}):
-      self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '-O1', '--closure', '1', '-g1', '-s', 'INCLUDE_FULL_LIBRARY=1', '-s', 'ERROR_ON_UNDEFINED_SYMBOLS=0'])
+      # USE_WEBGPU is specified here to make sure that it's closure-safe.
+      # It can be removed if USE_WEBGPU is later included in INCLUDE_FULL_LIBRARY.
+      self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '-O1', '--closure', '1', '-g1', '-s', 'INCLUDE_FULL_LIBRARY=1', '-s', 'USE_WEBGPU=1', '-s', 'ERROR_ON_UNDEFINED_SYMBOLS=0'])
 
   # Tests --closure-args command line flag
   def test_closure_externs(self):
@@ -8218,6 +8220,10 @@ int main () {
       return ' ({:+.2f}%)'.format((actual - expected) * 100.0 / expected)
 
     for js in [False, True]:
+      # TODO(sbc): re-enabled once binaryen side change rolls:
+      # https://github.com/WebAssembly/binaryen/pull/3325
+      if js:
+        continue
       for sources, name in [
           [hello_world_sources, 'hello_world'],
           [random_printf_sources, 'random_printf'],
@@ -8938,12 +8944,6 @@ Module.arguments has been replaced with plain arguments_ (the initial value can 
     self.run_process([EMCC, path_from_root('tests', 'hello_world.cpp'), '-lm', '-ldl', '-lrt', '-lpthread'])
 
   def test_supported_linker_flags(self):
-    out = self.run_process([EMCC, path_from_root('tests', 'hello_world.cpp'), '-Wl,--print-map'], stderr=PIPE).stderr
-    self.assertContained('warning: ignoring unsupported linker flag: `--print-map`', out)
-
-    out = self.run_process([EMCC, path_from_root('tests', 'hello_world.cpp'), '-Xlinker', '--print-map'], stderr=PIPE).stderr
-    self.assertContained('warning: ignoring unsupported linker flag: `--print-map`', out)
-
     out = self.run_process([EMCC, path_from_root('tests', 'hello_world.cpp'), '-Wl,-rpath=foo'], stderr=PIPE).stderr
     self.assertContained('warning: ignoring unsupported linker flag: `-rpath=foo`', out)
 
@@ -9324,15 +9324,13 @@ int main() {
     self.run_process([EMCC, '-c', path_from_root('tests', 'other', 'test_asm.s'), '-o', 'foo.o'])
     src = path_from_root('tests', 'other', 'test_asm.c')
     output = path_from_root('tests', 'other', 'test_asm.out')
-    self.emcc_args.append('foo.o')
-    self.do_run_from_file(src, output)
+    self.do_run_from_file(src, output, libraries=['foo.o'])
 
   def test_assembly_preprocessed(self):
     self.run_process([EMCC, '-c', path_from_root('tests', 'other', 'test_asm_cpp.S'), '-o', 'foo.o'])
     src = path_from_root('tests', 'other', 'test_asm.c')
     output = path_from_root('tests', 'other', 'test_asm.out')
-    self.emcc_args.append('foo.o')
-    self.do_run_from_file(src, output)
+    self.do_run_from_file(src, output, libraries=['foo.o'])
 
   @parameterized({
     '': (['-DUSE_KEEPALIVE'],),
@@ -9578,10 +9576,32 @@ exec "$@"
                       '--js-library=lib1.js',
                       '--js-library=lib2.js'])
 
+  def test_jslib_bad_config(self):
+    create_test_file('lib.js', '''
+      mergeInto(LibraryManager.library, {
+       foo__sig: 'ii',
+      });
+      ''')
+    err = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '--js-library=lib.js'])
+    self.assertContained('error: Missing library element `foo` for library config `foo__sig`', err)
+
+  def test_jslib_ifdef(self):
+    create_test_file('lib.js', '''
+      #ifdef ASSERTIONS
+      var foo;
+      #endif
+      ''')
+    proc = self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '--js-library=lib.js'], stderr=PIPE)
+    self.assertContained('warning: use of #ifdef in js library.  Use #if instead.', proc.stderr)
+
   def test_wasm2js_no_dynamic_linking(self):
     for arg in ['-sMAIN_MODULE', '-sSIDE_MODULE', '-sRELOCATABLE']:
       err = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '-sMAIN_MODULE', '-sWASM=0'])
       self.assertContained('WASM2JS is not compatible with relocatable output', err)
+
+  def test_wasm2js_standalone(self):
+    err = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '-sSTANDALONE_WASM', '-sWASM=0'])
+    self.assertContained('WASM2JS is not compatible with STANDALONE_WASM output', err)
 
   def test_oformat(self):
     self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '--oformat=wasm', '-o', 'out.foo'])
@@ -9599,4 +9619,23 @@ exec "$@"
     self.clear()
 
     err = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '--oformat=foo'])
-    self.assertContained("error: invalid output format: `foo` (must be one of ['wasm', 'js', 'mjs', 'html']", err)
+    self.assertContained("error: invalid output format: `foo` (must be one of ['wasm', 'js', 'mjs', 'html', 'bare']", err)
+
+  def test_post_link(self):
+    err = self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '--oformat=bare', '-o', 'bare.wasm'], stderr=PIPE).stderr
+    self.assertContained('--oformat=base/--post-link are experimental and subject to change', err)
+    err = self.run_process([EMCC, '--post-link', 'bare.wasm'], stderr=PIPE).stderr
+    self.assertContained('--oformat=base/--post-link are experimental and subject to change', err)
+    err = self.assertContained('hello, world!', self.run_js('a.out.js'))
+
+  def compile_with_wasi_sdk(self, filename, output):
+    sysroot = os.environ.get('EMTEST_WASI_SYSROOT')
+    if not sysroot:
+      self.skipTest('EMTEST_WASI_SYSROOT not found in environment')
+    sysroot = os.path.expanduser(sysroot)
+    self.run_process([CLANG_CC, '--sysroot=' + sysroot, '--target=wasm32-wasi', filename, '-o', output])
+
+  def test_run_wasi_sdk_output(self):
+    self.compile_with_wasi_sdk(path_from_root('tests', 'hello_world.c'), 'hello.wasm')
+    self.run_process([EMCC, '--post-link', '-sPURE_WASI', 'hello.wasm'])
+    self.assertContained('hello, world!', self.run_js('a.out.js'))

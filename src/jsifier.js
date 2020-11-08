@@ -127,7 +127,7 @@ function JSify(data, functionsOnly) {
 
       var noExport = false;
 
-      if (!LibraryManager.library.hasOwnProperty(ident) && !LibraryManager.library.hasOwnProperty(ident + '__inline')) {
+      if (!LibraryManager.library.hasOwnProperty(ident)) {
         if (!(finalName in IMPLEMENTED_FUNCTIONS) && !LINKABLE) {
           var msg = 'undefined symbol: ' + ident;
           if (dependent) msg += ' (referenced by ' + dependent + ')';
@@ -177,7 +177,7 @@ function JSify(data, functionsOnly) {
         return;
       }
       deps.forEach(function(dep) {
-        if (typeof snippet === 'string' && !(dep in LibraryManager.library)) warn('missing library dependency ' + dep + ', make sure you are compiling with the right options (see #ifdefs in src/library*.js)');
+        if (typeof snippet === 'string' && !(dep in LibraryManager.library)) warn('missing library dependency ' + dep + ', make sure you are compiling with the right options (see #if in src/library*.js)');
       });
       var isFunction = false;
 

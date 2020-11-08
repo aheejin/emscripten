@@ -15,6 +15,7 @@ import subprocess
 import time
 import logging
 import pprint
+import shutil
 from collections import OrderedDict
 
 from tools import building
@@ -77,18 +78,16 @@ def optimize_syscalls(declares, DEBUG):
     # without filesystem support, it doesn't matter what syscalls need
     shared.Settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
   else:
-    syscall_prefixes = ('__sys', 'fd_', '__wasi_fd_')
+    syscall_prefixes = ('__sys', 'fd_')
     syscalls = [d for d in declares if d.startswith(syscall_prefixes)]
     # check if the only filesystem syscalls are in: close, ioctl, llseek, write
     # (without open, etc.. nothing substantial can be done, so we can disable
     # extra filesystem support in that case)
     if set(syscalls).issubset(set([
       '__sys_ioctl',
-      # legacy/fastcomp name for __sys_ioctl
-      '__syscall6',
-      'fd_seek', '__wasi_fd_seek',
-      'fd_write', '__wasi_fd_write',
-      'fd_close', '__wasi_fd_close',
+      'fd_seek',
+      'fd_write',
+      'fd_close',
     ])):
       if DEBUG:
         logger.debug('very limited syscalls (%s) so disabling full filesystem support', ', '.join(str(s) for s in syscalls))
@@ -149,6 +148,17 @@ def update_settings_glue(metadata, DEBUG):
     # Instead we use __table_base to offset the elements by 1.
     shared.Settings.WASM_TABLE_SIZE = metadata['tableSize'] + 1
   shared.Settings.MAIN_READS_PARAMS = metadata['mainReadsParams']
+
+  # Store exports for Closure compiler to be able to track these as globals in
+  # -s DECLARE_ASM_MODULE_EXPORTS=0 builds.
+  shared.Settings.MODULE_EXPORTS = [(asmjs_mangle(f), f) for f in metadata['exports']]
+
+  if shared.Settings.STACK_OVERFLOW_CHECK:
+    if 'emscripten_stack_get_end' not in metadata['exports']:
+      logger.warning('STACK_OVERFLOW_CHECK disabled because emscripten stack helpers not exported')
+      shared.Settings.STACK_OVERFLOW_CHECK = 0
+    else:
+      shared.Settings.EXPORTED_RUNTIME_METHODS += ['writeStackCookie', 'checkStackCookie']
 
 
 # static code hooks
@@ -294,13 +304,20 @@ def create_named_globals(metadata):
   return '\n'.join(named_globals)
 
 
-def emscript(infile, outfile_js, memfile, temp_files, DEBUG):
+def emscript(in_wasm, out_wasm, outfile_js, memfile, temp_files, DEBUG):
   # Overview:
   #   * Run wasm-emscripten-finalize to extract metadata and modify the binary
   #     to use emscripten's wasm<->JS ABI
   #   * Use the metadata to generate the JS glue that goes with the wasm
 
-  metadata = finalize_wasm(infile, memfile, DEBUG)
+  if shared.Settings.SINGLE_FILE:
+    # placeholder strings for JS glue, to be replaced with subresource locations in do_binaryen
+    shared.Settings.WASM_BINARY_FILE = '<<< WASM_BINARY_FILE >>>'
+  else:
+    # set file locations, so that JS glue can find what it needs
+    shared.Settings.WASM_BINARY_FILE = shared.JS.escape_for_js_string(os.path.basename(out_wasm))
+
+  metadata = finalize_wasm(in_wasm, out_wasm, memfile, DEBUG)
 
   update_settings_glue(metadata, DEBUG)
 
@@ -339,7 +356,7 @@ def emscript(infile, outfile_js, memfile, temp_files, DEBUG):
     pre += '\n' + global_initializers + '\n'
 
   if shared.Settings.RELOCATABLE:
-    static_bump = align_memory(webassembly.parse_dylink_section(infile)[0])
+    static_bump = align_memory(webassembly.parse_dylink_section(in_wasm)[0])
     memory = Memory(static_bump)
     logger.debug('stack_base: %d, stack_max: %d, dynamic_base: %d', memory.stack_base, memory.stack_max, memory.dynamic_base)
 
@@ -353,10 +370,6 @@ def emscript(infile, outfile_js, memfile, temp_files, DEBUG):
   shared.Settings.EXPORTED_FUNCTIONS = forwarded_json['EXPORTED_FUNCTIONS']
 
   exports = metadata['exports']
-
-  # Store exports for Closure compiler to be able to track these as globals in
-  # -s DECLARE_ASM_MODULE_EXPORTS=0 builds.
-  shared.Settings.MODULE_EXPORTS = [(asmjs_mangle(f), f) for f in exports]
 
   if shared.Settings.ASYNCIFY:
     exports += ['asyncify_start_unwind', 'asyncify_stop_unwind', 'asyncify_start_rewind', 'asyncify_stop_rewind']
@@ -402,7 +415,7 @@ def remove_trailing_zeros(memfile):
     f.write(mem_data[:end])
 
 
-def finalize_wasm(infile, memfile, DEBUG):
+def finalize_wasm(infile, outfile, memfile, DEBUG):
   building.save_intermediate(infile, 'base.wasm')
   args = ['--detect-features', '--minimize-wasm-changes']
 
@@ -414,9 +427,9 @@ def finalize_wasm(infile, memfile, DEBUG):
     # later processing later anyhow)
     modify_wasm = True
   if shared.Settings.GENERATE_SOURCE_MAP:
-    building.emit_wasm_source_map(infile, infile + '.map')
+    building.emit_wasm_source_map(infile, infile + '.map', outfile)
     building.save_intermediate(infile + '.map', 'base_wasm.map')
-    args += ['--output-source-map-url=' + shared.Settings.SOURCE_MAP_BASE + os.path.basename(shared.Settings.WASM_BINARY_FILE) + '.map']
+    args += ['--output-source-map-url=' + shared.Settings.SOURCE_MAP_BASE + os.path.basename(outfile) + '.map']
     modify_wasm = True
   # tell binaryen to look at the features section, and if there isn't one, to use MVP
   # (which matches what llvm+lld has given us)
@@ -444,38 +457,28 @@ def finalize_wasm(infile, memfile, DEBUG):
   else:
     args.append('--no-legalize-javascript-ffi')
   if memfile:
-    args.append('--separate-data-segments=' + memfile)
+    args.append(f'--separate-data-segments={memfile}')
+    args.append(f'--global-base={shared.Settings.GLOBAL_BASE}')
     modify_wasm = True
   if shared.Settings.SIDE_MODULE:
     args.append('--side-module')
-  else:
-    # --global-base is used by wasm-emscripten-finalize to calculate the size
-    # of the static data used.  The argument we supply here needs to match the
-    # global based used by lld (see building.link_lld).  For relocatable this is
-    # zero for the global base although at runtime __memory_base is used.
-    # For non-relocatable output we used shared.Settings.GLOBAL_BASE.
-    # TODO(sbc): Can we remove this argument infer this from the segment
-    # initializer?
-    if shared.Settings.RELOCATABLE:
-      args.append('--global-base=0')
-    else:
-      args.append('--global-base=%s' % shared.Settings.GLOBAL_BASE)
   if shared.Settings.STACK_OVERFLOW_CHECK >= 2:
     args.append('--check-stack-overflow')
     modify_wasm = True
   if shared.Settings.STANDALONE_WASM:
     args.append('--standalone-wasm')
-    modify_wasm = True
 
   if shared.Settings.DEBUG_LEVEL >= 3:
     args.append('--dwarf')
   stdout = building.run_binaryen_command('wasm-emscripten-finalize',
                                          infile=infile,
-                                         outfile=infile if modify_wasm else None,
+                                         outfile=outfile if modify_wasm else None,
                                          args=args,
                                          stdout=subprocess.PIPE)
   if modify_wasm:
     building.save_intermediate(infile, 'post_finalize.wasm')
+  elif infile != outfile:
+    shutil.copy(infile, outfile)
   if shared.Settings.GENERATE_SOURCE_MAP:
     building.save_intermediate(infile + '.map', 'post_finalize.map')
 
@@ -881,11 +884,11 @@ def generate_struct_info():
   shared.Settings.STRUCT_INFO = shared.Cache.get(generated_struct_info_name, generate_struct_info)
 
 
-def run(infile, outfile_js, memfile):
+def run(in_wasm, out_wasm, outfile_js, memfile):
   temp_files = shared.configuration.get_temp_files()
   if not shared.Settings.BOOTSTRAPPING_STRUCT_INFO:
     generate_struct_info()
 
   return temp_files.run_and_clean(lambda: emscript(
-      infile, outfile_js, memfile, temp_files, shared.DEBUG)
+      in_wasm, out_wasm, outfile_js, memfile, temp_files, shared.DEBUG)
   )
