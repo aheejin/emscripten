@@ -36,6 +36,8 @@ class Cache(object):
         subdir += '-lto'
       if shared.Settings.RELOCATABLE:
         subdir += '-pic'
+      if shared.Settings.MEMORY64:
+        subdir += '-memory64'
       dirname = os.path.join(dirname, subdir)
 
     self.dirname = dirname

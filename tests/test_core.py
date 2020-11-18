@@ -461,10 +461,9 @@ class TestCoreBase(RunnerCore):
   def test_sha1(self):
     self.do_runf(path_from_root('tests', 'sha1.c'), 'SHA1=15dd99a1991e0b3826fede3deffc1feba42278e6')
 
-  @no_wasm_backend('test checks that __asmjs__ is #defined')
-  def test_asmjs_unknown_emscripten(self):
+  def test_wasm32_unknown_emscripten(self):
     # No other configuration is supported, so always run this.
-    self.do_runf(path_from_root('tests', 'asmjs-unknown-emscripten.c'), '')
+    self.do_runf(path_from_root('tests', 'wasm32-unknown-emscripten.c'), '')
 
   def test_cube2md5(self):
     self.emcc_args += ['--embed-file', 'cube2md5.txt']
@@ -476,8 +475,8 @@ class TestCoreBase(RunnerCore):
   def test_cube2hash(self):
     # A good test of i64 math
     self.do_run('// empty file', 'Usage: hashstring <seed>',
-                libraries=self.get_library('cube2hash', ['libcube2hash.a'], configure=None),
-                includes=[path_from_root('tests', 'cube2hash')], assert_returncode=NON_ZERO)
+                libraries=self.get_library(os.path.join('third_party', 'cube2hash'), ['libcube2hash.a'], configure=None),
+                includes=[path_from_root('tests', 'third_party', 'cube2hash')], assert_returncode=NON_ZERO)
 
     for text, output in [('fleefl', '892BDB6FD3F62E863D63DA55851700FDE3ACF30204798CE9'),
                          ('fleefl2', 'AA2CC5F96FC9D540CA24FDAF1F71E2942753DB83E8A81B61'),
@@ -2088,6 +2087,7 @@ int main(int argc, char **argv) {
   @no_asan('ASan alters the memory size')
   def test_module_wasm_memory(self):
     self.emcc_args += ['--pre-js', path_from_root('tests', 'core', 'test_module_wasm_memory.js')]
+    self.set_setting('IMPORTED_MEMORY')
     self.do_runf(path_from_root('tests', 'core', 'test_module_wasm_memory.c'), 'success')
 
   def test_ssr(self): # struct self-ref
@@ -8206,6 +8206,11 @@ NODEFS is no longer included by default; build with -lnodefs.js
       self.skipTest('standalone mode only')
     self.set_setting('STANDALONE_WASM', 1)
     self.set_setting('EXPORTED_FUNCTIONS', ['__start'])
+    self.do_run_in_out_file_test('tests', 'core', 'test_hello_world.c')
+
+  @unittest.skip("memory64 functionality only partially working")
+  def test_memory64_hello_world(self):
+    self.set_setting('MEMORY64', 2)
     self.do_run_in_out_file_test('tests', 'core', 'test_hello_world.c')
 
   # Tests the operation of API found in #include <emscripten/math.h>

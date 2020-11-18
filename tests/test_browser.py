@@ -4121,7 +4121,7 @@ window.close = function() {
     size = os.path.getsize('test.js')
     print('size:', size)
     # Note that this size includes test harness additions (for reporting the result, etc.).
-    self.assertLess(abs(size - 5496), 100)
+    self.assertLess(abs(size - 5368), 100)
 
   # Tests that it is possible to initialize and render WebGL content in a pthread by using OffscreenCanvas.
   # -DTEST_CHAINED_WEBGL_CONTEXT_PASSING: Tests that it is possible to transfer WebGL canvas in a chain from main thread -> thread 1 -> thread 2 and then init and render WebGL content there.
@@ -4484,8 +4484,8 @@ window.close = function() {
   # Tests that a pthreads build of -s MINIMAL_RUNTIME=1 works well in different build modes
   def test_minimal_runtime_hello_pthread(self):
     for opts in [[], ['-O3']]:
-      for modularize in [[], ['-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=MyModule', '-s', 'MINIMAL_RUNTIME=1']]:
-        self.btest(path_from_root('tests', 'pthread', 'hello_thread.c'), expected='1', args=['-s', 'USE_PTHREADS=1'] + modularize + opts)
+      for modularize in [[], ['-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=MyModule']]:
+        self.btest(path_from_root('tests', 'pthread', 'hello_thread.c'), expected='1', args=['-s', 'MINIMAL_RUNTIME=1', '-s', 'USE_PTHREADS=1'] + modularize + opts)
 
   # Tests memory growth in pthreads mode, but still on the main thread.
   @requires_threads
