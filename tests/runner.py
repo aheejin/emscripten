@@ -152,14 +152,6 @@ def is_slow_test(func):
   return decorated
 
 
-# Today we only support the wasm backend so any tests that is disabled under the llvm
-# backend is always disabled.
-# TODO(sbc): Investigate all tests with this decorator and either fix of remove the test.
-def no_wasm_backend(note=''):
-  assert not callable(note)
-  return unittest.skip(note)
-
-
 def disabled(note=''):
   assert not callable(note)
   return unittest.skip(note)
@@ -259,11 +251,14 @@ def ensure_dir(dirname):
     os.makedirs(dirname)
 
 
-def limit_size(string, maxbytes=800000 * 20, maxlines=100000):
+def limit_size(string, maxbytes=800000 * 20, maxlines=100000, max_line=5000):
   lines = string.splitlines()
+  for i, line in enumerate(lines):
+    if len(line) > max_line:
+      lines[i] = line[:max_line] + '[..]'
   if len(lines) > maxlines:
     lines = lines[0:maxlines // 2] + ['[..]'] + lines[-maxlines // 2:]
-    string = '\n'.join(lines)
+  string = '\n'.join(lines) + '\n'
   if len(string) > maxbytes:
     string = string[0:maxbytes // 2] + '\n[..]\n' + string[-maxbytes // 2:]
   return string
@@ -682,14 +677,15 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     else:
       ret = out + err
     if error or EMTEST_VERBOSE:
+      ret = limit_size(ret)
       print('-- begin program output --')
       print(ret, end='')
       print('-- end program output --')
-    if error:
-      if assert_returncode == NON_ZERO:
-        self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
-      else:
-        self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
+      if error:
+        if assert_returncode == NON_ZERO:
+          self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
+        else:
+          self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
 
     #  We should pass all strict mode checks
     self.assertNotContained('strict warning:', ret)

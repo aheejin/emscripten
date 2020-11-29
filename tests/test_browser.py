@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.request import urlopen
 
 from runner import BrowserCore, RunnerCore, path_from_root, has_browser, EMTEST_BROWSER
-from runner import no_wasm_backend, create_test_file, parameterized, ensure_dir
+from runner import create_test_file, parameterized, ensure_dir
 from tools import building
 from tools import shared
 from tools import system_libs
@@ -100,6 +100,8 @@ def no_firefox(note='firefox is not supported'):
 
 
 def no_swiftshader(f):
+  assert callable(f)
+
   def decorated(self):
     if is_chrome() and '--use-gl=swiftshader' in EMTEST_BROWSER:
       self.skipTest('not compatible with swiftshader')
@@ -109,6 +111,8 @@ def no_swiftshader(f):
 
 
 def requires_threads(f):
+  assert callable(f)
+
   def decorated(self, *args, **kwargs):
     if os.environ.get('EMTEST_LACKS_THREAD_SUPPORT'):
       self.skipTest('EMTEST_LACKS_THREAD_SUPPORT is set')
@@ -118,12 +122,22 @@ def requires_threads(f):
 
 
 def requires_asmfs(f):
+  assert callable(f)
+
   def decorated(self, *args, **kwargs):
     # https://github.com/emscripten-core/emscripten/issues/9534
     self.skipTest('ASMFS is looking for a maintainer')
     return f(self, *args, **kwargs)
 
   return decorated
+
+
+# Today we only support the wasm backend so any tests that is disabled under the llvm
+# backend is always disabled.
+# TODO(sbc): Investigate all tests with this decorator and either fix of remove the test.
+def no_wasm_backend(note=''):
+  assert not callable(note)
+  return unittest.skip(note)
 
 
 requires_graphics_hardware = unittest.skipIf(os.getenv('EMTEST_LACKS_GRAPHICS_HARDWARE'), "This test requires graphics hardware")
@@ -2531,11 +2545,15 @@ Module["preRun"].push(function () {
 
     self.btest('doublestart.c', args=['--pre-js', 'pre.js', '-o', 'test.html'], expected='1')
 
+  @parameterized({
+    '': ([],),
+    'closure': (['-O2', '-g1', '--closure', '1', '-s', 'HTML5_SUPPORT_DEFERRING_USER_SENSITIVE_REQUESTS=0'],),
+    'pthread': (['-s', 'USE_PTHREADS=1', '-s', 'PROXY_TO_PTHREAD=1'],),
+    'legacy': (['-s', 'MIN_FIREFOX_VERSION=0', '-s', 'MIN_SAFARI_VERSION=0', '-s', 'MIN_IE_VERSION=0', '-s', 'MIN_EDGE_VERSION=0', '-s', 'MIN_CHROME_VERSION=0'],)
+  })
   @requires_threads
-  def test_html5(self):
-    for opts in [[], ['-O2', '-g1', '--closure', '1', '-s', 'HTML5_SUPPORT_DEFERRING_USER_SENSITIVE_REQUESTS=0'], ['-s', 'USE_PTHREADS=1', '-s', 'PROXY_TO_PTHREAD=1'], ['-s', 'MIN_FIREFOX_VERSION=0', '-s', 'MIN_SAFARI_VERSION=0', '-s', 'MIN_IE_VERSION=0', '-s', 'MIN_EDGE_VERSION=0', '-s', 'MIN_CHROME_VERSION=0']]:
-      print(opts)
-      self.btest(path_from_root('tests', 'test_html5.c'), args=[] + opts, expected='0')
+  def test_html5_core(self, opts):
+    self.btest(path_from_root('tests', 'test_html5_core.c'), args=opts, expected='0')
 
   @requires_threads
   def test_html5_gamepad(self):
