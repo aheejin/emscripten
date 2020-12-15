@@ -60,7 +60,7 @@ var ABORT = false;
 // set by exit() and abort().  Passed to 'onExit' handler.
 // NOTE: This is also used as the process return code code in shell environments
 // but only when noExitRuntime is false.
-var EXITSTATUS = 0;
+var EXITSTATUS;
 
 /** @type {function(*, string=)} */
 function assert(condition, text) {
@@ -261,6 +261,10 @@ var HEAP,
 /** @type {Float64Array} */
   HEAPF64;
 
+#if WASM_BIGINT
+var HEAP64;
+#endif
+
 function updateGlobalBufferAndViews(buf) {
   buffer = buf;
   Module['HEAP8'] = HEAP8 = new Int8Array(buf);
@@ -271,6 +275,9 @@ function updateGlobalBufferAndViews(buf) {
   Module['HEAPU32'] = HEAPU32 = new Uint32Array(buf);
   Module['HEAPF32'] = HEAPF32 = new Float32Array(buf);
   Module['HEAPF64'] = HEAPF64 = new Float64Array(buf);
+#if WASM_BIGINT
+  Module['HEAP64'] = HEAP64 = new BigInt64Array(buf);
+#endif
 }
 
 #if RELOCATABLE
@@ -792,6 +799,17 @@ var wasmOffsetConverter;
 #include "wasm_offset_converter.js"
 #endif
 
+#if SPLIT_MODULE
+var splitModuleProxyHandler = {
+  'get': function(target, prop, receiver) {
+    err('placeholder function created: ' + prop);
+    return function() {
+      abort('placeholder function called: ' + prop);
+    }
+  }
+};
+#endif
+
 // Create the wasm instance.
 // Receives the wasm imports, returns the exports.
 function createWasm() {
@@ -803,6 +821,9 @@ function createWasm() {
     'env': asmLibraryArg,
     '{{{ WASI_MODULE_NAME }}}': asmLibraryArg,
 #endif // MINIFY_WASM_IMPORTED_MODULES
+#if SPLIT_MODULE
+    'placeholder': new Proxy({}, splitModuleProxyHandler),
+#endif
 #if RELOCATABLE
     'GOT.mem': new Proxy(asmLibraryArg, GOTHandler),
     'GOT.func': new Proxy(asmLibraryArg, GOTHandler),

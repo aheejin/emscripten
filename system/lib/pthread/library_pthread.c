@@ -732,7 +732,7 @@ int emscripten_sync_run_in_main_runtime_thread_(EM_FUNC_SIGNATURE sig, void* fun
   return q.returnValue.i;
 }
 
-EMSCRIPTEN_KEEPALIVE double emscripten_run_in_main_runtime_thread_js(int index, int num_args, double* buffer, int sync) {
+EMSCRIPTEN_KEEPALIVE double emscripten_run_in_main_runtime_thread_js(int index, int num_args, int64_t* buffer, int sync) {
   em_queued_call q;
   em_queued_call *c;
   if (sync) {
@@ -745,16 +745,19 @@ EMSCRIPTEN_KEEPALIVE double emscripten_run_in_main_runtime_thread_js(int index, 
   c->calleeDelete = 1-sync;
   c->functionEnum = EM_PROXIED_JS_FUNCTION;
   c->functionPtr = (void*)index;
-  // We write out the JS doubles into args[], which must be of appropriate size - JS will assume that.
-  assert(sizeof(em_variant_val) == sizeof(double));
   assert(num_args+1 <= EM_QUEUED_JS_CALL_MAX_ARGS);
+  // The types are only known at runtime in these calls, so we store values that
+  // must be able to contain any valid JS value, including a 64-bit BigInt if
+  // BigInt support is enabled. We store to an i64, which can contain both a
+  // BigInt and a JS Number which is a 64-bit double.
   c->args[0].i = num_args;
   for (int i = 0; i < num_args; i++) {
-    c->args[i+1].d = buffer[i];
+    c->args[i+1].i64 = buffer[i];
   }
 
   if (sync) {
     emscripten_sync_run_in_main_thread(&q);
+    // TODO: support BigInt return values somehow.
     return q.returnValue.d;
   } else {
     // 'async' runs are fire and forget, where the caller detaches itself from the call object after
@@ -906,49 +909,35 @@ int llvm_atomic_load_add_i32_p0i32(int* ptr, int delta) {
 
 // Stores the memory address that the main thread is waiting on, if any. If
 // the main thread is waiting, we wake it up before waking up any workers.
-EMSCRIPTEN_KEEPALIVE
-void* _emscripten_main_thread_futex;
+EMSCRIPTEN_KEEPALIVE void* _emscripten_main_thread_futex;
 
-typedef struct main_args {
-  int argc;
-  char** argv;
-} main_args;
+static int _main_argc;
+static char** _main_argv;
 
 extern int __call_main(int argc, char** argv);
 
-void* __emscripten_thread_main(void* param) {
-  emscripten_set_thread_name(pthread_self(),
-    "Application main thread"); // This is the main runtime thread for the application.
-  main_args* args = (main_args*)param;
-  return (void*)__call_main(args->argc, args->argv);
+static void* _main_thread(void* param) {
+  // This is the main runtime thread for the application.
+  emscripten_set_thread_name(pthread_self(), "Application main thread");
+  return (void*)__call_main(_main_argc, _main_argv);
 }
 
-static main_args _main_arguments;
-
-int proxy_main(int argc, char** argv) {
-  if (emscripten_has_threading_support()) {
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    // Use the size of the current stack, which is the normal size of the stack
-    // that main() would have without PROXY_TO_PTHREAD.
-    pthread_attr_setstacksize(&attr, emscripten_stack_get_base() - emscripten_stack_get_end());
-    // Pass special ID -1 to the list of transferred canvases to denote that the thread creation
-    // should instead take a list of canvases that are specified from the command line with
-    // -s OFFSCREENCANVASES_TO_PTHREAD linker flag.
-    emscripten_pthread_attr_settransferredcanvases(&attr, (const char*)-1);
-    _main_arguments.argc = argc;
-    _main_arguments.argv = argv;
-    pthread_t thread;
-    int rc = pthread_create(&thread, &attr, __emscripten_thread_main, (void*)&_main_arguments);
-    pthread_attr_destroy(&attr);
-    if (rc) {
-      // Proceed by running main() on the main browser thread as a fallback.
-      return __call_main(_main_arguments.argc, _main_arguments.argv);
-    }
-    return 0;
-  } else {
-    return __call_main(_main_arguments.argc, _main_arguments.argv);
-  }
+int emscripten_proxy_main(int argc, char** argv) {
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  // Use the size of the current stack, which is the normal size of the stack
+  // that main() would have without PROXY_TO_PTHREAD.
+  pthread_attr_setstacksize(&attr, emscripten_stack_get_base() - emscripten_stack_get_end());
+  // Pass special ID -1 to the list of transferred canvases to denote that the thread creation
+  // should instead take a list of canvases that are specified from the command line with
+  // -s OFFSCREENCANVASES_TO_PTHREAD linker flag.
+  emscripten_pthread_attr_settransferredcanvases(&attr, (const char*)-1);
+  _main_argc = argc;
+  _main_argv = argv;
+  pthread_t thread;
+  int rc = pthread_create(&thread, &attr, _main_thread, NULL);
+  pthread_attr_destroy(&attr);
+  return rc;
 }
 
 weak_alias(__pthread_testcancel, pthread_testcancel);
