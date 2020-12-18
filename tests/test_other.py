@@ -942,6 +942,20 @@ int main() {
     self.run_process([EMCC, '-Wl,-whole-archive', '-Wl,--no-whole-archive', 'libtest.a', 'main.o'])
     self.assertContained('foo is: 0\n', self.run_js('a.out.js'))
 
+  def test_whole_archive_48156(self):
+    # Regression test for http://llvm.org/PR48156
+    # TODO: distill this test further and move to lld
+    self.run_process([EMCC, '-c', '-o', 'foo.o', '-O1',
+                      path_from_root('tests', 'test_whole_archive_foo.cpp')])
+    self.run_process([EMCC, '-c', '-o', 'main.o', '-O1',
+                      path_from_root('tests', 'test_whole_archive_main.cpp')])
+    self.run_process([EMAR, 'rc', 'libfoo.a', 'foo.o'])
+    self.run_process([EMAR, 'rc', 'libmain.a', 'main.o'])
+    self.run_process([
+        EMCC, path_from_root('tests', 'test_whole_archive_init.cpp'),
+        '-O1', 'libfoo.a', '-Wl,--whole-archive', 'libmain.a', '-Wl,--no-whole-archive'])
+    self.assertContained('Result: 11', self.run_js('a.out.js'))
+
   def test_link_group_bitcode(self):
     create_test_file('1.c', r'''
 int f(void);
@@ -9764,6 +9778,7 @@ exec "$@"
     self.set_setting('SPLIT_MODULE')
     self.emcc_args += ['-g', '-Wno-experimental']
     self.emcc_args += ['--post-js', path_from_root('tests', 'other', 'test_split_module.post.js')]
+    self.emcc_args += ['-sEXPORTED_FUNCTIONS=[_malloc, _free]']
     self.do_other_test('test_split_module.c')
     self.assertExists('test_split_module.wasm')
     self.assertExists('test_split_module.wasm.orig')
@@ -9774,4 +9789,7 @@ exec "$@"
 
     os.remove('test_split_module.wasm')
     os.rename('primary.wasm', 'test_split_module.wasm')
-    self.run_js('test_split_module.js')
+    os.rename('secondary.wasm', 'test_split_module.wasm.deferred')
+    result = self.run_js('test_split_module.js')
+    self.assertNotIn('writing profile', result)
+    self.assertIn('Hello! answer: 42', result)
