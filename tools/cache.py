@@ -3,9 +3,10 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
+import contextlib
+import logging
 import os
 import shutil
-import logging
 from . import tempfiles, filelock, config, utils
 from . import mylog
 
@@ -13,7 +14,7 @@ logger = logging.getLogger('cache')
 
 
 # Permanent cache for system librarys and ports
-class Cache(object):
+class Cache:
   # If EM_EXCLUSIVE_CACHE_ACCESS is true, this process is allowed to have direct
   # access to the Emscripten cache without having to obtain an interprocess lock
   # for it. Generally this is false, and this is used in the case that
@@ -76,17 +77,23 @@ class Cache(object):
       self.filelock.release()
       logger.debug('PID %s released multiprocess file lock to Emscripten cache at %s' % (str(os.getpid()), self.dirname))
 
+  @contextlib.contextmanager
+  def lock(self):
+    """A context manager that performs actions in the given directory."""
+    self.acquire_cache_lock()
+    try:
+      yield
+    finally:
+      self.release_cache_lock()
+
   def ensure(self):
     utils.safe_ensure_dirs(self.dirname)
 
   def erase(self):
-    self.acquire_cache_lock()
-    try:
+    with self.lock():
       if os.path.exists(self.root_dirname):
         for f in os.listdir(self.root_dirname):
           tempfiles.try_delete(os.path.join(self.root_dirname, f))
-    finally:
-      self.release_cache_lock()
 
   def get_path(self, shortname, root=False):
     if root:
@@ -112,8 +119,7 @@ class Cache(object):
     if os.path.exists(cachename) and not force:
       return cachename
 
-    self.acquire_cache_lock()
-    try:
+    with self.lock():
       if os.path.exists(cachename) and not force:
         return cachename
       # it doesn't exist yet, create it
@@ -135,8 +141,6 @@ class Cache(object):
         mylog.log_copy(temp, cachename)
         shutil.copyfile(temp, cachename)
       logger.info(' - ok')
-    finally:
-      self.release_cache_lock()
 
     return cachename
 
