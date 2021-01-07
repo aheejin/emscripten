@@ -927,7 +927,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
 
     def ccshared(src, linkto=[]):
       cmdv = [EMCC, src, '-o', shared.unsuffixed(src) + so] + self.get_emcc_args()
-      cmdv += ['-s', 'SIDE_MODULE=1', '-s', 'RUNTIME_LINKED_LIBS=' + str(linkto)]
+      cmdv += ['-s', 'SIDE_MODULE', '-s', 'RUNTIME_LINKED_LIBS=' + str(linkto)]
       self.run_process(cmdv)
 
     ccshared('liba.cpp')
@@ -1497,7 +1497,7 @@ class BrowserCore(RunnerCore):
     # use REPORT_RESULT, and also adds a cpp file to be compiled alongside the testcase, which
     # contains the implementation of REPORT_RESULT (we can't just include that implementation in
     # the header as there may be multiple files being compiled here).
-    args += ['-s', 'IN_TEST_HARNESS=1']
+    args += ['-s', 'IN_TEST_HARNESS']
     if reporting != Reporting.NONE:
       # For basic reporting we inject JS helper funtions to report result back to server.
       args += ['-DEMTEST_PORT_NUMBER=%d' % self.port,
@@ -1546,7 +1546,7 @@ class BrowserCore(RunnerCore):
       expected = [str(i) for i in range(0, reference_slack + 1)]
       self.reftest(path_from_root('tests', reference), manually_trigger=manually_trigger_reftest)
       if not manual_reference:
-        args += ['--pre-js', 'reftest.js', '-s', 'GL_TESTING=1']
+        args += ['--pre-js', 'reftest.js', '-s', 'GL_TESTING']
     outfile = 'test.html'
     args = [filepath, '-o', outfile] + args
     # print('all args:', args)
@@ -1574,7 +1574,7 @@ class BrowserCore(RunnerCore):
         post_build = self.post_manual_reftest
       # run proxied
       self.btest(filename, expected, reference, force_c, reference_slack, manual_reference, post_build,
-                 original_args + ['--proxy-to-worker', '-s', 'GL_TESTING=1'], message, timeout=timeout)
+                 original_args + ['--proxy-to-worker', '-s', 'GL_TESTING'], message, timeout=timeout)
 
 
 ###################################################################################################
@@ -1604,8 +1604,7 @@ def build_library(name,
     generated_libs = [generated_libs]
   source_dir = path_from_root('tests', name.replace('_native', ''))
 
-  temp_dir = build_dir
-  project_dir = os.path.join(temp_dir, name)
+  project_dir = os.path.join(build_dir, name)
   if os.path.exists(project_dir):
     shutil.rmtree(project_dir)
   shutil.copytree(source_dir, project_dir) # Useful in debugging sometimes to comment this out, and two lines above
