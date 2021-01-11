@@ -480,10 +480,10 @@ f.close()
   def test_emcc_cflags(self):
     output = self.run_process([EMCC, '--cflags'], stdout=PIPE)
     flags = output.stdout.strip()
-    self.assertContained(shared.shlex_join(shared.emsdk_cflags([], False)), flags)
+    self.assertContained(shared.shlex_join(shared.emsdk_cflags([])), flags)
     output = self.run_process([EMXX, '--cflags'], stdout=PIPE)
     flags = output.stdout.strip()
-    self.assertContained(shared.shlex_join(shared.emsdk_cflags([], True)), flags)
+    self.assertContained(shared.shlex_join(shared.emsdk_cflags([])), flags)
     # check they work
     cmd = [CLANG_CXX, path_from_root('tests', 'hello_world.cpp')] + shlex.split(flags.replace('\\', '\\\\')) + ['-c', '-o', 'out.o']
     self.run_process(cmd)
@@ -7169,7 +7169,8 @@ int main() {
   def test_include_system_header_in_c(self):
     for std in [[], ['-std=c89']]: # Test oldest C standard, and the default C standard
       for directory, headers in [
-        ('emscripten', ['dom_pk_codes.h', 'em_asm.h', 'emscripten.h', 'fetch.h', 'html5.h', 'key_codes.h', 'threading.h', 'trace.h', 'vr.h']), # This directory has also bind.h, val.h and wire.h, which require C++11
+        # This directory has also bind.h, val.h and wire.h, which require C++11
+        ('emscripten', ['dom_pk_codes.h', 'em_asm.h', 'emscripten.h', 'fetch.h', 'html5.h', 'key_codes.h', 'threading.h', 'trace.h']),
         ('AL', ['al.h', 'alc.h']),
         ('EGL', ['egl.h', 'eglplatform.h']),
         ('GL', ['freeglut_std.h', 'gl.h', 'glew.h', 'glfw.h', 'glu.h', 'glut.h']),

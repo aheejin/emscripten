@@ -1383,6 +1383,15 @@ keydown(100);keyup(100); // trigger the end
     self.btest(os.path.join('fs', 'test_lz4fs.cpp'), '2', args=['--pre-js', 'files.js', '-s', 'LZ4=1', '-s', 'FORCE_FILESYSTEM'])
     print('    opts')
     self.btest(os.path.join('fs', 'test_lz4fs.cpp'), '2', args=['--pre-js', 'files.js', '-s', 'LZ4=1', '-s', 'FORCE_FILESYSTEM', '-O2'])
+    print('    modularize')
+    self.compile_btest([path_from_root('tests', 'fs', 'test_lz4fs.cpp'), '--pre-js', 'files.js', '-s', 'LZ4=1', '-s', 'FORCE_FILESYSTEM', '-s', 'MODULARIZE=1'])
+    create_test_file('a.html', '''
+      <script src="a.out.js"></script>
+      <script>
+        Module()
+      </script>
+    ''')
+    self.run_browser('a.html', '.', '/report_result?2')
 
     # load the data into LZ4FS manually at runtime. This means we compress on the client. This is generally not recommended
     print('manual')
@@ -1593,7 +1602,7 @@ keydown(100);keyup(100); // trigger the end
     for file_data in [1, 0]:
       cmd = [EMCC, path_from_root('tests', 'hello_world_worker.cpp'), '-o', 'worker.js'] + (['--preload-file', 'file.dat'] if file_data else [])
       print(cmd)
-      subprocess.check_call(cmd)
+      self.run_process(cmd)
       self.assertExists('worker.js')
       self.run_browser('main.html', '', '/report_result?hello from worker, and :' + ('data for w' if file_data else '') + ':')
 
