@@ -8573,6 +8573,15 @@ int main () {
     err = self.expect_fail([EMCC, '-sSTRICT', path_from_root('tests', 'hello_libcxx.cpp')])
     self.assertContained('error: undefined symbol:', err)
 
+  def test_strict_mode_override(self):
+    create_test_file('empty.c', '')
+    # IGNORE_MISSING_MAIN default to 1 so this works by default
+    self.run_process([EMCC, 'empty.c'])
+    # strict mode disables it causing a link error
+    self.expect_fail([EMCC, '-sSTRICT', 'empty.c'])
+    # explicly setting IGNORE_MISSING_MAIN overrides the STRICT setting
+    self.run_process([EMCC, '-sSTRICT', '-sIGNORE_MISSING_MAIN', 'empty.c'])
+
   def test_safe_heap_log(self):
     self.set_setting('SAFE_HEAP')
     self.set_setting('SAFE_HEAP_LOG')
@@ -9703,6 +9712,14 @@ exec "$@"
       ''')
     proc = self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '--js-library=lib.js'], stderr=PIPE)
     self.assertContained('warning: use of #ifdef in js library.  Use #if instead.', proc.stderr)
+
+  def test_jslib_mangling(self):
+    create_test_file('lib.js', '''
+      mergeInto(LibraryManager.library, {
+       $__foo: function() { return 43; },
+      });
+      ''')
+    self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '--js-library=lib.js', '-s', 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$__foo]'])
 
   def test_wasm2js_no_dynamic_linking(self):
     for arg in ['-sMAIN_MODULE', '-sSIDE_MODULE', '-sRELOCATABLE']:

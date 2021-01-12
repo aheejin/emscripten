@@ -8069,6 +8069,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   @node_pthreads
   def test_pthread_create(self):
+    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('tests', 'core', 'pthread', 'create.cpp')
 
   @node_pthreads
@@ -8078,6 +8079,13 @@ NODEFS is no longer included by default; build with -lnodefs.js
     if not self.has_changed_setting('INITIAL_MEMORY'):
       self.set_setting('INITIAL_MEMORY', '64mb')
     self.do_run_in_out_file_test('tests', 'pthread', 'test_pthread_c11_threads.c')
+
+  @node_pthreads
+  def test_pthread_cxx_threads(self):
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.clear_setting('ALLOW_MEMORY_GROWTH')
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test('tests', 'pthread', 'test_pthread_cxx_threads.cpp')
 
   @node_pthreads
   def test_pthread_create_pool(self):
