@@ -1499,6 +1499,11 @@ int f() {
     output = self.run_js('a.out.js')
     self.assertContained('libpng passes test', output)
 
+  def test_giflib(self):
+    shutil.copyfile(path_from_root('tests', 'third_party', 'giflib', 'treescap.gif'), 'treescap.gif')
+    building.emcc(path_from_root('tests', 'third_party', 'giflib', 'giftext.c'), ['--embed-file', 'treescap.gif', '-s', 'USE_GIFLIB'], output_filename='a.out.js')
+    self.assertContained('GIF file terminated normally', self.run_js('a.out.js', args=['treescap.gif']))
+
   def test_libjpeg(self):
     shutil.copyfile(path_from_root('tests', 'screenshot.jpg'), 'screenshot.jpg')
     building.emcc(path_from_root('tests', 'jpeg_test.c'), ['--embed-file', 'screenshot.jpg', '-s', 'USE_LIBJPEG'], output_filename='a.out.js')
@@ -6587,12 +6592,12 @@ int main() {
 
     # Must be a multiple of 64KB
     ret = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'INITIAL_MEMORY=33554433']) # 32MB + 1 byte
-    self.assertContained('INITIAL_MEMORY must be a multiple of 64KB', ret)
+    self.assertContained('INITIAL_MEMORY must be a multiple of WebAssembly page size (64KiB)', ret)
 
     self.run_process([EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'MAXIMUM_MEMORY=33MB'])
 
     ret = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'MAXIMUM_MEMORY=34603009']) # 33MB + 1 byte
-    self.assertContained('MAXIMUM_MEMORY must be a multiple of 64KB', ret)
+    self.assertContained('MAXIMUM_MEMORY must be a multiple of WebAssembly page size (64KiB)', ret)
 
   def test_invalid_output_dir(self):
     ret = self.expect_fail([EMCC, path_from_root('tests', 'hello_world.c'), '-o', os.path.join('NONEXISTING_DIRECTORY', 'out.js')])
