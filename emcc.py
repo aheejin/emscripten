@@ -24,7 +24,6 @@ emcc can be influenced by a few environment variables:
 """
 
 
-import atexit
 import json
 import logging
 import os
@@ -43,6 +42,7 @@ from tools import colored_logger, diagnostics, building
 from tools import mylog
 from tools.shared import unsuffixed, unsuffixed_basename, WINDOWS, safe_move, safe_copy
 from tools.shared import run_process, asbytes, read_and_preprocess, exit_with_error, DEBUG
+from tools.shared import do_replace
 from tools.response_file import substitute_response_files
 from tools.minimal_runtime_shell import generate_minimal_runtime_html
 import tools.line_endings
@@ -427,7 +427,7 @@ def ensure_archive_index(archive_file):
     run_process([shared.LLVM_RANLIB, archive_file])
 
 
-def get_all_js_syms(temp_files):
+def get_all_js_syms():
   # Runs the js compiler to generate a list of all symbols available in the JS
   # libraries.  This must be done separately for each linker invokation since the
   # list of symbols depends on what settings are used.
@@ -441,7 +441,7 @@ def get_all_js_syms(temp_files):
     shared.Settings.INCLUDE_FULL_LIBRARY = True
     shared.Settings.ONLY_CALC_JS_SYMBOLS = True
     emscripten.generate_struct_info()
-    glue, forwarded_data = emscripten.compile_settings(temp_files)
+    glue, forwarded_data = emscripten.compile_settings()
     forwarded_json = json.loads(forwarded_data)
     library_fns = forwarded_json['Functions']['libraryFunctions']
     library_fns_list = []
@@ -613,12 +613,6 @@ def do_split_module(wasm_file):
   os.rename(wasm_file, wasm_file + '.orig')
   args = ['--instrument']
   building.run_binaryen_command('wasm-split', wasm_file + '.orig', outfile=wasm_file, args=args)
-
-
-def do_replace(input_, pattern, replacement):
-  if pattern not in input_:
-    exit_with_error('expected to find pattern in input JS: %s' % pattern)
-  return input_.replace(pattern, replacement)
 
 
 def is_dash_s_for_emcc(args, i):
@@ -824,7 +818,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       print(shared.shlex_join(parts[1:]))
     return 0
 
-  shared.check_sanity(force=DEBUG)
+  shared.check_sanity()
 
   def get_language_mode(args):
     return_next = False
@@ -1246,6 +1240,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if shared.Settings.STRICT:
       default_setting('STRICT_JS', 1)
       default_setting('AUTO_JS_LIBRARIES', 0)
+      default_setting('AUTO_NATIVE_LIBRARIES', 0)
       default_setting('AUTO_ARCHIVE_INDEXES', 0)
       default_setting('IGNORE_MISSING_MAIN', 0)
       default_setting('DEFAULT_TO_CXX', 0)
@@ -1282,6 +1277,10 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if shared.Settings.CLOSURE_WARNINGS not in ['quiet', 'warn', 'error']:
       exit_with_error('Invalid option -s CLOSURE_WARNINGS=%s specified! Allowed values are "quiet", "warn" or "error".' % shared.Settings.CLOSURE_WARNINGS)
+
+    # Include dynCall() function by default in DYNCALLS builds in classic runtime; in MINIMAL_RUNTIME, must add this explicitly.
+    if shared.Settings.DYNCALLS and not shared.Settings.MINIMAL_RUNTIME:
+      shared.Settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$dynCall']
 
     if shared.Settings.MAIN_MODULE:
       assert not shared.Settings.SIDE_MODULE
@@ -1331,7 +1330,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if shared.Settings.ASYNCIFY:
       # See: https://github.com/emscripten-core/emscripten/issues/12065
       # See: https://github.com/emscripten-core/emscripten/issues/12066
-      shared.Settings.USE_LEGACY_DYNCALLS = 1
+      shared.Settings.DYNCALLS = 1
       shared.Settings.EXPORTED_FUNCTIONS += ['_emscripten_stack_get_base',
                                              '_emscripten_stack_get_end',
                                              '_emscripten_stack_set_limits']
@@ -1901,14 +1900,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         (shared.Settings.MAXIMUM_MEMORY < 0 or
          shared.Settings.MAXIMUM_MEMORY > 2 * 1024 * 1024 * 1024)):
       shared.Settings.CAN_ADDRESS_2GB = 1
-      if shared.Settings.MALLOC == 'emmalloc':
-        if shared.Settings.INITIAL_MEMORY >= 2 * 1024 * 1024 * 1024:
-          suggestion = 'decrease INITIAL_MEMORY'
-        elif shared.Settings.MAXIMUM_MEMORY < 0:
-          suggestion = 'set MAXIMUM_MEMORY'
-        else:
-          suggestion = 'decrease MAXIMUM_MEMORY'
-        exit_with_error('emmalloc only works on <2GB of memory. Use the default allocator, or ' + suggestion)
 
     shared.Settings.EMSCRIPTEN_VERSION = shared.EMSCRIPTEN_VERSION
     shared.Settings.PROFILING_FUNCS = options.profiling_funcs
@@ -1922,14 +1913,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
   # exit block 'parse arguments and setup'
   log_time('parse arguments and setup')
-
-  if DEBUG:
-    # we are about to start using temp dirs. serialize access to the temp dir
-    # when using EMCC_DEBUG, since we don't want multiple processes would to
-    # use it at once, they might collide if they happen to use the same
-    # tempfile names
-    shared.Cache.acquire_cache_lock()
-    atexit.register(shared.Cache.release_cache_lock)
 
   if options.post_link:
     process_libraries(libs, lib_dirs, temp_files)
@@ -2098,12 +2081,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   if link_to_object:
     with ToolchainProfiler.profile_block('linking to object file'):
       logger.debug('link_to_object: ' + str(linker_inputs) + ' -> ' + target)
-      if len(temp_files) == 1:
-        temp_file = temp_files[0][1]
-        # skip running the linker and just copy the object file
-        safe_copy(temp_file, target)
-      else:
-        building.link_to_object(linker_inputs, target)
+      building.link_to_object(linker_inputs, target)
       logger.debug('stopping after linking to object file')
       return 0
 
@@ -2149,7 +2127,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # TODO: we could check if this is a fastcomp build, and still speed things up here
     js_funcs = None
     if shared.Settings.LLD_REPORT_UNDEFINED and shared.Settings.ERROR_ON_UNDEFINED_SYMBOLS:
-      js_funcs = get_all_js_syms(misc_temp_files)
+      js_funcs = get_all_js_syms()
       log_time('JS symbol generation')
     building.link_lld(linker_inputs, wasm_target, external_symbol_list=js_funcs)
     # Special handling for when the user passed '-Wl,--version'.  In this case the linker
