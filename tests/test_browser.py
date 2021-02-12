@@ -2415,7 +2415,11 @@ void *getBindBuffer() {
     self.compile_btest([path_from_root('tests', 'browser_module.cpp'), '-o', 'lib.wasm', '-O2', '-s', 'SIDE_MODULE', '-s', 'EXPORTED_FUNCTIONS=[_one,_two]'])
     self.btest('browser_main.cpp', args=['-O2', '-s', 'MAIN_MODULE'], expected='8')
 
-  def test_preload_module(self):
+  @parameterized({
+    'non-lz4': ([],),
+    'lz4': (['-s', 'LZ4'],)
+  })
+  def test_preload_module(self, args):
     create_test_file('library.c', r'''
       #include <stdio.h>
       int library_func() {
@@ -2449,7 +2453,7 @@ void *getBindBuffer() {
     ''')
     self.btest_exit(
       'main.c',
-      args=['-s', 'MAIN_MODULE', '--preload-file', '.@/', '-O2', '--use-preload-plugins', '-s', 'EXPORT_ALL'],
+      args=['-s', 'MAIN_MODULE', '--preload-file', '.@/', '-O2', '--use-preload-plugins', '-s', 'EXPORT_ALL'] + args,
       expected='0')
 
   def test_mmap_file(self):
@@ -4155,8 +4159,12 @@ window.close = function() {
     self.btest_exit('binaryen_async.c', expected=1, args=common_args)
 
   # Test that implementing Module.instantiateWasm() callback works.
-  def test_manual_wasm_instantiate(self):
-    self.compile_btest([path_from_root('tests/manual_wasm_instantiate.cpp'), '-o', 'manual_wasm_instantiate.js', '-s', 'BINARYEN'])
+  @parameterized({
+    '': ([],),
+    'asan': (['-fsanitize=address', '-s', 'INITIAL_MEMORY=128MB'],)
+  })
+  def test_manual_wasm_instantiate(self, args=[]):
+    self.compile_btest([path_from_root('tests/manual_wasm_instantiate.cpp'), '-o', 'manual_wasm_instantiate.js'] + args)
     shutil.copyfile(path_from_root('tests', 'manual_wasm_instantiate.html'), 'manual_wasm_instantiate.html')
     self.run_browser('manual_wasm_instantiate.html', 'wasm instantiation succeeded', '/report_result?1')
 
