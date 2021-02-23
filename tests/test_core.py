@@ -1434,7 +1434,7 @@ int main(int argc, char **argv)
   @with_both_exception_handling
   def test_exceptions_rethrow_missing(self):
     create_test_file('main.cpp', 'int main() { throw; }')
-    self.do_runf('main.cpp', 'abort(no exception to throw)', assert_returncode=NON_ZERO)
+    self.do_runf('main.cpp', None, assert_returncode=NON_ZERO)
 
   @with_both_exception_handling
   def test_bad_typeid(self):
@@ -1859,12 +1859,14 @@ int main(int argc, char **argv) {
 
   def test_em_asm(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm.cpp')
+    self.emcc_args.append('-std=gnu89')
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm.cpp', force_c=True)
 
   # Tests various different ways to invoke the EM_ASM(), EM_ASM_INT() and EM_ASM_DOUBLE() macros.
   @no_asan('Cannot use ASan: test depends exactly on heap size')
   def test_em_asm_2(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm_2.cpp')
+    self.emcc_args.append('-std=gnu89')
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm_2.cpp', force_c=True)
 
   # Tests various different ways to invoke the MAIN_THREAD_EM_ASM(), MAIN_THREAD_EM_ASM_INT() and MAIN_THREAD_EM_ASM_DOUBLE() macros.
@@ -1912,17 +1914,20 @@ int main(int argc, char **argv) {
     self.do_run_in_out_file_test('tests', 'core', 'test_em_asm_arguments_side_effects.cpp', force_c=True)
 
   @parameterized({
-    'normal': ([],),
-    'linked': (['-s', 'MAIN_MODULE'],),
+    '': ([], False),
+    'c': ([], True),
+    'linked': (['-s', 'MAIN_MODULE'], False),
+    'linked_c': (['-s', 'MAIN_MODULE'], True),
   })
-  def test_em_js(self, args):
+  def test_em_js(self, args, force_c):
     if 'MAIN_MODULE' in args and not self.is_wasm():
       self.skipTest('main module support for non-wasm')
     if '-fsanitize=address' in self.emcc_args:
       self.skipTest('no dynamic library support in asan yet')
     self.emcc_args += args + ['-s', 'EXPORTED_FUNCTIONS=["_main","_malloc"]']
-    self.do_run_in_out_file_test('tests', 'core', 'test_em_js.cpp')
-    self.do_run_in_out_file_test('tests', 'core', 'test_em_js.cpp', force_c=True)
+
+    self.do_run_in_out_file_test('tests', 'core', 'test_em_js.cpp', force_c=force_c)
+    self.assertContained("no args returning int", open('test_em_js.js').read())
 
   def test_runtime_stacksave(self):
     self.do_runf(path_from_root('tests', 'core', 'test_runtime_stacksave.c'), 'success')
@@ -4531,6 +4536,30 @@ res64 - external 64\n''', header='''
                      header=header,
                      expected='success')
 
+  @needs_dlfcn
+  def test_dylink_argv_argc(self):
+    # Verify that argc and argv can be sent to main when main is in a side module
+
+    self.emcc_args += ['--extern-pre-js', 'pre.js']
+
+    create_test_file('pre.js', '''
+      var Module = { arguments: ['hello', 'world!'] }
+    ''')
+
+    self.dylink_test(
+      '', # main module is empty.
+      r'''
+      #include <stdio.h>
+      int main(int argc, char const *argv[]) {
+        printf("%d ", argc);
+        for (int i=1; i<argc; i++) printf("%s ", argv[i]);
+        printf("\n");
+        return 0;
+      }
+      ''',
+      expected='3 hello world!',
+      need_reverse=False)
+
   def test_random(self):
     src = r'''#include <stdlib.h>
 #include <stdio.h>
@@ -4616,8 +4645,8 @@ Have even and odd!
   def test_strtok(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_strtok.c')
 
-  def test_parseInt(self):
-    self.do_run_in_out_file_test('tests', 'core', 'test_parseInt.c')
+  def test_strtol(self):
+    self.do_run_in_out_file_test('tests', 'core', 'test_strtol.c')
 
   def test_transtrcase(self):
     self.do_run_in_out_file_test('tests', 'core', 'test_transtrcase.c')
@@ -8148,7 +8177,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
       self.set_setting('INITIAL_MEMORY', '64mb')
     self.do_run_in_out_file_test('tests', 'pthread', 'test_pthread_c11_threads.c')
 
-  @no_asan('flakey errors that must be fixed, https://github.com/emscripten-core/emscripten/issues/12985')
   @node_pthreads
   def test_pthread_cxx_threads(self):
     self.set_setting('PROXY_TO_PTHREAD')
@@ -8362,7 +8390,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   # Tests <emscripten/stack.h> API
   @no_asan('stack allocation sizes are no longer predictable')
   def test_emscripten_stack(self):
-    self.emcc_args += ['-lstack.js']
     self.set_setting('TOTAL_STACK', 4 * 1024 * 1024)
     self.do_run_in_out_file_test('tests', 'core', 'test_stack_get_free.c')
 
