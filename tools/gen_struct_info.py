@@ -276,7 +276,7 @@ def inspect_headers(headers, cflags):
 
   show(shared.shlex_join(cmd))
   try:
-    mylog.log_cmd(cmd, env=env)
+    mylog.log_cmd(cmd)
     subprocess.check_call(cmd)
   except subprocess.CalledProcessError as e:
     sys.stderr.write('FAIL: Compilation failed!: %s\n' % e.cmd)
