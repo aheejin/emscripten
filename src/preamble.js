@@ -261,12 +261,19 @@ var HEAP,
 /** @type {Float64Array} */
   HEAPF64;
 
+#if SUPPORT_BIG_ENDIAN
+var HEAP_DATA_VIEW;
+#endif
+
 #if WASM_BIGINT
 var HEAP64;
 #endif
 
 function updateGlobalBufferAndViews(buf) {
   buffer = buf;
+#if SUPPORT_BIG_ENDIAN
+  Module['HEAP_DATA_VIEW'] = HEAP_DATA_VIEW = new DataView(buf);
+#endif
   Module['HEAP8'] = HEAP8 = new Int8Array(buf);
   Module['HEAP16'] = HEAP16 = new Int16Array(buf);
   Module['HEAP32'] = HEAP32 = new Int32Array(buf);
@@ -1060,6 +1067,10 @@ function createWasm() {
         var search = location.search;
         if (search.indexOf('_rwasm=0') < 0) {
           location.href += (search ? search + '&' : '?') + '_rwasm=0';
+          // Return here to avoid calling abort() below.  The application
+          // still has a chance to start sucessfully do we don't want to
+          // trigger onAbort or onExit handlers.
+          return;
         }
 #if ENVIRONMENT_MAY_BE_NODE || ENVIRONMENT_MAY_BE_SHELL
       }

@@ -297,6 +297,12 @@ var DECLARE_ASM_MODULE_EXPORTS = 1;
 // [compile+link]
 var INLINING_LIMIT = 0;
 
+// If set to 1, perform acorn pass that converts each HEAP access into a
+// function call that uses DataView to enforce LE byte order for HEAP buffer;
+// This makes generated JavaScript run on BE as well as LE machines. (If 0, only
+// LE systems are supported). Does not affect generated wasm.
+var SUPPORT_BIG_ENDIAN = 0;
+
 // Check each write to the heap, for example, this will give a clear
 // error on what would be segfaults in a native build (like dereferencing
 // 0). See runtime_safe_heap.js for the actual checks performed.
@@ -1452,6 +1458,23 @@ var USE_PTHREADS = 0;
 // threadpool equal to the number of cores).
 // [link] - affects generated JS runtime code at link time
 var PTHREAD_POOL_SIZE = '';
+
+// Normally, applications can create new threads even when the pool is empty.
+// When application breaks out to the JS event loop before trying to block on
+// the thread via `pthread_join` or any other blocking primitive,
+// an extra Worker will be created and the thread callback will be executed.
+// However, breaking out to the event loop requires custom modifications to
+// the code to adapt it to the Web, and not something that works for
+// off-the-shelf apps. Those apps without any modifications are most likely
+// to deadlock. This setting ensures that, instead of a risking a deadlock,
+// they get a runtime EAGAIN error instead that can at least be gracefully
+// handled from the C / C++ side.
+// Values:
+//  - `0` - disable warnings on thread pool exhaustion
+//  - `1` - enable warnings on thread pool exhaustion (default)
+//  - `2` - make thread pool exhaustion a hard error
+// [link]
+var PTHREAD_POOL_SIZE_STRICT = 1;
 
 // If your application does not need the ability to synchronously create
 // threads, but it would still like to opportunistically speed up initial thread
