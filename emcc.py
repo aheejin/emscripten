@@ -24,15 +24,16 @@ emcc can be influenced by a few environment variables:
 """
 
 
+import base64
 import json
 import logging
 import os
 import re
 import shlex
+import shutil
 import stat
 import sys
 import time
-import base64
 from enum import Enum
 from subprocess import PIPE
 
@@ -40,7 +41,7 @@ import emscripten
 from tools import shared, system_libs
 from tools import colored_logger, diagnostics, building
 from tools import mylog
-from tools.shared import unsuffixed, unsuffixed_basename, WINDOWS, safe_move, safe_copy
+from tools.shared import unsuffixed, unsuffixed_basename, WINDOWS, safe_copy
 from tools.shared import run_process, read_and_preprocess, exit_with_error, DEBUG
 from tools.shared import do_replace
 from tools.response_file import substitute_response_files
@@ -1511,9 +1512,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       shared.Settings.MIN_EDGE_VERSION = 0
       shared.Settings.MIN_CHROME_VERSION = 0
 
-    if shared.Settings.MIN_SAFARI_VERSION <= 9 and shared.Settings.WASM2JS:
-      shared.Settings.WORKAROUND_IOS_9_RIGHT_SHIFT_BUG = 1
-
     if shared.Settings.MIN_CHROME_VERSION <= 37:
       shared.Settings.WORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG = 1
 
@@ -1522,7 +1520,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # Silently drop any individual backwards compatibility emulation flags that are known never to occur on browsers that support WebAssembly.
     if not shared.Settings.WASM2JS:
       shared.Settings.POLYFILL_OLD_MATH_FUNCTIONS = 0
-      shared.Settings.WORKAROUND_IOS_9_RIGHT_SHIFT_BUG = 0
       shared.Settings.WORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG = 0
 
     forced_stdlibs = []
@@ -2278,6 +2275,19 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   return 0
 
 
+def move_file(src, dst):
+  logging.debug('move: %s -> %s', src, dst)
+  if os.path.isdir(dst):
+    exit_with_error(f'cannot write output file `{dst}`: Is a directory')
+  src = os.path.abspath(src)
+  dst = os.path.abspath(dst)
+  if src == dst:
+    return
+  if dst == os.devnull:
+    return
+  shutil.move(src, dst)
+
+
 def post_link(options, in_wasm, wasm_target, target):
   global final_js
 
@@ -2430,7 +2440,7 @@ def post_link(options, in_wasm, wasm_target, target):
       js_target = unsuffixed(target) + '.js'
 
     # The JS is now final. Move it to its final location
-    safe_move(final_js, js_target)
+    move_file(final_js, js_target)
 
     if not shared.Settings.SINGLE_FILE:
       generated_text_files_with_native_eols += [js_target]
@@ -2907,9 +2917,11 @@ def do_binaryen(target, options, wasm_target):
                                use_closure_compiler=options.use_closure_compiler,
                                debug_info=debug_info,
                                symbols_file=symbols_file)
+
+    shared.configuration.get_temp_files().note(wasm2js)
+
     if shared.Settings.WASM == 2:
       safe_copy(wasm2js, wasm2js_template)
-      shared.try_delete(wasm2js)
 
     if shared.Settings.WASM != 2:
       final_js = wasm2js
@@ -3017,6 +3029,7 @@ else if (typeof exports === 'object')
   exports["%(EXPORT_NAME)s"] = %(EXPORT_NAME)s;
 ''' % {'EXPORT_NAME': shared.Settings.EXPORT_NAME})
 
+  shared.configuration.get_temp_files().note(final_js)
   save_intermediate('modularized')
 
 
@@ -3147,9 +3160,13 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
 
   html_contents = do_replace(shell, '{{{ SCRIPT }}}', script.replacement())
   html_contents = tools.line_endings.convert_line_endings(html_contents, '\n', options.output_eol)
-  # Force UTF-8 output for consistency across platforms and with the web.
-  with open(target, 'wb') as f:
-    f.write(html_contents.encode('utf-8'))
+
+  try:
+    with open(target, 'wb') as f:
+      # Force UTF-8 output for consistency across platforms and with the web.
+      f.write(html_contents.encode('utf-8'))
+  except OSError as e:
+    exit_with_error(f'cannot write output file: {e}')
 
 
 def minify_html(filename):
@@ -3224,7 +3241,7 @@ def generate_worker_js(target, js_target, target_basename):
 
   # compiler output goes in .worker.js file
   else:
-    safe_move(js_target, unsuffixed(js_target) + '.worker.js')
+    move_file(js_target, unsuffixed(js_target) + '.worker.js')
     worker_target_basename = target_basename + '.worker'
     proxy_worker_filename = (shared.Settings.PROXY_TO_WORKER_FILENAME or worker_target_basename) + '.js'
 

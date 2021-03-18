@@ -212,11 +212,7 @@ function allocate(slab, allocator) {
 #endif
 
   if (allocator == ALLOC_STACK) {
-#if DECLARE_ASM_MODULE_EXPORTS
     ret = stackAlloc(slab.length);
-#else
-    ret = (typeof stackAlloc !== 'undefined' ? stackAlloc : null)(slab.length);
-#endif
   } else {
     ret = {{{ makeMalloc('allocate', 'slab.length') }}};
   }
@@ -357,13 +353,6 @@ var __ATPOSTRUN__ = []; // functions called after the main() is called
 
 var runtimeInitialized = false;
 var runtimeExited = false;
-
-#if '___wasm_call_ctors' in IMPLEMENTED_FUNCTIONS
-#if USE_PTHREADS
-if (!ENVIRONMENT_IS_PTHREAD)
-#endif
-__ATINIT__.push({ func: function() { ___wasm_call_ctors() } });
-#endif
 
 function preRun() {
 #if USE_PTHREADS
@@ -970,6 +959,10 @@ function createWasm() {
 #if ASSERTIONS && !PURE_WASI
     assert(wasmTable, "table not found in wasm exports");
 #endif
+#endif
+
+#if '___wasm_call_ctors' in IMPLEMENTED_FUNCTIONS
+    addOnInit(Module['asm']['__wasm_call_ctors']);
 #endif
 
 #if ABORT_ON_WASM_EXCEPTIONS

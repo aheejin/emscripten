@@ -1423,7 +1423,7 @@ int f() {
     self.run_process([EMCC, 'main.cpp', '--embed-file', 'tst', '--exclude-file', '*.exe'])
     self.assertEqual(self.run_js('a.out.js').strip(), '')
 
-  def test_dynamic_link_with_exceptions_and_assetions(self):
+  def test_dylink_exceptions_and_assetions(self):
     # Linking side modules using the STL and exceptions should not abort with
     # "function in Table but not functionsInTableMap" when using ASSERTIONS=2
 
@@ -1456,7 +1456,6 @@ int f() {
       }
       ''')
 
-    self.node_args += ['--experimental-wasm-threads', '--experimental-wasm-bulk-memory']
     self.do_smart_test(
       'main.cpp',
       ['0123456789'],
@@ -1526,7 +1525,8 @@ int f() {
     test(['-lfile'], '') # -l, auto detection from library path
     test([self.in_dir('libdir', 'libfile.so.3.1.4.1.5.9')], '.3.1.4.1.5.9') # handle libX.so.1.2.3 as well
 
-  def test_dynamic_link_pthread_static_data(self):
+  @node_pthreads
+  def test_dylink_pthread_static_data(self):
     # Test that a side module uses the same static data region for global objects across all threads
 
     # A side module with a global object with a constructor.
@@ -1563,7 +1563,6 @@ int f() {
       }
       ''')
 
-    self.node_args += ['--experimental-wasm-threads', '--experimental-wasm-bulk-memory']
     self.do_smart_test(
       'main.cpp',
       ['123'],
@@ -6704,9 +6703,20 @@ int main() {
     ret = self.expect_fail([EMCC, test_file('hello_world.c'), '-s', 'MAXIMUM_MEMORY=34603009']) # 33MB + 1 byte
     self.assertContained('MAXIMUM_MEMORY must be a multiple of WebAssembly page size (64KiB)', ret)
 
-  def test_invalid_output_dir(self):
+  def test_dasho_invalid_dir(self):
     ret = self.expect_fail([EMCC, test_file('hello_world.c'), '-o', os.path.join('NONEXISTING_DIRECTORY', 'out.js')])
     self.assertContained('specified output file (NONEXISTING_DIRECTORY%sout.js) is in a directory that does not exist' % os.path.sep, ret)
+
+  def test_dasho_is_dir(self):
+    ret = self.expect_fail([EMCC, test_file('hello_world.c'), '-o', '.'])
+    self.assertContained('emcc: error: cannot write output file `.`: Is a directory', ret)
+
+    ret = self.expect_fail([EMCC, test_file('hello_world.c'), '-o', '.', '--oformat=wasm'])
+    self.assertContained('wasm-ld: error: cannot open output file .: Is a directory', ret)
+
+    ret = self.expect_fail([EMCC, test_file('hello_world.c'), '-o', '.', '--oformat=html'])
+    self.assertContained('emcc: error: cannot write output file:', ret)
+    self.assertContained("Is a directory: '.'", ret)
 
   def test_binaryen_ctors(self):
     # ctor order must be identical to js builds, deterministically
@@ -7372,15 +7382,14 @@ end
     create_file('file1', ' ')
     self.run_process([EMAR, 'cr', 'file1.a', 'file1', 'file1'])
 
-  # Temporarily disabled to allow this llvm change to roll
-  # https://reviews.llvm.org/D69665
-  @no_windows('Temporarily disabled under windows')
   def test_emar_response_file(self):
     # Test that special character such as single quotes in filenames survive being
     # sent via response file
     create_file("file'1", ' ')
     create_file("file'2", ' ')
-    building.emar('cr', 'libfoo.a', ("file'1", "file'2"))
+    create_file("hyvää päivää", ' ')
+    create_file("snowman freezes covid ☃ 🦠", ' ')
+    building.emar('cr', 'libfoo.a', ("file'1", "file'2", "hyvää päivää", "snowman freezes covid ☃ 🦠"))
 
   def test_archive_empty(self):
     # This test added because we had an issue with the AUTO_ARCHIVE_INDEXES failing on empty
@@ -7469,9 +7478,17 @@ end
   def test_closure_externs(self):
     self.run_process([EMCC, test_file('hello_world.c'), '--closure=1', '--pre-js', test_file('test_closure_externs_pre_js.js'), '--closure-args', '--externs "' + test_file('test_closure_externs.js') + '"'])
 
+  # Tests that it is possible to enable the Closure compiler via --closure=1 even if any of the input files reside in a path with unicode characters.
+  def test_closure_cmdline_utf8_chars(self):
+    test = "☃ äö Ć € ' 🦠.c"
+    shutil.copyfile(test_file('hello_world.c'), test)
+    externs = '💩' + test
+    create_file(externs, '')
+    self.run_process([EMCC, test, '--closure=1', '--closure-args', '--externs "' + externs + '"'])
+
   def test_toolchain_profiler(self):
     environ = os.environ.copy()
-    environ['EM_PROFILE_TOOLCHAIN'] = '1'
+    environ['EMPROFILE'] = '1'
     # replaced subprocess functions should not cause errors
     self.run_process([EMCC, test_file('hello_world.c')], env=environ)
 
@@ -8430,6 +8447,7 @@ int main () {
                                '-s', 'GL_SUPPORT_EXPLICIT_SWAP_CONTROL=0',
                                '-s', 'GL_POOL_TEMP_BUFFERS=0',
                                '-s', 'MIN_CHROME_VERSION=58',
+                               '-s', 'GL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0',
                                '-s', 'NO_FILESYSTEM',
                                '--output_eol', 'linux',
                                '-Oz',
@@ -8862,12 +8880,13 @@ int main(void) {
   def test_asan_pthread_stubs(self):
     self.do_smart_test(test_file('other', 'test_asan_pthread_stubs.c'), emcc_args=['-fsanitize=address', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=314572800'])
 
+  @node_pthreads
   def test_proxy_to_pthread_stack(self):
-    self.node_args += ['--experimental-wasm-threads', '--experimental-wasm-bulk-memory']
+    # Check that the proxied main gets run with TOTAL_STACK setting and not
+    # DEFAULT_PTHREAD_STACK_SIZE.
     self.do_smart_test(test_file('other', 'test_proxy_to_pthread_stack.c'),
                        ['success'],
-                       engine=config.NODE_JS,
-                       emcc_args=['-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-s', 'TOTAL_STACK=1048576'])
+                       emcc_args=['-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-s', 'DEFAULT_PTHREAD_STACK_SIZE=64kb', '-s', 'TOTAL_STACK=128kb'])
 
   @parameterized({
     'async': ['-s', 'WASM_ASYNC_COMPILATION'],
@@ -9855,7 +9874,7 @@ exec "$@"
       ''')
     self.run_process([EMCC, test_file('hello_world.c'), '--js-library=lib.js', '-s', 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$__foo]'])
 
-  def test_wasm2js_no_dynamic_linking(self):
+  def test_wasm2js_no_dylink(self):
     for arg in ['-sMAIN_MODULE', '-sSIDE_MODULE', '-sRELOCATABLE']:
       err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sWASM=0', arg])
       self.assertContained('WASM2JS is not compatible with relocatable output', err)
@@ -10010,6 +10029,13 @@ exec "$@"
     self.run_process([PYTHON, path_from_root('tools/gen_struct_info.py'), '-o', 'out.json'])
     self.assertFileContents(test_file('reference_struct_info.json'), open('out.json').read())
 
+  def test_gen_struct_info_env(self):
+    # gen_struct_info.py builds C code in a very particlar way.  We don't want EMMAKEN_CFLAGS to
+    # be injected which could cause it to fail.
+    # For example -O2 causes printf -> iprintf which will fail with undefined symbol iprintf.
+    with env_modify({'EMMAKEN_CFLAGS': '-O2 BAD_ARG'}):
+      self.run_process([PYTHON, path_from_root('tools/gen_struct_info.py'), '-o', 'out.json'])
+
   def test_relocatable_limited_exports(self):
     # Building with RELOCATABLE should *not* automatically export all sybmols.
     self.run_process([EMCC, test_file('hello_world.c'), '-sRELOCATABLE', '-o', 'out.wasm'])
@@ -10118,3 +10144,34 @@ exec "$@"
   def test_em_js_side_module(self):
     err = self.expect_fail([EMCC, '-sSIDE_MODULE', test_file('core/test_em_js.cpp')])
     self.assertContained('EM_JS is not supported in side modules', err)
+
+  # On Windows maximum command line length is 32767 characters. Create such a long build line by linking together
+  # several .o files to test that emcc internally uses response files properly when calling llvmn-nm and wasm-ld.
+  @is_slow_test
+  def test_windows_long_link_response_file(self):
+    decls = ''
+    calls = ''
+    files = []
+
+    def create_o(name, i):
+      nonlocal decls, calls, files
+      f = name + '.c'
+      create_file(f, 'int %s() { return %d; }' % (name, i))
+      files += [f]
+      decls += 'int %s();' % name
+      calls += 'value += %s();' % name
+
+    count = 1000
+    for i in range(count):
+      name = 'a' + str(i)
+      for j in range(5):
+        name += name
+      create_o(name, i)
+
+    main = '#include<stdio.h>\n%s int main() { int value = 0; %s printf("%%d\\n", value); }' % (decls, calls)
+    open('main.c', 'w').write(main)
+
+    assert(sum(len(f) for f in files) > 32767)
+
+    self.run_process(building.get_command_with_possible_response_file([EMCC, 'main.c'] + files))
+    self.assertContained(str(count * (count - 1) // 2), self.run_js('a.out.js'))
