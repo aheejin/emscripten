@@ -737,7 +737,13 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
 
     libc_files += files_in_path(
         path_components=['system', 'lib', 'libc'],
-        filenames=['extras.c', 'wasi-helpers.c', 'emscripten_pthread.c'])
+        filenames=[
+          'extras.c',
+          'wasi-helpers.c',
+          'emscripten_pthread.c',
+          'emscripten_get_heap_size.c',
+          'emscripten_resize_heap.c',
+        ])
 
     libc_files += files_in_path(
         path_components=['system', 'lib', 'pthread'],
@@ -1659,7 +1665,7 @@ class Ports(object):
   name_cache = set()
 
   @staticmethod
-  def fetch_project(name, url, subdir, is_tarbz2=False, sha512hash=None):
+  def fetch_project(name, url, subdir, sha512hash=None):
     # To compute the sha512 hash, run `curl URL | sha512sum`.
     fullname = os.path.join(Ports.get_dir(), name)
 
@@ -1701,7 +1707,7 @@ class Ports(object):
               Ports.clear_project_build(name)
             return
 
-    if is_tarbz2:
+    if url.endswith('.tar.bz2'):
       fullpath = fullname + '.tar.bz2'
     elif url.endswith('.tar.gz'):
       fullpath = fullname + '.tar.gz'
@@ -1733,7 +1739,7 @@ class Ports(object):
       open(fullpath, 'wb').write(data)
 
     def check_tag():
-      if is_tarbz2:
+      if url.endswith('.tar.bz2'):
         names = tarfile.open(fullpath, 'r:bz2').getnames()
       elif url.endswith('.tar.gz'):
         names = tarfile.open(fullpath, 'r:gz').getnames()
