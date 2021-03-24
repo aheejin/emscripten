@@ -234,7 +234,6 @@ class EmccOptions(object):
     self.profiling_funcs = False
     self.tracing = False
     self.emit_symbol_map = False
-    self.llvm_opts = None
     self.use_closure_compiler = None
     self.closure_args = []
     self.js_transform = None
@@ -1010,11 +1009,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     if options.thread_profiler:
       options.post_js += open(shared.path_from_root('src', 'threadprofiler.js')).read() + '\n'
-
-    if options.llvm_opts is None:
-      options.llvm_opts = LLVM_OPT_LEVEL[shared.Settings.OPT_LEVEL]
-    elif type(options.llvm_opts) == int:
-      options.llvm_opts = ['-O%d' % options.llvm_opts]
 
     if options.memory_init_file is None:
       options.memory_init_file = shared.Settings.OPT_LEVEL >= 2
@@ -2244,7 +2238,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     # link in ports and system libraries, if necessary
     if not shared.Settings.SIDE_MODULE:
       # Ports are always linked into the main module, never the size module.
-      extra_files_to_link += system_libs.get_ports(shared.Settings)
+      extra_files_to_link += system_libs.get_ports_libs(shared.Settings)
     if '-nostdlib' not in newargs and '-nodefaultlibs' not in newargs:
       link_as_cxx = run_via_emxx
       # Traditionally we always link as C++.  For compatibility we continue to do that,
@@ -2560,21 +2554,19 @@ def parse_args(newargs):
       # Let -O default to -O2, which is what gcc does.
       options.requested_level = arg[2:] or '2'
       if options.requested_level == 's':
-        options.llvm_opts = ['-Os']
         options.requested_level = 2
         shared.Settings.SHRINK_LEVEL = 1
-        settings_changes.append('INLINING_LIMIT=50')
+        settings_changes.append('INLINING_LIMIT=1')
       elif options.requested_level == 'z':
-        options.llvm_opts = ['-Oz']
         options.requested_level = 2
         shared.Settings.SHRINK_LEVEL = 2
-        settings_changes.append('INLINING_LIMIT=25')
+        settings_changes.append('INLINING_LIMIT=1')
       shared.Settings.OPT_LEVEL = validate_arg_level(options.requested_level, 3, 'Invalid optimization level: ' + arg, clamp=True)
     elif check_arg('--js-opts'):
       logger.warning('--js-opts ignored when using llvm backend')
       consume_arg()
     elif check_arg('--llvm-opts'):
-      options.llvm_opts = parse_value(consume_arg(), expect_list=True)
+      diagnostics.warning('deprecated', '--llvm-opts is deprecated.  All non-emcc args are passed through to clang.')
     elif arg.startswith('-flto'):
       if '=' in arg:
         shared.Settings.LTO = arg.split('=')[1]
