@@ -4602,6 +4602,14 @@ res64 - external 64\n''', header='''
       expected='3 hello world!',
       need_reverse=False)
 
+  @disabled('https://github.com/emscripten-core/emscripten/issues/13773')
+  def test_dylink_weak(self):
+    # Verify that weakly symbols can be defined in both side module and main
+    # module
+    main = test_file('core', 'test_dylink_weak_main.c')
+    side = test_file('core', 'test_dylink_weak_side.c')
+    self.dylink_testf(main, side, force_c=True, need_reverse=False)
+
   def test_random(self):
     src = r'''#include <stdlib.h>
 #include <stdio.h>
@@ -5731,6 +5739,11 @@ int main(void) {
         ('new Structy[10]', 'delete[]'),
       ]:
         self.do_run(src.replace('{{{ NEW }}}', new).replace('{{{ DELETE }}}', delete), '*1,0*')
+
+  # Tests that a large allocation should gracefully fail
+  def test_dlmalloc_large(self):
+    self.emcc_args += ['-s', 'ABORTING_MALLOC=0', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'MAXIMUM_MEMORY=128MB']
+    self.do_runf(path_from_root('tests', 'dlmalloc_test_large.c'), '0 0 0 1')
 
   @no_asan('asan also changes malloc, and that ends up linking in new twice')
   def test_dlmalloc_partial(self):

@@ -6940,7 +6940,7 @@ int main() {
     'O2': (['-O2'], [], ['waka'],  2060), # noqa
     'O3': (['-O3'], [], [],        1792), # noqa; in -O3, -Os and -Oz we metadce
     'Os': (['-Os'], [], [],        1781), # noqa
-    'Oz': (['-Oz'], [], [],        1777), # noqa
+    'Oz': (['-Oz'], [], [],        1305), # noqa
     # finally, check what happens when we export nothing. wasm should be almost empty
     'export_nothing':
           (['-Os', '-s', 'EXPORTED_FUNCTIONS=[]'],    [], [],     55), # noqa
@@ -7292,7 +7292,7 @@ int main() {
     for std in [[], ['-std=c89']]:
       for directory, headers in [
         # This directory has also bind.h, val.h and wire.h, which require C++11
-        ('emscripten', ['dom_pk_codes.h', 'em_asm.h', 'emscripten.h', 'fetch.h', 'html5.h', 'key_codes.h', 'threading.h', 'trace.h']),
+        ('emscripten', ['asmfs.h', 'dom_pk_codes.h', 'em_asm.h', 'em_js.h', 'em_macros.h', 'em_math.h', 'emmalloc.h', 'emscripten.h', 'exports.h', 'fetch.h', 'fiber.h', 'heap.h', 'html5.h', 'html5_webgl.h', 'html5_webgpu.h', 'key_codes.h', 'posix_socket.h', 'stack.h', 'threading.h', 'trace.h', 'websocket.h']),
         ('AL', ['al.h', 'alc.h']),
         ('EGL', ['egl.h', 'eglplatform.h']),
         ('GL', ['freeglut_std.h', 'gl.h', 'glew.h', 'glfw.h', 'glu.h', 'glut.h']),
@@ -9595,18 +9595,19 @@ int main() {
 
   @parameterized({
     '': ([],),
-    'minimal': (['-s', 'MINIMAL_RUNTIME'],),
+    'minimal': (['-s', 'MINIMAL_RUNTIME', '-s', 'SUPPORT_ERRNO'],),
   })
   def test_support_errno(self, args):
     self.emcc_args += args
     src = test_file('core', 'test_support_errno.c')
     output = test_file('core', 'test_support_errno.out')
+
     self.do_run_from_file(src, output)
     size_default = os.path.getsize('test_support_errno.js')
 
     # Run the same test again but with SUPPORT_ERRNO disabled.  This time we don't expect errno
     # to be set after the failing syscall.
-    self.set_setting('SUPPORT_ERRNO', 0)
+    self.emcc_args += ['-s', 'SUPPORT_ERRNO=0']
     output = test_file('core', 'test_support_errno_disabled.out')
     self.do_run_from_file(src, output)
 
