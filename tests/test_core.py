@@ -25,7 +25,7 @@ from tools import shared, building, config
 from runner import RunnerCore, path_from_root, requires_native_clang, test_file
 from runner import skip_if, needs_dylink, no_windows, is_slow_test, create_file, parameterized
 from runner import env_modify, with_env_modify, disabled, node_pthreads
-from runner import NON_ZERO
+from runner import NON_ZERO, WEBIDL_BINDER
 import clang_native
 
 # decorators for limiting which modes a test can run in
@@ -1808,9 +1808,7 @@ int main() {
     self.banned_js_engines = [config.V8_ENGINE] # timer limitations in v8 shell
     # needs to flush stdio streams
     self.set_setting('EXIT_RUNTIME')
-
-    if self.run_name == 'asm2':
-      self.emcc_args += ['--closure=1'] # Use closure here for some additional coverage
+    self.maybe_closure()
     self.do_runf(test_file('emscripten_get_now.cpp'), 'Timer resolution is good')
 
   def test_emscripten_get_compiler_setting(self):
@@ -4739,12 +4737,6 @@ Have even and odd!
     self.do_core_test('test_strstr.c')
 
   def test_fnmatch(self):
-    # Run one test without assertions, for additional coverage
-    if self.run_name == 'asm2m':
-      i = self.emcc_args.index('ASSERTIONS=1')
-      assert i > 0 and self.emcc_args[i - 1] == '-s'
-      self.emcc_args[i] = 'ASSERTIONS=0'
-      print('flip assertions off')
     self.do_core_test('test_fnmatch.cpp')
 
   def test_sscanf(self):
@@ -5822,11 +5814,7 @@ return malloc(size);
   def test_cubescript(self):
     # uses register keyword
     self.emcc_args += ['-std=c++03', '-Wno-dynamic-class-memaccess']
-    if self.run_name == 'asm3':
-      self.emcc_args += ['--closure=1'] # Use closure here for some additional coverage
-
-    self.emcc_args = [x for x in self.emcc_args if x != '-g'] # remove -g, so we have one test without it by default
-
+    self.maybe_closure()
     self.emcc_args += ['-I', test_file('third_party', 'cubescript')]
 
     def test():
@@ -5946,7 +5934,6 @@ return malloc(size);
   # Tests invoking the SIMD API via x86 SSE4.2 nmmintrin.h header (_mm_x() functions)
   @wasm_simd
   @requires_native_clang
-  @unittest.skip('recent SIMD changes require a binaryen fix')
   def test_sse4_2(self):
     src = test_file('sse', 'test_sse4_2.cpp')
     self.run_process([shared.CLANG_CXX, src, '-msse4.2', '-Wno-argument-outside-range', '-o', 'test_sse4_2', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
@@ -6075,7 +6062,7 @@ return malloc(size);
     self.maybe_closure()
 
     self.emcc_args.append('-Wno-shift-negative-value')
-    if self.run_name == 'asm2g':
+    if '-g' in self.emcc_args:
       self.emcc_args.append('-g4') # more source maps coverage
 
     if use_cmake:
@@ -6256,30 +6243,13 @@ return malloc(size);
   def test_fuzz(self):
     self.emcc_args += ['-I' + test_file('fuzz', 'include'), '-w']
 
-    skip_lto_tests = [
-      # LLVM LTO bug
-      '19.c', '18.cpp',
-      # puts exists before LTO, but is not used; LTO cleans it out, but then creates uses to it (printf=>puts) XXX https://llvm.org/bugs/show_bug.cgi?id=23814
-      '23.cpp'
-    ]
-
     def run_all(x):
       print(x)
       for name in sorted(glob.glob(test_file('fuzz', '*.c')) + glob.glob(test_file('fuzz', '*.cpp'))):
-        # if os.path.basename(name) != '4.c':
-        #   continue
         if 'newfail' in name:
           continue
         if os.path.basename(name).startswith('temp_fuzzcode'):
           continue
-        # pnacl legalization issue, see https://code.google.com/p/nativeclient/issues/detail?id=4027
-        if x == 'lto' and self.run_name in ['default'] and os.path.basename(name) in ['8.c']:
-          continue
-        if x == 'lto' and self.run_name == 'default' and os.path.basename(name) in skip_lto_tests:
-          continue
-        if x == 'lto' and os.path.basename(name) in ['21.c']:
-          continue # LLVM LTO bug
-
         print(name)
         if name.endswith('.cpp'):
           self.emcc_args.append('-std=c++03')
@@ -6986,17 +6956,13 @@ someweirdtext
   })
   @sync
   def test_webidl(self, mode, allow_memory_growth):
-    if self.run_name == 'asm2':
-      self.emcc_args += ['--closure=1', '-g1'] # extra testing
+    if self.maybe_closure():
       # avoid closure minified names competing with our test code in the global name space
       self.set_setting('MODULARIZE')
 
     # Force IDL checks mode
-    os.environ['IDL_CHECKS'] = mode
-
-    self.run_process([PYTHON, path_from_root('tools', 'webidl_binder.py'),
-                     test_file('webidl', 'test.idl'),
-                     'glue'])
+    with env_modify({'IDL_CHECKS': mode}):
+      self.run_process([WEBIDL_BINDER, test_file('webidl', 'test.idl'), 'glue'])
     self.assertExists('glue.cpp')
     self.assertExists('glue.js')
 
@@ -7009,7 +6975,7 @@ someweirdtext
     def post(filename):
       with open(filename, 'a') as f:
         f.write('\n\n')
-        if self.run_name == 'asm2':
+        if self.get_setting('MODULARIZE'):
           f.write('var TheModule = Module();\n')
         else:
           f.write('var TheModule = Module;\n')
