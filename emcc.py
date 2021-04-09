@@ -386,7 +386,7 @@ def apply_settings(changes):
 
     if key == 'EXPORTED_FUNCTIONS':
       # used for warnings in emscripten.py
-      shared.Settings.USER_EXPORTED_FUNCTIONS = shared.Settings.EXPORTED_FUNCTIONS[:]
+      shared.Settings.USER_EXPORTED_FUNCTIONS = shared.Settings.EXPORTED_FUNCTIONS.copy()
 
     # TODO(sbc): Remove this legacy way.
     if key == 'WASM_OBJECT_FILES':
@@ -972,7 +972,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   with ToolchainProfiler.profile_block('parse arguments and setup'):
     ## Parse args
 
-    newargs = list(args)
+    newargs = args.copy()
 
     # Scan and strip emscripten specific cmdline warning flags.
     # This needs to run before other cmdline flags have been parsed, so that
@@ -1016,9 +1016,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       options.memory_init_file = shared.Settings.OPT_LEVEL >= 2
 
     # TODO: support source maps with js_transform
-    if options.js_transform and shared.Settings.DEBUG_LEVEL >= 4:
+    if options.js_transform and shared.Settings.GENERATE_SOURCE_MAP:
       logger.warning('disabling source maps because a js transform is being done')
-      shared.Settings.DEBUG_LEVEL = 3
+      shared.Settings.GENERATE_SOURCE_MAP = 0
 
     explicit_settings_changes, newargs = parse_s_args(newargs)
     settings_changes += explicit_settings_changes
@@ -1314,7 +1314,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       exit_with_error('no input files')
 
     # Note the exports the user requested
-    building.user_requested_exports = shared.Settings.EXPORTED_FUNCTIONS[:]
+    building.user_requested_exports = shared.Settings.EXPORTED_FUNCTIONS.copy()
 
     def default_setting(name, new_default):
       if name not in settings_map:
@@ -1853,7 +1853,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if shared.Settings.WASM_BIGINT:
       shared.Settings.LEGALIZE_JS_FFI = 0
 
-    shared.Settings.GENERATE_SOURCE_MAP = shared.Settings.DEBUG_LEVEL >= 4 and not shared.Settings.SINGLE_FILE
+    if shared.Settings.SINGLE_FILE:
+      shared.Settings.GENERATE_SOURCE_MAP = 0
 
     if options.use_closure_compiler == 2 and not shared.Settings.WASM2JS:
       exit_with_error('closure compiler mode 2 assumes the code is asm.js, so not meaningful for wasm')
@@ -1957,7 +1958,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if shared.Settings.LINKABLE:
         exit_with_error('ASan does not support dynamic linking')
 
-    if sanitize and '-g4' in args:
+    if sanitize and shared.Settings.GENERATE_SOURCE_MAP:
       shared.Settings.LOAD_SOURCE_MAP = 1
 
     if shared.Settings.LOAD_SOURCE_MAP and shared.Settings.USE_PTHREADS:
@@ -2618,8 +2619,11 @@ def parse_args(newargs):
         if shared.Settings.DEBUG_LEVEL < 3:
           newargs[i] = ''
         else:
-          # for 3+, report -g to clang as -g4 is not accepted
+          # for 3+, report -g to clang as -g4 etc. are not accepted
           newargs[i] = '-g'
+          if shared.Settings.DEBUG_LEVEL == 4:
+            shared.Settings.GENERATE_SOURCE_MAP = 1
+            diagnostics.warning('deprecated', 'please replace -g4 with -gsource-map')
       else:
         if requested_level.startswith('force_dwarf'):
           exit_with_error('gforce_dwarf was a temporary option and is no longer necessary (use -g)')
@@ -2635,6 +2639,9 @@ def parse_args(newargs):
             shared.Settings.SEPARATE_DWARF = requested_level.split('=')[1]
           else:
             shared.Settings.SEPARATE_DWARF = True
+        elif requested_level == 'source-map':
+          shared.Settings.GENERATE_SOURCE_MAP = 1
+          newargs[i] = '-g'
         # a non-integer level can be something like -gline-tables-only. keep
         # the flag for the clang frontend to emit the appropriate DWARF info.
         # set the emscripten debug level to 3 so that we do not remove that
@@ -3288,25 +3295,21 @@ def process_libraries(libs, lib_dirs, temp_files):
   libraries = []
   consumed = []
   suffixes = STATICLIB_ENDINGS + DYNAMICLIB_ENDINGS
-  prefixes = ('', 'lib')
 
   # Find library files
   for i, lib in libs:
     logger.debug('looking for library "%s"', lib)
 
     found = False
-    for prefix in prefixes:
-      for suff in suffixes:
-        name = prefix + lib + suff
-        for lib_dir in lib_dirs:
-          path = os.path.join(lib_dir, name)
-          if os.path.exists(path):
-            logger.debug('found library "%s" at %s', lib, path)
-            temp_files.append((i, path))
-            consumed.append(i)
-            found = True
-            break
-        if found:
+    for suff in suffixes:
+      name = 'lib' + lib + suff
+      for lib_dir in lib_dirs:
+        path = os.path.join(lib_dir, name)
+        if os.path.exists(path):
+          logger.debug('found library "%s" at %s', lib, path)
+          temp_files.append((i, path))
+          consumed.append(i)
+          found = True
           break
       if found:
         break
