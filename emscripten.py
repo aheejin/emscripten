@@ -116,10 +116,18 @@ def update_settings_glue(metadata, DEBUG):
 
   settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += metadata['globalImports']
 
-  all_exports = metadata['exports'] + list(metadata['namedGlobals'].keys())
-  settings.WASM_EXPORTS = [asmjs_mangle(x) for x in all_exports]
+  settings.WASM_EXPORTS = metadata['exports'] + list(metadata['namedGlobals'].keys())
+  # Store function exports so that Closure and metadce can track these even in
+  # -s DECLARE_ASM_MODULE_EXPORTS=0 builds.
+  settings.WASM_FUNCTION_EXPORTS = metadata['exports']
 
-  settings.BINARYEN_FEATURES = metadata['features']
+  # start with the MVP features, and add any detected features.
+  settings.BINARYEN_FEATURES = ['--mvp-features'] + metadata['features']
+  if settings.USE_PTHREADS:
+    assert '--enable-threads' in settings.BINARYEN_FEATURES
+  if settings.MEMORY64:
+    assert '--enable-memory64' in settings.BINARYEN_FEATURES
+
   if settings.RELOCATABLE:
     # When building relocatable output (e.g. MAIN_MODULE) the reported table
     # size does not include the reserved slot at zero for the null pointer.
@@ -127,15 +135,11 @@ def update_settings_glue(metadata, DEBUG):
     if settings.INITIAL_TABLE == -1:
       settings.INITIAL_TABLE = metadata['tableSize'] + 1
 
-  settings.HAS_MAIN = settings.MAIN_MODULE or settings.STANDALONE_WASM or '_main' in settings.WASM_EXPORTS
+  settings.HAS_MAIN = settings.MAIN_MODULE or settings.STANDALONE_WASM or 'main' in settings.WASM_EXPORTS
 
   # When using dynamic linking the main function might be in a side module.
   # To be safe assume they do take input parametes.
   settings.MAIN_READS_PARAMS = metadata['mainReadsParams'] or settings.MAIN_MODULE
-
-  # Store exports for Closure compiler to be able to track these as globals in
-  # -s DECLARE_ASM_MODULE_EXPORTS=0 builds.
-  settings.MODULE_EXPORTS = [(asmjs_mangle(f), f) for f in metadata['exports']]
 
   if settings.STACK_OVERFLOW_CHECK and not settings.SIDE_MODULE:
     settings.EXPORTED_RUNTIME_METHODS += ['writeStackCookie', 'checkStackCookie']
@@ -187,7 +191,7 @@ def set_memory(static_bump):
 def report_missing_symbols(pre):
   # the initial list of missing functions are that the user explicitly exported
   # but were not implemented in compiled code
-  missing = set(settings.USER_EXPORTED_FUNCTIONS) - set(settings.WASM_EXPORTS)
+  missing = set(settings.USER_EXPORTED_FUNCTIONS) - set(asmjs_mangle(e) for e in settings.WASM_EXPORTS)
 
   for requested in sorted(missing):
     if (f'function {requested}(') not in pre:
@@ -205,7 +209,7 @@ def report_missing_symbols(pre):
     # maximum compatibility.
     return
 
-  if settings.EXPECT_MAIN and '_main' not in settings.WASM_EXPORTS:
+  if settings.EXPECT_MAIN and 'main' not in settings.WASM_EXPORTS:
     # For compatibility with the output of wasm-ld we use the same wording here in our
     # error message as if wasm-ld had failed (i.e. in LLD_REPORT_UNDEFINED mode).
     exit_with_error('entry symbol not defined (pass --no-entry to suppress): main')
@@ -379,7 +383,7 @@ def finalize_wasm(infile, outfile, memfile, DEBUG):
   building.save_intermediate(infile, 'base.wasm')
   # tell binaryen to look at the features section, and if there isn't one, to use MVP
   # (which matches what llvm+lld has given us)
-  args = ['--detect-features', '--minimize-wasm-changes']
+  args = ['--minimize-wasm-changes']
 
   # if we don't need to modify the wasm, don't tell finalize to emit a wasm file
   modify_wasm = False

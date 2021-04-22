@@ -57,11 +57,7 @@ from tools.settings import settings
 if __name__ == '__main__':
   ToolchainProfiler.record_process_start()
 
-try:
-  from urllib.parse import quote
-except ImportError:
-  # Python 2 compatibility
-  from urllib import quote
+from urllib.parse import quote
 
 logger = logging.getLogger('emcc')
 
@@ -641,7 +637,7 @@ def process_dynamic_libs(dylibs):
 
     exports = webassembly.get_exports(dylib)
     for export in exports:
-      settings.SIDE_MODULE_EXPORTS.append(shared.asmjs_mangle(export.name))
+      settings.SIDE_MODULE_EXPORTS.append(export.name)
 
 
 def unmangle_symbols_from_cmdline(symbols):
@@ -1443,12 +1439,14 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         settings.EXPORT_ALL = 1
       settings.RELOCATABLE = 1
 
+    if settings.MAIN_MODULE:
+      settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$getDylinkMetadata']
+
     if settings.RELOCATABLE:
       settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += [
           '$reportUndefinedSymbols',
           '$relocateExports',
           '$GOTHandler',
-          '$getDylinkMetadata',
           '__heap_base',
           '__stack_pointer',
       ]
@@ -1630,7 +1628,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     if settings.SIDE_MODULE and settings.GLOBAL_BASE != -1:
       exit_with_error('Cannot set GLOBAL_BASE when building SIDE_MODULE')
 
-    if settings.RELOCATABLE:
+    if settings.RELOCATABLE or settings.LINKABLE:
       default_setting('ERROR_ON_UNDEFINED_SYMBOLS', 0)
       default_setting('WARN_ON_UNDEFINED_SYMBOLS', 0)
 
@@ -2904,13 +2902,12 @@ def do_binaryen(target, options, wasm_target):
                           wasm_target,
                           args=passes,
                           debug=intermediate_debug_info)
-  else:
+  elif strip_debug or strip_producers:
     # we are not running wasm-opt. if we need to strip certain sections
     # then do so using llvm-objcopy which is fast and does not rewrite the
     # code (which is better for debug info)
-    if strip_debug or strip_producers:
-      building.save_intermediate(wasm_target, 'pre-strip.wasm')
-      building.strip(wasm_target, wasm_target, debug=strip_debug, producers=strip_producers)
+    building.save_intermediate(wasm_target, 'pre-strip.wasm')
+    building.strip(wasm_target, wasm_target, debug=strip_debug, producers=strip_producers)
 
   if settings.EVAL_CTORS:
     building.save_intermediate(wasm_target, 'pre-ctors.wasm')

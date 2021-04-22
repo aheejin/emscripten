@@ -641,13 +641,6 @@ def parse_symbols(output):
   return ObjectFileInfo(0, None, set(defs), set(undefs), set(commons))
 
 
-def emcc(filename, args=[], output_filename=None, stdout=None, stderr=None, env=None):
-  if output_filename is None:
-    output_filename = filename + '.o'
-  try_delete(output_filename)
-  run_process([EMCC, filename] + args + ['-o', output_filename], stdout=stdout, stderr=stderr, env=env)
-
-
 def emar(action, output_filename, filenames, stdout=None, stderr=None, env=None):
   try_delete(output_filename)
   response_filename = response_file.create_response_file(filenames, TEMP_DIR)
@@ -789,9 +782,9 @@ def closure_compiler(filename, pretty, advanced=True, extra_closure_args=None):
     # Closure compiler needs to know about all exports that come from the wasm module, because to optimize for small code size,
     # the exported symbols are added to global scope via a foreach loop in a way that evades Closure's static analysis. With an explicit
     # externs file for the exports, Closure is able to reason about the exports.
-    if settings.MODULE_EXPORTS and not settings.DECLARE_ASM_MODULE_EXPORTS:
+    if settings.WASM_FUNCTION_EXPORTS and not settings.DECLARE_ASM_MODULE_EXPORTS:
       # Generate an exports file that records all the exported symbols from the wasm module.
-      module_exports_suppressions = '\n'.join(['/**\n * @suppress {duplicate, undefinedVars}\n */\nvar %s;\n' % i for i, j in settings.MODULE_EXPORTS])
+      module_exports_suppressions = '\n'.join(['/**\n * @suppress {duplicate, undefinedVars}\n */\nvar %s;\n' % asmjs_mangle(i) for i in settings.WASM_FUNCTION_EXPORTS])
       exports_file = configuration.get_temp_files().get('_module_exports.js')
       exports_file.write(module_exports_suppressions.encode())
       exports_file.close()
@@ -957,22 +950,9 @@ def metadce(js_file, wasm_file, minify_whitespace, debug_info):
   logger.debug('running meta-DCE')
   temp_files = configuration.get_temp_files()
   # first, get the JS part of the graph
-  extra_info = '{ "exports": [' + ','.join(map(lambda x: '["' + x[0] + '","' + x[1] + '"]', settings.MODULE_EXPORTS)) + ']}'
+  extra_info = '{ "exports": [' + ','.join(f'["{asmjs_mangle(x)}", "{x}"]' for x in settings.WASM_FUNCTION_EXPORTS) + ']}'
   txt = acorn_optimizer(js_file, ['emitDCEGraph', 'noPrint'], return_output=True, extra_info=extra_info)
   graph = json.loads(txt)
-  # add exports based on the backend output, that are not present in the JS
-  if not settings.DECLARE_ASM_MODULE_EXPORTS:
-    exports = set()
-    for item in graph:
-      if 'export' in item:
-        exports.add(item['export'])
-    for export, unminified in settings.MODULE_EXPORTS:
-      if export not in exports:
-        graph.append({
-          'export': export,
-          'name': 'emcc$export$' + export,
-          'reaches': []
-        })
   # ensure that functions expected to be exported to the outside are roots
   for item in graph:
     if 'export' in item:
@@ -1389,14 +1369,12 @@ def emit_wasm_source_map(wasm_file, map_file, final_wasm):
 
 
 def get_binaryen_feature_flags():
-  # start with the MVP features, add the rest as needed
-  ret = ['--mvp-features']
-  if settings.USE_PTHREADS:
-    ret += ['--enable-threads']
-  if settings.MEMORY64:
-    ret += ['--enable-memory64']
-  ret += settings.BINARYEN_FEATURES
-  return ret
+  # settings.BINARYEN_FEATURES is empty unless features have been extracted by
+  # wasm-emscripten-finalize already.
+  if settings.BINARYEN_FEATURES:
+    return settings.BINARYEN_FEATURES
+  else:
+    return ['--detect-features']
 
 
 def check_binaryen(bindir):
@@ -1466,8 +1444,7 @@ def run_binaryen_command(tool, infile, outfile=None, args=[], debug=False, stdou
   if debug:
     cmd += ['-g'] # preserve the debug info
   # if the features are not already handled, handle them
-  if '--detect-features' not in cmd:
-    cmd += get_binaryen_feature_flags()
+  cmd += get_binaryen_feature_flags()
   # if we are emitting a source map, every time we load and save the wasm
   # we must tell binaryen to update it
   if settings.GENERATE_SOURCE_MAP and outfile:
