@@ -3,6 +3,8 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
+from .toolchain_profiler import ToolchainProfiler
+
 import glob
 import hashlib
 import itertools
@@ -12,7 +14,6 @@ import shutil
 import sys
 from glob import iglob
 
-from .toolchain_profiler import ToolchainProfiler
 from . import shared, building, ports, config, utils
 from . import deps_info, tempfiles
 from . import diagnostics
@@ -730,7 +731,15 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
     # Allowed files from ignored modules
     libc_files += files_in_path(
         path_components=['system', 'lib', 'libc', 'musl', 'src', 'time'],
-        filenames=['clock_settime.c', 'asctime.c', 'ctime.c', 'gmtime.c', 'localtime.c', 'nanosleep.c'])
+        filenames=[
+          'clock_settime.c',
+          'asctime_r.c',
+          'asctime.c',
+          'ctime.c',
+          'gmtime.c',
+          'localtime.c',
+          'nanosleep.c'
+        ])
     libc_files += files_in_path(
         path_components=['system', 'lib', 'libc', 'musl', 'src', 'legacy'],
         filenames=['getpagesize.c', 'err.c'])
@@ -962,6 +971,11 @@ class libcxx(NoExceptLibrary, MTLibrary):
 
 class libunwind(NoExceptLibrary, MTLibrary):
   name = 'libunwind'
+  # Because calls to _Unwind_CallPersonality are generated during LTO, libunwind
+  # can't currently be part of LTO.
+  # See https://bugs.llvm.org/show_bug.cgi?id=44353
+  force_object_files = True
+
   cflags = ['-Oz', '-D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS']
   src_dir = ['system', 'lib', 'libunwind', 'src']
   # Without this we can't build libunwind since it will pickup the unwind.h
@@ -1352,7 +1366,6 @@ class libstandalonewasm(MuslInternalLibrary):
                    '__tm_to_secs.c',
                    '__tz.c',
                    '__year_to_secs.c',
-                   'asctime_r.c',
                    'clock.c',
                    'clock_gettime.c',
                    'ctime_r.c',
@@ -1945,6 +1958,6 @@ def install_system_headers(stamp):
   return stamp
 
 
+@ToolchainProfiler.profile_block('ensure_sysroot')
 def ensure_sysroot():
-  with ToolchainProfiler.profile_block('ensure_sysroot'):
-    shared.Cache.get('sysroot_install.stamp', install_system_headers, what='system headers')
+  shared.Cache.get('sysroot_install.stamp', install_system_headers, what='system headers')
