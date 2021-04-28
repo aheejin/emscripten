@@ -747,8 +747,9 @@ def safe_copy(src, dst):
     return
   if dst == os.devnull:
     return
+  # Copies data and permission bits, but not other metadata such as timestamp
   mylog.log_copy(src, dst)
-  shutil.copyfile(src, dst)
+  shutil.copy(src, dst)
 
 
 def read_and_preprocess(filename, expand_macros=False):

@@ -171,12 +171,12 @@ def get_building_env(cflags=[]):
     env['CFLAGS'] = env['EMMAKEN_CFLAGS'] = ' '.join(cflags)
   env['HOST_CC'] = CLANG_CC
   env['HOST_CXX'] = CLANG_CXX
-  env['HOST_CFLAGS'] = "-W" # if set to nothing, CFLAGS is used, which we don't want
-  env['HOST_CXXFLAGS'] = "-W" # if set to nothing, CXXFLAGS is used, which we don't want
-  env['PKG_CONFIG_LIBDIR'] = path_from_root('system', 'local', 'lib', 'pkgconfig') + os.path.pathsep + path_from_root('system', 'lib', 'pkgconfig')
+  env['HOST_CFLAGS'] = '-W' # if set to nothing, CFLAGS is used, which we don't want
+  env['HOST_CXXFLAGS'] = '-W' # if set to nothing, CXXFLAGS is used, which we don't want
+  env['PKG_CONFIG_LIBDIR'] = shared.Cache.get_sysroot_dir('local', 'lib', 'pkgconfig') + os.path.pathsep + shared.Cache.get_sysroot_dir('lib', 'pkgconfig')
   env['PKG_CONFIG_PATH'] = os.environ.get('EM_PKG_CONFIG_PATH', '')
   env['EMSCRIPTEN'] = path_from_root()
-  env['PATH'] = path_from_root('system', 'bin') + os.pathsep + env['PATH']
+  env['PATH'] = shared.Cache.get_sysroot_dir('bin') + os.pathsep + env['PATH']
   env['CROSS_COMPILE'] = path_from_root('em') # produces /path/to/emscripten/em , which then can have 'cc', 'ar', etc appended to it
   return env
 
@@ -1298,8 +1298,23 @@ def is_bitcode(filename):
 
 
 def is_wasm(filename):
-  magic = open(filename, 'rb').read(4)
-  return magic == b'\0asm'
+  if not os.path.exists(filename):
+    return False
+  header = open(filename, 'rb').read(webassembly.HEADER_SIZE)
+  return header == webassembly.MAGIC + webassembly.VERSION
+
+
+def is_wasm_dylib(filename):
+  """Detech wasm dynamic libraries by the presence of the "dylink" custom section."""
+  if not is_wasm(filename):
+    return False
+  module = webassembly.Module(filename)
+  section = next(module.sections())
+  if section.type == webassembly.SecType.CUSTOM:
+    module.seek(section.offset)
+    if module.readString() == 'dylink':
+      return True
+  return False
 
 
 # Given the name of a special Emscripten-implemented system library, returns an

@@ -99,6 +99,9 @@ def with_both_exception_handling(f):
         self.skipTest('wasm2js does not support wasm exceptions')
       if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:
         self.skipTest('d8 required to run wasm eh tests')
+      # FIXME Temporarily disabled. Enable this later when the bug is fixed.
+      if '-fsanitize=address' in self.emcc_args:
+        self.skipTest('Wasm EH does not work with asan yet')
       self.emcc_args.append('-fwasm-exceptions')
       self.v8_args.append('--experimental-wasm-eh')
       self.js_engines = [config.V8_ENGINE]
@@ -5852,7 +5855,6 @@ return malloc(size);
 
   @wasm_simd
   @is_slow_test
-  @disabled("https://github.com/emscripten-core/emscripten/issues/13991")
   def test_wasm_builtin_simd(self):
     # Improves test readability
     self.emcc_args += ['-Wno-c++11-narrowing', '-Wno-format']
@@ -7510,6 +7512,12 @@ Module['onRuntimeInitialized'] = function() {
     self.set_setting('ASYNCIFY_IMPORTS', ['suspend'])
     self.set_setting('ASSERTIONS')
     self.do_core_test('asyncify_assertions.cpp')
+
+  def test_asyncify_during_exit(self):
+    self.set_setting('ASYNCIFY')
+    self.set_setting('ASSERTIONS')
+    self.set_setting('EXIT_RUNTIME', 1)
+    self.do_core_test('asyncify_during_exit.cpp', assert_returncode=1)
 
   @no_asan('asyncify stack operations confuse asan')
   @no_wasm2js('TODO: lazy loading in wasm2js')

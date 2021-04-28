@@ -3103,47 +3103,48 @@ var Module = { print: function(x) { throw '<{(' + x + ')}>' } };
     create_file('header.h', '#define X 5\n')
     self.run_process([EMCC, '-Werror', '-xc++-header', 'header.h'])
 
-  def test_precompiled_headers(self):
-    for suffix in ['gch', 'pch']:
-      print(suffix)
-      self.clear()
-      create_file('header.h', '#define X 5\n')
-      self.run_process([EMCC, '-xc++-header', 'header.h', '-c'])
-      self.assertExists('header.h.gch') # default output is gch
-      if suffix != 'gch':
-        self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'header.h.' + suffix])
-        self.assertBinaryEqual('header.h.gch', 'header.h.' + suffix)
+  @parameterized({
+    'gch': ['gch'],
+    'pch': ['pch'],
+  })
+  def test_precompiled_headers(self, suffix):
+    create_file('header.h', '#define X 5\n')
+    self.run_process([EMCC, '-xc++-header', 'header.h', '-c'])
+    self.assertExists('header.h.gch') # default output is gch
+    if suffix != 'gch':
+      self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'header.h.' + suffix])
+      self.assertBinaryEqual('header.h.gch', 'header.h.' + suffix)
 
-      create_file('src.cpp', r'''
+    create_file('src.cpp', r'''
 #include <stdio.h>
 int main() {
-  printf("|%d|\n", X);
-  return 0;
+printf("|%d|\n", X);
+return 0;
 }
 ''')
-      self.run_process([EMCC, 'src.cpp', '-include', 'header.h'])
+    self.run_process([EMCC, 'src.cpp', '-include', 'header.h'])
 
-      output = self.run_js('a.out.js')
-      self.assertContained('|5|', output)
+    output = self.run_js('a.out.js')
+    self.assertContained('|5|', output)
 
-      # also verify that the gch is actually used
-      err = self.run_process([EMCC, 'src.cpp', '-include', 'header.h', '-Xclang', '-print-stats'], stderr=PIPE).stderr
-      self.assertTextDataContained('*** PCH/Modules Loaded:\nModule: header.h.' + suffix, err)
-      # and sanity check it is not mentioned when not
-      try_delete('header.h.' + suffix)
-      err = self.run_process([EMCC, 'src.cpp', '-include', 'header.h', '-Xclang', '-print-stats'], stderr=PIPE).stderr
-      self.assertNotContained('*** PCH/Modules Loaded:\nModule: header.h.' + suffix, err.replace('\r\n', '\n'))
+    # also verify that the gch is actually used
+    err = self.run_process([EMCC, 'src.cpp', '-include', 'header.h', '-Xclang', '-print-stats'], stderr=PIPE).stderr
+    self.assertTextDataContained('*** PCH/Modules Loaded:\nModule: header.h.' + suffix, err)
+    # and sanity check it is not mentioned when not
+    try_delete('header.h.' + suffix)
+    err = self.run_process([EMCC, 'src.cpp', '-include', 'header.h', '-Xclang', '-print-stats'], stderr=PIPE).stderr
+    self.assertNotContained('*** PCH/Modules Loaded:\nModule: header.h.' + suffix, err.replace('\r\n', '\n'))
 
-      # with specified target via -o
-      try_delete('header.h.' + suffix)
-      self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'my.' + suffix])
-      self.assertExists('my.' + suffix)
+    # with specified target via -o
+    try_delete('header.h.' + suffix)
+    self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'my.' + suffix])
+    self.assertExists('my.' + suffix)
 
-      # -include-pch flag
-      self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'header.h.' + suffix])
-      self.run_process([EMCC, 'src.cpp', '-include-pch', 'header.h.' + suffix])
-      output = self.run_js('a.out.js')
-      self.assertContained('|5|', output)
+    # -include-pch flag
+    self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'header.h.' + suffix])
+    self.run_process([EMCC, 'src.cpp', '-include-pch', 'header.h.' + suffix])
+    output = self.run_js('a.out.js')
+    self.assertContained('|5|', output)
 
   def test_LEGACY_VM_SUPPORT(self):
     # when modern features are lacking, we can polyfill them or at least warn
@@ -5133,7 +5134,7 @@ print(os.environ.get('NM'))
       [['--cflags', '--libs'], '-s USE_SDL=2'],
     ]:
       print(args, expected)
-      out = self.run_process([PYTHON, path_from_root('system', 'bin', 'sdl2-config')] + args, stdout=PIPE, stderr=PIPE).stdout
+      out = self.run_process([PYTHON, shared.Cache.get_sysroot_dir('bin', 'sdl2-config')] + args, stdout=PIPE, stderr=PIPE).stdout
       self.assertContained(expected, out)
       print('via emmake')
       out = self.run_process([emmake, 'sdl2-config'] + args, stdout=PIPE, stderr=PIPE).stdout
@@ -7210,8 +7211,8 @@ int main() {
             print(engine)
             self.assertContained('hello, world!', self.run_js('out.wasm', engine=engine))
 
-  def test_wasm_targets_side_module(self):
-    # side modules do allow a wasm target
+  def test_side_module_naming(self):
+    # SIDE_MODULE should work with any arbirary filename
     for opts, target in [([], 'a.out.wasm'),
                          (['-o', 'lib.wasm'], 'lib.wasm'),
                          (['-o', 'lib.so'], 'lib.so'),
@@ -7219,12 +7220,14 @@ int main() {
       # specified target
       print('building: ' + target)
       self.clear()
-      self.run_process([EMCC, test_file('hello_world.cpp'), '-s', 'SIDE_MODULE', '-Werror'] + opts)
+      self.run_process([EMCC, test_file('hello_world.c'), '-s', 'SIDE_MODULE', '-Werror'] + opts)
       for x in os.listdir('.'):
         self.assertFalse(x.endswith('.js'))
-      self.assertTrue(building.is_wasm(target))
-      wasm_data = open(target, 'rb').read()
-      self.assertEqual(wasm_data.count(b'dylink'), 1)
+      self.assertTrue(building.is_wasm_dylib(target))
+
+      create_file('main.c', '')
+      self.run_process([EMCC, '-s', 'MAIN_MODULE=2', 'main.c', '-Werror', target])
+      self.run_js('a.out.js')
 
   @is_slow_test
   def test_lto(self):
