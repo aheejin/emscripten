@@ -18,9 +18,6 @@ emcc can be influenced by a few environment variables:
                (by default /tmp/emscripten_temp). "2" will save additional emcc-*
                steps, that would normally not be separately produced (so this
                slows down compilation).
-
-  EMMAKEN_NO_SDK - Will tell emcc *not* to use the emscripten headers. Instead
-                   your system headers will be used.
 """
 
 from tools.toolchain_profiler import ToolchainProfiler
@@ -47,6 +44,7 @@ from tools import mylog
 from tools.shared import unsuffixed, unsuffixed_basename, WINDOWS, safe_copy
 from tools.shared import run_process, read_and_preprocess, exit_with_error, DEBUG
 from tools.shared import do_replace
+from tools.response_file import substitute_response_files
 from tools.minimal_runtime_shell import generate_minimal_runtime_html
 import tools.line_endings
 from tools import js_manipulation
@@ -927,6 +925,12 @@ def run(args):
 
   # Handle some global flags
 
+  # read response files very early on
+  try:
+    args = substitute_response_files(args)
+  except IOError as e:
+    exit_with_error(e)
+
   if '--help' in args:
     # Documentation for emcc and its options must be updated in:
     #    site/source/docs/tools_reference/emcc.rst
@@ -1004,6 +1008,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   EMMAKEN_CFLAGS = os.environ.get('EMMAKEN_CFLAGS')
   if EMMAKEN_CFLAGS:
     args += shlex.split(EMMAKEN_CFLAGS)
+
+  if 'EMMAKEN_NO_SDK' in os.environ:
+    diagnostics.warning('deprecated', 'We hope to deprecated EMMAKEN_NO_SDK.  See https://github.com/emscripten-core/emscripten/issues/14050 if use use this feature.')
 
   # ---------------- End configs -------------
   state = EmccState(args)
@@ -2758,6 +2765,9 @@ def parse_args(newargs):
       diagnostics.warning('legacy-settings', '--remove-duplicates is deprecated as it is no longer needed. If you cannot link without it, file a bug with a testcase')
     elif check_flag('--jcache'):
       logger.error('jcache is no longer supported')
+    elif check_arg('--cache'):
+      config.CACHE = os.path.normpath(consume_arg())
+      shared.reconfigure_cache()
     elif check_flag('--clear-cache'):
       logger.info('clearing cache as requested by --clear-cache')
       shared.Cache.erase()
@@ -2989,17 +2999,23 @@ def phase_binaryen(target, options, wasm_target):
   if final_js and options.use_closure_compiler:
     run_closure_compiler()
 
-  symbols_file = shared.replace_or_append_suffix(target, '.symbols') if options.emit_symbol_map else None
+  symbols_file = None
+  if options.emit_symbol_map:
+    symbols_file = shared.replace_or_append_suffix(target, '.symbols')
 
   if settings.WASM2JS:
+    symbols_file_js = None
     if settings.WASM == 2:
       wasm2js_template = wasm_target + '.js'
-      open(wasm2js_template, 'w').write(preprocess_wasm2js_script())
+      with open(wasm2js_template, 'w') as f:
+        f.write(preprocess_wasm2js_script())
       # generate secondary file for JS symbols
-      symbols_file_js = shared.replace_or_append_suffix(wasm2js_template, '.symbols') if options.emit_symbol_map else None
+      if options.emit_symbol_map:
+        symbols_file_js = shared.replace_or_append_suffix(wasm2js_template, '.symbols')
     else:
       wasm2js_template = final_js
-      symbols_file_js = shared.replace_or_append_suffix(target, '.symbols') if options.emit_symbol_map else None
+      if options.emit_symbol_map:
+        symbols_file_js = shared.replace_or_append_suffix(target, '.symbols')
 
     wasm2js = building.wasm2js(wasm2js_template,
                                wasm_target,

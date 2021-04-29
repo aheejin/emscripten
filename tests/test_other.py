@@ -7578,10 +7578,9 @@ end
     self.run_process([EMCC, test, '--closure=1', '--closure-args', '--externs "' + externs + '"'])
 
   def test_toolchain_profiler(self):
-    environ = os.environ.copy()
-    environ['EMPROFILE'] = '1'
-    # replaced subprocess functions should not cause errors
-    self.run_process([EMCC, test_file('hello_world.c')], env=environ)
+    with env_modify({'EMPROFILE': '1'}):
+      # replaced subprocess functions should not cause errors
+      self.run_process([EMCC, test_file('hello_world.c')])
 
   def test_noderawfs(self):
     fopen_write = open(test_file('asmfs', 'fopen_write.cpp')).read()
@@ -9627,6 +9626,31 @@ int main() {
     with open(test_file('other', 'wasm2c', 'output.txt')) as f:
       self.assertEqual(output, f.read())
 
+  @requires_native_clang
+  def test_wasm2c_multi_lib(self):
+    # compile two libraries to object files
+    for lib in ['a', 'b']:
+      self.run_process([EMCC,
+                        test_file('other', 'wasm2c', f'unsafe-library-{lib}.c'),
+                        '-O3', '-o', f'lib{lib}.wasm', '-s', 'WASM2C', '--no-entry'])
+      # build with a different WASM_RT_MODULE_PREFIX for each library, so that
+      # they do not have colliding symbols
+      self.run_process([CLANG_CC, f'lib{lib}.wasm.c', '-O3', '-c',
+                        f'-DWASM_RT_MODULE_PREFIX={lib}_'] +
+                       clang_native.get_clang_native_args(),
+                       env=clang_native.get_clang_native_env())
+
+    # compile the main program with the wasmboxed libraries
+    self.run_process([CLANG_CC,
+                      test_file('other', 'wasm2c', 'my-code-multi.c'),
+                      'liba.wasm.o', 'libb.wasm.o',
+                      '-O3', '-o', 'program.exe'] +
+                     clang_native.get_clang_native_args(),
+                     env=clang_native.get_clang_native_env())
+    output = self.run_process([os.path.abspath('program.exe')], stdout=PIPE).stdout
+    with open(test_file('other', 'wasm2c', 'output-multi.txt')) as f:
+      self.assertEqual(output, f.read())
+
   @parameterized({
     'wasm2js': (['-s', 'WASM=0'], ''),
     'modularize': (['-s', 'MODULARIZE'], 'Module()'),
@@ -10377,3 +10401,9 @@ exec "$@"
     # negative case: foo is undefined in test_check_undefined.c
     err = self.expect_fail([EMCC, flag, '-sERROR_ON_UNDEFINED_SYMBOLS', test_file('other', 'test_check_undefined.c')])
     self.assertContained('undefined symbol: foo', err)
+
+  def test_EMMAKEN_NO_SDK(self):
+    with env_modify({'EMMAKEN_NO_SDK': '1'}):
+      err = self.expect_fail([EMCC, test_file('hello_world.c')])
+      self.assertContained("warning: We hope to deprecated EMMAKEN_NO_SDK", err)
+      self.assertContained("fatal error: 'stdio.h' file not found", err)
