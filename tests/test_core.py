@@ -1822,11 +1822,10 @@ int main() {
   def test_emscripten_get_compiler_setting(self):
     src = test_file('core', 'emscripten_get_compiler_setting.c')
     output = shared.unsuffixed(src) + '.out'
-    old = self.get_setting('ASSERTIONS', 1)
     # with assertions, a nice message is shown
     self.set_setting('ASSERTIONS')
     self.do_runf(src, 'You must build with -s RETAIN_COMPILER_SETTINGS=1', assert_returncode=NON_ZERO)
-    self.set_setting('ASSERTIONS', old)
+    self.clear_setting('ASSERTIONS')
     self.set_setting('RETAIN_COMPILER_SETTINGS')
     self.do_runf(src, open(output).read().replace('waka', shared.EMSCRIPTEN_VERSION))
 
@@ -2625,8 +2624,6 @@ The current type of b is: 9
   @needs_dylink
   def test_dlfcn_missing(self):
     self.set_setting('MAIN_MODULE')
-    if self.has_changed_setting('ASSERTIONS'):
-      self.skipTest('test needs to customize ASSERTIONS')
     self.set_setting('ASSERTIONS')
     src = r'''
       #include <dlfcn.h>
@@ -3594,7 +3591,7 @@ ok
     return self.dylink_testf(main, side, expected, force_c, **kwargs)
 
   def dylink_testf(self, main, side, expected=None, force_c=False, main_emcc_args=[],
-                   need_reverse=True, auto_load=True, main_module=2, **kwargs):
+                   need_reverse=True, auto_load=True, **kwargs):
     self.maybe_closure()
     # Same as dylink_test but takes source code as filenames on disc.
     old_args = self.emcc_args.copy()
@@ -3617,7 +3614,7 @@ ok
     shutil.move(out_file, 'liblib.so')
 
     # main settings
-    self.set_setting('MAIN_MODULE', main_module)
+    self.set_setting('MAIN_MODULE', 2)
     self.clear_setting('SIDE_MODULE')
     if auto_load:
       # Normally we don't report undefined symbols when linking main modules but
@@ -3644,7 +3641,7 @@ ok
       # Test the reverse as well.  There we flip the role of the side module and main module.
       # - We add --no-entry since the side module doesn't have a `main`
       self.dylink_testf(side, main, expected, force_c, main_emcc_args + ['--no-entry'],
-                        need_reverse=False, main_module=main_module, **kwargs)
+                        need_reverse=False, **kwargs)
 
   def do_basic_dylink_test(self, **kwargs):
     self.dylink_test(r'''
@@ -4253,11 +4250,10 @@ res64 - external 64\n''', header='''
 
     test('libc++')
     test('1')
-    if not self.has_changed_setting('ASSERTIONS'):
-      self.set_setting('ASSERTIONS', 0)
-      test('', expect_pass=False, need_reverse=False)
-      self.set_setting('ASSERTIONS')
-      test('', expect_pass=False, need_reverse=False)
+    self.set_setting('ASSERTIONS', 0)
+    test('', expect_pass=False, need_reverse=False)
+    self.set_setting('ASSERTIONS')
+    test('', expect_pass=False, need_reverse=False)
 
   @needs_dylink
   @with_env_modify({'EMCC_FORCE_STDLIBS': 'libc++'})
@@ -4329,8 +4325,6 @@ res64 - external 64\n''', header='''
   @with_both_exception_handling
   @needs_dylink
   def test_dylink_raii_exceptions(self):
-    # MAIN_MODULE=1 still needed in this test due to:
-    # https://github.com/emscripten-core/emscripten/issues/13786
     self.dylink_test(main=r'''
       #include <stdio.h>
       extern int side();
@@ -4357,14 +4351,13 @@ res64 - external 64\n''', header='''
         volatile ifdi p = func_with_special_sig;
         return p(2.18281, 3.14159, 42);
       }
-    ''', expected=['special 2.182810 3.141590 42\ndestroy\nfrom side: 1337.\n'], main_module=1)
+    ''', expected=['special 2.182810 3.141590 42\ndestroy\nfrom side: 1337.\n'])
 
   @needs_dylink
   @disabled('https://github.com/emscripten-core/emscripten/issues/12815')
   def test_dylink_hyper_dupe(self):
     self.set_setting('INITIAL_MEMORY', '64mb')
-    if not self.has_changed_setting('ASSERTIONS'):
-      self.set_setting('ASSERTIONS', 2)
+    self.set_setting('ASSERTIONS', 2)
 
     # test hyper-dynamic linking, and test duplicate warnings
     create_file('third.cpp', r'''
@@ -4432,10 +4425,9 @@ res64 - external 64\n''', header='''
                      # in wasm, we can't flip as the side would have an EM_ASM, which we don't support yet TODO
                      need_reverse=not self.is_wasm())
 
-    if not self.has_changed_setting('ASSERTIONS'):
-      print('check warnings')
-      full = self.run_js('src.js')
-      self.assertContained("warning: symbol '_sideg' from '%s' already exists" % libname, full)
+    print('check warnings')
+    full = self.run_js('src.js')
+    self.assertContained("warning: symbol '_sideg' from '%s' already exists" % libname, full)
 
   @needs_dylink
   def test_dylink_load_compiled_side_module(self):
@@ -4473,8 +4465,8 @@ res64 - external 64\n''', header='''
 
   @needs_dylink
   def test_dylink_dso_needed(self):
-    def do_run(src, expected_output):
-      self.do_run(src + 'int main() { return test_main(); }', expected_output)
+    def do_run(src, expected_output, emcc_args=[]):
+      self.do_run(src + 'int main() { return test_main(); }', expected_output, emcc_args=emcc_args)
     self._test_dylink_dso_needed(do_run)
 
   @needs_dylink
@@ -4599,12 +4591,9 @@ res64 - external 64\n''', header='''
     }
     '''
 
-    # MAIN_MODULE=1 still needed in this test due to:
-    # https://github.com/emscripten-core/emscripten/issues/13786
     self.dylink_test(main=main,
                      side=side,
                      header=header,
-                     main_module=1,
                      expected='success')
 
   @needs_dylink
@@ -5900,8 +5889,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-msse', '-o', 'test_sse1', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_sse1', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-msse']
+    self.emcc_args += ['-I' + test_file('sse'), '-msse']
     self.maybe_closure()
 
     self.do_runf(src, native_result)
@@ -5916,8 +5904,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-msse2', '-Wno-argument-outside-range', '-o', 'test_sse2', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_sse2', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-msse2', '-Wno-argument-outside-range']
+    self.emcc_args += ['-I' + test_file('sse'), '-msse2', '-Wno-argument-outside-range']
     self.maybe_closure()
     self.do_runf(src, native_result)
 
@@ -5929,8 +5916,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-msse3', '-Wno-argument-outside-range', '-o', 'test_sse3', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_sse3', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-msse3', '-Wno-argument-outside-range']
+    self.emcc_args += ['-I' + test_file('sse'), '-msse3', '-Wno-argument-outside-range']
     self.maybe_closure()
     self.do_runf(src, native_result)
 
@@ -5942,8 +5928,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-mssse3', '-Wno-argument-outside-range', '-o', 'test_ssse3', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_ssse3', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-mssse3', '-Wno-argument-outside-range']
+    self.emcc_args += ['-I' + test_file('sse'), '-mssse3', '-Wno-argument-outside-range']
     self.maybe_closure()
     self.do_runf(src, native_result)
 
@@ -5956,8 +5941,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-msse4.1', '-Wno-argument-outside-range', '-o', 'test_sse4_1', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_sse4_1', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-msse4.1', '-Wno-argument-outside-range']
+    self.emcc_args += ['-I' + test_file('sse'), '-msse4.1', '-Wno-argument-outside-range']
     self.maybe_closure()
     self.do_runf(src, native_result)
 
@@ -5969,8 +5953,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-msse4.2', '-Wno-argument-outside-range', '-o', 'test_sse4_2', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_sse4_2', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-msse4.2', '-Wno-argument-outside-range']
+    self.emcc_args += ['-I' + test_file('sse'), '-msse4.2', '-Wno-argument-outside-range']
     self.maybe_closure()
     self.do_runf(src, native_result)
 
@@ -5982,8 +5965,7 @@ return malloc(size);
     self.run_process([shared.CLANG_CXX, src, '-mavx', '-Wno-argument-outside-range', '-o', 'test_avx', '-D_CRT_SECURE_NO_WARNINGS=1'] + clang_native.get_clang_native_args(), stdout=PIPE)
     native_result = self.run_process('./test_avx', stdout=PIPE).stdout
 
-    orig_args = self.emcc_args
-    self.emcc_args = orig_args + ['-I' + test_file('sse'), '-mavx', '-Wno-argument-outside-range']
+    self.emcc_args += ['-I' + test_file('sse'), '-mavx', '-Wno-argument-outside-range']
     self.maybe_closure()
     self.do_runf(src, native_result)
 
@@ -6126,10 +6108,10 @@ return malloc(size);
         '-Wno-shift-negative-value',
         '-Wno-format'
     ]
-    asserts = self.get_setting('ASSERTIONS', 0)
 
     # extra testing for ASSERTIONS == 2
-    self.set_setting('ASSERTIONS', 2 if use_cmake else asserts)
+    if use_cmake:
+      self.set_setting('ASSERTIONS', 2)
 
     self.do_runf(test_file('third_party', 'bullet', 'Demos', 'HelloWorld', 'HelloWorld.cpp'),
                  [open(test_file('bullet', 'output.txt')).read(), # different roundings
@@ -6385,7 +6367,6 @@ return malloc(size);
     'minimal_runtime': ['-s', 'MINIMAL_RUNTIME=1']
   })
   def test_dyncall_specific(self, *args):
-    emcc_args = self.emcc_args.copy()
     cases = [
         ('DIRECT', []),
         ('DYNAMIC_SIG', ['-s', 'DYNCALLS=1', '-s', 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$dynCall']),
@@ -6399,18 +6380,14 @@ return malloc(size);
 
     for which, extra_args in cases:
       print(str(args) + ' ' + which)
-      self.emcc_args = emcc_args + ['-D' + which] + list(args) + extra_args
-      self.do_core_test('dyncall_specific.c')
+      self.do_core_test('dyncall_specific.c', emcc_args=['-D' + which] + list(args) + extra_args)
 
   def test_getValue_setValue(self):
     # these used to be exported, but no longer are by default
     def test(output_prefix='', args=[], assert_returncode=0):
-      old = self.emcc_args.copy()
-      self.emcc_args += args
       src = test_file('core', 'getValue_setValue.cpp')
       expected = test_file('core', 'getValue_setValue' + output_prefix + '.out')
-      self.do_run_from_file(src, expected, assert_returncode=assert_returncode)
-      self.emcc_args = old
+      self.do_run_from_file(src, expected, assert_returncode=assert_returncode, emcc_args=args)
 
     # see that direct usage (not on module) works. we don't export, but the use
     # keeps it alive through JSDCE
@@ -6433,13 +6410,10 @@ return malloc(size);
         if use_files:
           args += ['-DUSE_FILES']
         print(args)
-        old = self.emcc_args.copy()
-        self.emcc_args += args
         self.do_runf(test_file('core', 'FS_exports.cpp'),
                      (open(test_file('core', 'FS_exports' + output_prefix + '.out')).read(),
                       open(test_file('core', 'FS_exports' + output_prefix + '_2.out')).read()),
-                     assert_returncode=assert_returncode)
-        self.emcc_args = old
+                     assert_returncode=assert_returncode, emcc_args=args)
 
       # see that direct usage (not on module) works. we don't export, but the use
       # keeps it alive through JSDCE
@@ -6622,10 +6596,9 @@ return malloc(size);
     # ensure function names are preserved
     self.emcc_args += ['--profiling-funcs']
     self.do_core_test('test_demangle_stacks.cpp', assert_returncode=NON_ZERO)
-    if not self.has_changed_setting('ASSERTIONS'):
-      print('without assertions, the stack is not printed, but a message suggesting assertions is')
-      self.set_setting('ASSERTIONS', 0)
-      self.do_core_test('test_demangle_stacks_noassert.cpp', assert_returncode=NON_ZERO)
+    print('without assertions, the stack is not printed, but a message suggesting assertions is')
+    self.set_setting('ASSERTIONS', 0)
+    self.do_core_test('test_demangle_stacks_noassert.cpp', assert_returncode=NON_ZERO)
 
   def test_demangle_stacks_symbol_map(self):
     # disable aggressive inlining in binaryen
@@ -8499,6 +8472,12 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_gl_main_module(self):
     self.set_setting('MAIN_MODULE')
     self.do_runf(test_file('core', 'test_gl_get_proc_address.c'))
+
+  @needs_dylink
+  def test_main_module_js_symbol(self):
+    self.set_setting('MAIN_MODULE', 2)
+    self.emcc_args += ['--js-library', test_file('core', 'test_main_module_js_symbol.js')]
+    self.do_runf(test_file('core', 'test_main_module_js_symbol.c'))
 
   def test_REVERSE_DEPS(self):
     create_file('connect.c', '#include <sys/socket.h>\nint main() { return (int)&connect; }')

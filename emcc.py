@@ -652,19 +652,18 @@ def filter_out_duplicate_dynamic_libs(inputs):
 def process_dynamic_libs(dylibs):
   for dylib in dylibs:
     imports = webassembly.get_imports(dylib)
-    new_exports = []
-    for imp in imports:
-      if imp.kind not in (webassembly.ExternType.FUNC, webassembly.ExternType.GLOBAL):
-        continue
-      new_exports.append(imp.field)
-    logger.debug('Adding exports based on `%s`: %s', dylib, new_exports)
-    settings.EXPORTED_FUNCTIONS.extend(shared.asmjs_mangle(e) for e in new_exports)
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.extend(new_exports)
-    building.user_requested_exports.update(shared.asmjs_mangle(e) for e in new_exports)
+    imports = [i.field for i in imports if i.kind in (webassembly.ExternType.FUNC, webassembly.ExternType.GLOBAL)]
+    settings.SIDE_MODULE_IMPORTS.extend(imports)
+    logger.debug('Adding symbols requirements from `%s`: %s', dylib, imports)
 
     exports = webassembly.get_exports(dylib)
     for export in exports:
       settings.SIDE_MODULE_EXPORTS.append(export.name)
+
+  mangled_imports = [shared.asmjs_mangle(e) for e in settings.SIDE_MODULE_IMPORTS]
+  settings.EXPORTED_FUNCTIONS.extend(mangled_imports)
+  settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.extend(settings.SIDE_MODULE_IMPORTS)
+  building.user_requested_exports.update(mangled_imports)
 
 
 def unmangle_symbols_from_cmdline(symbols):
@@ -1166,26 +1165,18 @@ def phase_setup(state):
   if settings_map.get('WARN_ON_UNDEFINED_SYMBOLS') == '0':
     settings.ERROR_ON_UNDEFINED_SYMBOLS = 0
 
-  if settings.MINIMAL_RUNTIME or settings_map.get('MINIMAL_RUNTIME') in ('1', '2'):
-    # Remove the default exported functions 'malloc', 'free', etc. those should only be linked in if used
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE = []
-
   # Apply -s settings in newargs here (after optimization levels, so they can override them)
   apply_settings(settings_map)
 
-  if os.environ.get('EMMAKEN_JUST_CONFIGURE') or 'conftest.c' in state.orig_args:
+  autoconf = os.environ.get('EMMAKEN_JUST_CONFIGURE') or 'conftest.c' in state.orig_args
+
+  if autoconf:
     # configure tests want a more shell-like style, where we emit return codes on exit()
     settings.EXIT_RUNTIME = 1
     # use node.js raw filesystem access, to behave just like a native executable
     settings.NODERAWFS = 1
     # Add `#!` line to output JS and make it executable.
     options.executable = True
-    # Autoconf expects the executable output file to be called `a.out`
-    default_target_name = 'a.out'
-  elif settings.SIDE_MODULE:
-    default_target_name = 'a.out.wasm'
-  else:
-    default_target_name = 'a.out.js'
 
   # options.output_file is the user-specified one, target is what we will generate
   if options.output_file:
@@ -1197,8 +1188,13 @@ def phase_setup(state):
     dirname = os.path.dirname(target)
     if dirname and not os.path.isdir(dirname):
       exit_with_error("specified output file (%s) is in a directory that does not exist" % target)
+  elif autoconf:
+    # Autoconf expects the executable output file to be called `a.out`
+    target = 'a.out'
+  elif settings.SIDE_MODULE:
+    target = 'a.out.wasm'
   else:
-    target = default_target_name
+    target = 'a.out.js'
 
   settings.TARGET_BASENAME = unsuffixed_basename(target)
 
@@ -1327,12 +1323,8 @@ def phase_setup(state):
         options.default_object_extension = '.s'
     elif '-M' in newargs or '-MM' in newargs:
       options.default_object_extension = '.mout' # not bitcode, not js; but just dependency rule of the input file
-
-    if options.output_file:
-      if len(input_files) > 1:
-        exit_with_error('cannot specify -o with -c/-S/-E/-M and multiple source files')
-    else:
-      target = unsuffixed_basename(target) + options.default_object_extension
+    if options.output_file and len(input_files) > 1:
+      exit_with_error('cannot specify -o with -c/-S/-E/-M and multiple source files')
 
   # If no output format was sepecific we try to imply the format based on
   # the output filename extension.
@@ -1515,7 +1507,7 @@ def phase_setup(state):
     settings.RELOCATABLE = 1
 
   if settings.MAIN_MODULE:
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$getDylinkMetadata']
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$getDylinkMetadata', '$mergeLibSymbols']
 
   if settings.RELOCATABLE:
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += [
@@ -1809,7 +1801,7 @@ def phase_setup(state):
     ]
     # Some of these symbols are using by worker.js but otherwise unreferenced.
     # Because emitDCEGraph only considered the main js file, and not worker.js
-    # we have explictly mark these symbols as user-exported so that they will
+    # we have explicitly mark these symbols as user-exported so that they will
     # kept alive through DCE.
     # TODO: Find a less hacky way to do this, perhaps by also scanning worker.js
     # for roots.
@@ -2799,7 +2791,7 @@ def parse_args(newargs):
       if os.path.isabs(path_name) and not is_valid_abspath(options, path_name):
         # Of course an absolute path to a non-system-specific library or header
         # is fine, and you can ignore this warning. The danger are system headers
-        # that are e.g. x86 specific and nonportable. The emscripten bundled
+        # that are e.g. x86 specific and non-portable. The emscripten bundled
         # headers are modified to be portable, local system ones are generally not.
         diagnostics.warning(
             'absolute-paths', '-I or -L of an absolute path "' + arg +
