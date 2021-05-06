@@ -22,7 +22,7 @@ if __name__ == '__main__':
 from tools.shared import try_delete, PIPE
 from tools.shared import PYTHON, EMCC, EMAR
 from tools.utils import WINDOWS, MACOS
-from tools import shared, building, config
+from tools import shared, building, config, webassembly
 from runner import RunnerCore, path_from_root, requires_native_clang, test_file
 from runner import skip_if, needs_dylink, no_windows, is_slow_test, create_file, parameterized
 from runner import env_modify, with_env_modify, disabled, node_pthreads
@@ -167,6 +167,7 @@ def also_with_standalone_wasm(wasm2c=False, impure=False):
           # support in order for JS to have a chance to run this without trapping
           # when it sees an i64 on the ffi.
           self.set_setting('WASM_BIGINT')
+          self.emcc_args.append('-Wno-unused-command-line-argument')
           # if we are impure, disallow all wasm engines
           if impure:
             self.wasm_engines = []
@@ -3617,12 +3618,13 @@ ok
     self.set_setting('MAIN_MODULE', 2)
     self.clear_setting('SIDE_MODULE')
     if auto_load:
-      # Normally we don't report undefined symbols when linking main modules but
-      # in this case we know all the side modules are specified on the command line.
-      # TODO(sbc): Make this the default one day
-      self.set_setting('ERROR_ON_UNDEFINED_SYMBOLS')
       self.emcc_args += main_emcc_args
       self.emcc_args.append('liblib.so')
+    else:
+      # When not auto loading (i.e. when not specifying the side module on the
+      # command line) we need to disable warnings on undefined symbols.
+      self.set_setting('WARN_ON_UNDEFINED_SYMBOLS', 0)
+
     if force_c:
       self.emcc_args.append('-nostdlib++')
 
@@ -4466,7 +4468,8 @@ res64 - external 64\n''', header='''
   @needs_dylink
   def test_dylink_dso_needed(self):
     def do_run(src, expected_output, emcc_args=[]):
-      self.do_run(src + 'int main() { return test_main(); }', expected_output, emcc_args=emcc_args)
+      create_file('main.c', src + 'int main() { return test_main(); }')
+      self.do_runf('main.c', expected_output, emcc_args=emcc_args)
     self._test_dylink_dso_needed(do_run)
 
   @needs_dylink
@@ -5384,9 +5387,9 @@ main( int argv, char ** argc ) {
   def test_unistd_sysconf_phys_pages(self):
     filename = test_file('unistd', 'sysconf_phys_pages.c')
     if self.get_setting('ALLOW_MEMORY_GROWTH'):
-      expected = (2 * 1024 * 1024 * 1024) // 16384
+      expected = (2 * 1024 * 1024 * 1024) // webassembly.WASM_PAGE_SIZE
     else:
-      expected = 16 * 1024 * 1024 // 16384
+      expected = 16 * 1024 * 1024 // webassembly.WASM_PAGE_SIZE
     self.do_runf(filename, str(expected) + ', errno: 0')
 
   def test_unistd_login(self):
@@ -6112,6 +6115,7 @@ return malloc(size);
     # extra testing for ASSERTIONS == 2
     if use_cmake:
       self.set_setting('ASSERTIONS', 2)
+      self.emcc_args.append('-Wno-unused-command-line-argument')
 
     self.do_runf(test_file('third_party', 'bullet', 'Demos', 'HelloWorld', 'HelloWorld.cpp'),
                  [open(test_file('bullet', 'output.txt')).read(), # different roundings
@@ -6890,6 +6894,20 @@ someweirdtext
   def test_embind_val(self):
     self.emcc_args += ['--bind']
     self.do_run_in_out_file_test('embind', 'test_val.cpp')
+
+  @no_wasm2js('wasm_bigint')
+  def test_embind_i64_val(self):
+    self.set_setting('WASM_BIGINT')
+    self.emcc_args += ['--bind']
+    self.node_args += ['--experimental-wasm-bigint']
+    self.do_run_in_out_file_test('embind', 'test_i64_val.cpp', assert_identical=True)
+
+  @no_wasm2js('wasm_bigint')
+  def test_embind_i64_binding(self):
+    self.set_setting('WASM_BIGINT')
+    self.emcc_args += ['--bind']
+    self.node_args += ['--experimental-wasm-bigint']
+    self.do_run_in_out_file_test('embind', 'test_i64_binding.cpp', assert_identical=True)
 
   def test_embind_no_rtti(self):
     create_file('main.cpp', r'''
@@ -8502,6 +8520,10 @@ def make_run(name, emcc_args, settings=None, env=None):
     env = {}
   if settings is None:
     settings = {}
+  if settings:
+    # Until we create a way to specify link-time settings separately from compile-time settings
+    # we need to pass this flag here to avoid warnings from compile-only commands.
+    emcc_args.append('-Wno-unused-command-line-argument')
 
   TT = type(name, (TestCoreBase,), dict(run_name=name, env=env, __module__=__name__))  # noqa
 

@@ -51,7 +51,7 @@ from tools import js_manipulation
 from tools import wasm2c
 from tools import webassembly
 from tools import config
-from tools.settings import settings
+from tools.settings import settings, MEM_SIZE_SETTINGS, COMPILE_TIME_SETTINGS
 
 logger = logging.getLogger('emcc')
 
@@ -349,8 +349,7 @@ def apply_settings(changes):
       key = settings.alt_names[key]
 
     # In those settings fields that represent amount of memory, translate suffixes to multiples of 1024.
-    if key in ('TOTAL_STACK', 'INITIAL_MEMORY', 'MEMORY_GROWTH_LINEAR_STEP', 'MEMORY_GROWTH_GEOMETRIC_CAP',
-               'GL_MAX_TEMP_BUFFER_SIZE', 'MAXIMUM_MEMORY', 'DEFAULT_PTHREAD_STACK_SIZE'):
+    if key in MEM_SIZE_SETTINGS:
       value = str(expand_byte_size_suffixes(value))
 
     if value and value[0] == '@':
@@ -649,7 +648,24 @@ def filter_out_duplicate_dynamic_libs(inputs):
   return [f for f in inputs if check(f[1])]
 
 
-def process_dynamic_libs(dylibs):
+def process_dynamic_libs(dylibs, lib_dirs):
+  extras = []
+  seen = set()
+  to_process = dylibs.copy()
+  while to_process:
+    dylib = to_process.pop()
+    dylink = webassembly.parse_dylink_section(dylib)
+    for needed in dylink.needed:
+      if needed in seen:
+        continue
+      path = find_library(needed, lib_dirs)
+      if path:
+        extras.append(path)
+      else:
+        exit_with_error(f'{dylib}: shared library dependency not found: `{needed}`')
+      to_process.append(needed)
+
+  dylibs += extras
   for dylib in dylibs:
     imports = webassembly.get_imports(dylib)
     imports = [i.field for i in imports if i.kind in (webassembly.ExternType.FUNC, webassembly.ExternType.GLOBAL)]
@@ -949,20 +965,13 @@ emcc: supported targets: llvm bitcode, WebAssembly, NOT elf
     return 0
 
   if '--version' in args:
-    # if the emscripten folder is not a git repo, don't run git show - that can
-    # look up and find the revision in a parent directory that is a git repo
-    revision = ''
-    if os.path.exists(shared.path_from_root('.git')):
-      revision = run_process(['git', 'rev-parse', 'HEAD'], stdout=PIPE, stderr=PIPE, cwd=shared.path_from_root()).stdout.strip()
-    elif os.path.exists(shared.path_from_root('emscripten-revision.txt')):
-      revision = open(shared.path_from_root('emscripten-revision.txt')).read().strip()
-    if revision:
-      revision = ' (%s)' % revision
-    print('''%s%s
+
+    print(version_string())
+    print('''\
 Copyright (C) 2014 the Emscripten authors (see AUTHORS.txt)
 This is free and open source software under the MIT license.
 There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-  ''' % (version_string(), revision))
+''')
     return 0
 
   if run_via_emxx:
@@ -1032,6 +1041,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       diagnostics.warning('unused-command-line-argument', "argument unused during compilation: '%s'" % flag[1])
     for f in linker_inputs:
       diagnostics.warning('unused-command-line-argument', "%s: linker input file unused because linking not done" % f[1])
+
     return 0
 
   if options.output_file and options.output_file.startswith('-'):
@@ -1088,7 +1098,7 @@ def phase_calculate_linker_inputs(options, state, linker_inputs):
 
   if settings.MAIN_MODULE:
     dylibs = [i[1] for i in linker_inputs if building.is_wasm_dylib(i[1])]
-    process_dynamic_libs(dylibs)
+    process_dynamic_libs(dylibs, state.lib_dirs)
 
   linker_arguments = [val for _, val in sorted(linker_inputs + state.link_flags)]
   return linker_arguments
@@ -1307,7 +1317,11 @@ def phase_setup(state):
   state.preprocess_only = state.has_dash_E or '-M' in newargs or '-MM' in newargs or '-fsyntax-only' in newargs
   state.compile_only = state.has_dash_c or state.has_dash_S or state.has_header_inputs or state.preprocess_only
 
-  if not state.compile_only:
+  if state.compile_only:
+    for key in settings_map:
+      if key not in COMPILE_TIME_SETTINGS:
+        diagnostics.warning('unused-command-line-argument', "linker setting ignored during compilation: '%s'" % key)
+  else:
     ldflags = emsdk_ldflags(newargs)
     for f in ldflags:
       add_link_flag(sys.maxsize, f)
@@ -1535,7 +1549,6 @@ def phase_setup(state):
   # various settings require sbrk() access
   if settings.DETERMINISTIC or \
      settings.EMSCRIPTEN_TRACING or \
-     settings.MALLOC == 'emmalloc' or \
      settings.SAFE_HEAP or \
      settings.MEMORYPROFILER:
     settings.EXPORTED_FUNCTIONS += ['_sbrk']
@@ -1673,9 +1686,6 @@ def phase_setup(state):
   if not settings.USES_DYNAMIC_ALLOC:
     settings.MALLOC = 'none'
 
-  if settings.MALLOC == 'emmalloc':
-    settings.SYSTEM_JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_emmalloc.js')))
-
   if settings.FETCH and final_suffix in EXECUTABLE_ENDINGS:
     state.forced_stdlibs.append('libfetch')
     settings.SYSTEM_JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_fetch.js')))
@@ -1703,7 +1713,9 @@ def phase_setup(state):
   if settings.SIDE_MODULE and settings.GLOBAL_BASE != -1:
     exit_with_error('Cannot set GLOBAL_BASE when building SIDE_MODULE')
 
-  if settings.RELOCATABLE or settings.LINKABLE:
+  # When building a side module we currently have to assume that any undefined
+  # symbols that exist at link time will be satisfied by the main module or JS.
+  if settings.SIDE_MODULE:
     default_setting('ERROR_ON_UNDEFINED_SYMBOLS', 0)
     default_setting('WARN_ON_UNDEFINED_SYMBOLS', 0)
 
@@ -2557,7 +2569,16 @@ def phase_final_emitting(options, target, wasm_target, memfile):
 
 
 def version_string():
-  return 'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) %s' % shared.EMSCRIPTEN_VERSION
+  # if the emscripten folder is not a git repo, don't run git show - that can
+  # look up and find the revision in a parent directory that is a git repo
+  revision = ''
+  if os.path.exists(shared.path_from_root('.git')):
+    revision = run_process(['git', 'rev-parse', 'HEAD'], stdout=PIPE, stderr=PIPE, cwd=shared.path_from_root()).stdout.strip()
+  elif os.path.exists(shared.path_from_root('emscripten-revision.txt')):
+    revision = open(shared.path_from_root('emscripten-revision.txt')).read().strip()
+  if revision:
+    revision = '-git (%s)' % revision
+  return f'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) {shared.EMSCRIPTEN_VERSION}{revision}'
 
 
 def parse_args(newargs):
@@ -3360,6 +3381,15 @@ def worker_js_script(proxy_worker_filename):
   return web_gl_client_src + '\n' + proxy_client_src
 
 
+def find_library(lib, lib_dirs):
+  for lib_dir in lib_dirs:
+    path = os.path.join(lib_dir, lib)
+    if os.path.isfile(path):
+      logger.debug('found library "%s" at %s', lib, path)
+      return path
+  return None
+
+
 def process_libraries(libs, lib_dirs, linker_inputs):
   libraries = []
   consumed = []
@@ -3369,21 +3399,17 @@ def process_libraries(libs, lib_dirs, linker_inputs):
   for i, lib in libs:
     logger.debug('looking for library "%s"', lib)
 
-    found = False
+    path = None
     for suff in suffixes:
       name = 'lib' + lib + suff
-      for lib_dir in lib_dirs:
-        path = os.path.join(lib_dir, name)
-        if os.path.exists(path):
-          logger.debug('found library "%s" at %s', lib, path)
-          linker_inputs.append((i, path))
-          consumed.append(i)
-          found = True
-          break
-      if found:
+      path = find_library(name, lib_dirs)
+      if path:
         break
 
-    if not found:
+    if path:
+      linker_inputs.append((i, path))
+      consumed.append(i)
+    else:
       jslibs = building.map_to_js_libs(lib)
       if jslibs is not None:
         libraries += [(i, jslib) for jslib in jslibs]

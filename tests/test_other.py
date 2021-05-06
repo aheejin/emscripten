@@ -1722,7 +1722,12 @@ int f() {
     cmd += ['-Wno-undefined']
     self.run_process(cmd)
 
-  def test_undefined_symbols(self):
+  @parameterized({
+    'warn': ('WARN',),
+    'error': ('ERROR',),
+    'ignore': (None,)
+  })
+  def test_undefined_symbols(self, action):
     create_file('main.cpp', r'''
       #include <stdio.h>
       #include <SDL.h>
@@ -1742,35 +1747,34 @@ int f() {
       ''')
 
     for args in ([], ['-O1'], ['-s', 'MAX_WEBGL_VERSION=2']):
-      for action in ('WARN', 'ERROR', None):
-        for value in ([0, 1]):
-          try_delete('a.out.js')
-          print('checking "%s" %s=%s' % (args, action, value))
-          extra = ['-s', action + '_ON_UNDEFINED_SYMBOLS=%d' % value] if action else []
-          proc = self.run_process([EMCC, 'main.cpp'] + extra + args, stderr=PIPE, check=False)
-          print(proc.stderr)
-          if value or action is None:
-            # The default is that we error in undefined symbols
-            self.assertContained('error: undefined symbol: something', proc.stderr)
-            self.assertContained('error: undefined symbol: elsey', proc.stderr)
-            check_success = False
-          elif action == 'ERROR' and not value:
-            # Error disables, should only warn
-            self.assertContained('warning: undefined symbol: something', proc.stderr)
-            self.assertContained('warning: undefined symbol: elsey', proc.stderr)
-            self.assertNotContained('undefined symbol: emscripten_', proc.stderr)
-            check_success = True
-          elif action == 'WARN' and not value:
-            # Disabled warning should imply disabling errors
-            self.assertNotContained('undefined symbol', proc.stderr)
-            check_success = True
+      for value in ([0, 1]):
+        try_delete('a.out.js')
+        print('checking "%s" %s' % (args, value))
+        extra = ['-s', action + '_ON_UNDEFINED_SYMBOLS=%d' % value] if action else []
+        proc = self.run_process([EMCC, 'main.cpp'] + extra + args, stderr=PIPE, check=False)
+        print(proc.stderr)
+        if value or action is None:
+          # The default is that we error in undefined symbols
+          self.assertContained('error: undefined symbol: something', proc.stderr)
+          self.assertContained('error: undefined symbol: elsey', proc.stderr)
+          check_success = False
+        elif action == 'ERROR' and not value:
+          # Error disables, should only warn
+          self.assertContained('warning: undefined symbol: something', proc.stderr)
+          self.assertContained('warning: undefined symbol: elsey', proc.stderr)
+          self.assertNotContained('undefined symbol: emscripten_', proc.stderr)
+          check_success = True
+        elif action == 'WARN' and not value:
+          # Disabled warning should imply disabling errors
+          self.assertNotContained('undefined symbol', proc.stderr)
+          check_success = True
 
-          if check_success:
-            self.assertEqual(proc.returncode, 0)
-            self.assertTrue(os.path.exists('a.out.js'))
-          else:
-            self.assertNotEqual(proc.returncode, 0)
-            self.assertFalse(os.path.exists('a.out.js'))
+        if check_success:
+          self.assertEqual(proc.returncode, 0)
+          self.assertTrue(os.path.exists('a.out.js'))
+        else:
+          self.assertNotEqual(proc.returncode, 0)
+          self.assertFalse(os.path.exists('a.out.js'))
 
   def test_GetProcAddress_LEGACY_GL_EMULATION(self):
     # without legacy gl emulation, getting a proc from there should fail
@@ -7159,10 +7163,10 @@ int main() {
       result = self.run_js('a.out.js').strip()
       self.assertEqual(result, f'{expected}, errno: 0')
 
-    run([], 1024)
-    run(['-s', 'INITIAL_MEMORY=32MB'], 2048)
-    run(['-s', 'INITIAL_MEMORY=32MB', '-s', 'ALLOW_MEMORY_GROWTH'], (2 * 1024 * 1024 * 1024) // 16384)
-    run(['-s', 'INITIAL_MEMORY=32MB', '-s', 'ALLOW_MEMORY_GROWTH', '-s', 'WASM=0'], (2 * 1024 * 1024 * 1024) // 16384)
+    run([], 256)
+    run(['-s', 'INITIAL_MEMORY=32MB'], 512)
+    run(['-s', 'INITIAL_MEMORY=32MB', '-s', 'ALLOW_MEMORY_GROWTH'], (2 * 1024 * 1024 * 1024) // webassembly.WASM_PAGE_SIZE)
+    run(['-s', 'INITIAL_MEMORY=32MB', '-s', 'ALLOW_MEMORY_GROWTH', '-s', 'WASM=0'], (2 * 1024 * 1024 * 1024) // webassembly.WASM_PAGE_SIZE)
 
   def test_wasm_target_and_STANDALONE_WASM(self):
     # STANDALONE_WASM means we never minify imports and exports.
@@ -7225,6 +7229,30 @@ int main() {
       create_file('main.c', '')
       self.run_process([EMCC, '-s', 'MAIN_MODULE=2', 'main.c', '-Werror', target])
       self.run_js('a.out.js')
+
+  def test_side_module_missing(self):
+    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'SIDE_MODULE', '-o', 'libside1.wasm'])
+    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'SIDE_MODULE', '-o', 'libside2.wasm', 'libside1.wasm'])
+    # When linking against `libside2.wasm` (which depends on libside1.wasm) that library path is used
+    # to locate `libside1.wasm`.  Expect the link to fail with an unmodified library path.
+    err = self.expect_fail([EMCC, '-s', 'MAIN_MODULE=2', test_file('hello_world.c'), 'libside2.wasm'])
+    self.assertContained('libside2.wasm: shared library dependency not found: `libside1.wasm`', err)
+
+    # But succeed if `.` is added the library path.
+    self.run_process([EMCC, '-s', 'MAIN_MODULE=2', test_file('hello_world.c'), '-L.', 'libside2.wasm'])
+
+  def test_side_module_transitive_deps(self):
+    # Build three side modules in a dependency chain
+    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'SIDE_MODULE', '-o', 'libside1.wasm'])
+    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'SIDE_MODULE', '-o', 'libside2.wasm', 'libside1.wasm'])
+    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'SIDE_MODULE', '-o', 'libside3.wasm', 'libside2.wasm'])
+
+    # Link should succeed if and only if the end of the chain can be found
+    final_link = [EMCC, '-s', 'MAIN_MODULE=2', test_file('hello_world.c'), '-L.', 'libside3.wasm']
+    self.run_process(final_link)
+    os.remove('libside1.wasm')
+    err = self.expect_fail(final_link)
+    self.assertContained('error: libside2.wasm: shared library dependency not found: `libside1.wasm`', err)
 
   @is_slow_test
   def test_lto(self):
@@ -7544,13 +7572,13 @@ end
     self.assertNotContained(WARNING, proc.stderr)
 
   def test_full_js_library(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'INCLUDE_FULL_LIBRARY'])
+    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY'])
 
   def test_full_js_library_gl_emu(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'INCLUDE_FULL_LIBRARY', '-s', 'LEGACY_GL_EMULATION'])
+    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sLEGACY_GL_EMULATION'])
 
   def test_full_js_library_no_exception_throwing(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-s', 'INCLUDE_FULL_LIBRARY', '-s', 'DISABLE_EXCEPTION_THROWING'])
+    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sDISABLE_EXCEPTION_THROWING'])
 
   def test_closure_full_js_library(self):
     # test for closure errors in the entire JS library
@@ -9672,7 +9700,7 @@ int main() {
   # Compile-test for -s USE_WEBGPU=1 and library_webgpu.js.
   def test_webgpu_compiletest(self):
     for args in [[], ['-s', 'ASSERTIONS']]:
-      self.run_process([EMCC, test_file('webgpu_dummy.cpp'), '-s', 'USE_WEBGPU'] + args)
+      self.run_process([EMCC, test_file('webgpu_dummy.cpp'), '-s', 'USE_WEBGPU', '-s', 'ASYNCIFY', '-s', 'ASYNCIFY_IMPORTS=["init_js_device"]'] + args)
 
   def test_signature_mismatch(self):
     create_file('a.c', 'void foo(); int main() { foo(); return 0; }')
@@ -9687,6 +9715,15 @@ int main() {
     stderr = self.expect_fail([EMCC, '-s', 'LLD_REPORT_UNDEFINED', 'main.c'])
     self.assertContained('wasm-ld: error:', stderr)
     self.assertContained('main_0.o: undefined symbol: foo', stderr)
+
+  def test_lld_report_undefined_reverse_deps(self):
+    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED', '-sREVERSE_DEPS=all', test_file('hello_world.c')])
+
+  def test_lld_report_undefined_exceptions(self):
+    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED', '-fwasm-exceptions', test_file('hello_libcxx.cpp')])
+
+  def test_lld_report_undefined_main_module(self):
+    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED', '-sMAIN_MODULE=2', test_file('hello_world.c')])
 
   def test_4GB(self):
     stderr = self.expect_fail([EMCC, test_file('hello_world.c'), '-s', 'INITIAL_MEMORY=2GB'])
@@ -10246,8 +10283,8 @@ exec "$@"
     # When debugging set this valud to the function that you want to start
     # with.  All symbols prior will be skipped over.
     start_at = None
-    assert not start_at or start_at in deps_info.deps_info
-    for function, deps in deps_info.deps_info.items():
+    assert not start_at or start_at in deps_info.get_deps_info()
+    for function, deps in deps_info.get_deps_info().items():
       if start_at:
         if function == start_at:
           start_at = None
@@ -10404,3 +10441,21 @@ exec "$@"
       err = self.expect_fail([EMCC, test_file('hello_world.c')])
       self.assertContained("warning: We hope to deprecated EMMAKEN_NO_SDK", err)
       self.assertContained("fatal error: 'stdio.h' file not found", err)
+
+  @parameterized({
+    'default': ('', '2147483648'),
+    '1GB': ('-sMAXIMUM_MEMORY=1GB', '1073741824'),
+    # for 4GB we return 1 wasm page less than 4GB, as 4GB cannot fit in a 32bit
+    # integer
+    '4GB': ('-sMAXIMUM_MEMORY=4GB', '4294901760'),
+  })
+  def test_emscripten_get_heap_max(self, arg, expected):
+    create_file('get.c', r'''
+      #include <emscripten/heap.h>
+      #include <stdio.h>
+      int main() {
+        printf("max: |%zu|\n", emscripten_get_heap_max());
+      }
+    ''')
+    self.run_process([EMCC, 'get.c', '-s', 'ALLOW_MEMORY_GROWTH', arg])
+    self.assertContained(f'max: |{expected}|', self.run_js('a.out.js'))

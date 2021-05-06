@@ -1136,7 +1136,7 @@ class libgl(MTLibrary):
     if self.is_legacy:
       cflags += ['-DLEGACY_GL_EMULATION=1']
     if self.is_webgl2:
-      cflags += ['-DMAX_WEBGL_VERSION=2', '-s', 'MAX_WEBGL_VERSION=2']
+      cflags += ['-DMAX_WEBGL_VERSION=2']
     if self.is_ofb:
       cflags += ['-D__EMSCRIPTEN_OFFSCREEN_FRAMEBUFFER__']
     if self.is_full_es3:
@@ -1415,7 +1415,7 @@ def handle_reverse_deps(input_files):
   elif settings.REVERSE_DEPS == 'all':
     # When not optimzing we add all possible reverse dependencies rather
     # than scanning the input files
-    for symbols in deps_info.deps_info.values():
+    for symbols in deps_info.get_deps_info().values():
       for symbol in symbols:
         settings.EXPORTED_FUNCTIONS.append(mangle_c_symbol_name(symbol))
     return
@@ -1427,7 +1427,7 @@ def handle_reverse_deps(input_files):
 
   def add_reverse_deps(need):
     more = False
-    for ident, deps in deps_info.deps_info.items():
+    for ident, deps in deps_info.get_deps_info().items():
       if ident in need.undefs and ident not in added:
         added.add(ident)
         more = True
