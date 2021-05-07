@@ -51,7 +51,7 @@ from tools import js_manipulation
 from tools import wasm2c
 from tools import webassembly
 from tools import config
-from tools.settings import settings, MEM_SIZE_SETTINGS, COMPILE_TIME_SETTINGS
+from tools.settings import settings, MEM_SIZE_SETTINGS
 
 logger = logging.getLogger('emcc')
 
@@ -418,6 +418,7 @@ def ensure_archive_index(archive_file):
     run_process([shared.LLVM_RANLIB, archive_file])
 
 
+@ToolchainProfiler.profile_block('JS symbol generation')
 def get_all_js_syms():
   # Runs the js compiler to generate a list of all symbols available in the JS
   # libraries.  This must be done separately for each linker invokation since the
@@ -434,16 +435,16 @@ def get_all_js_syms():
     emscripten.generate_struct_info()
     glue, forwarded_data = emscripten.compile_settings()
     forwarded_json = json.loads(forwarded_data)
-    library_fns_list = []
+    library_syms = set()
     for name in forwarded_json['libraryFunctions']:
       if shared.is_c_symbol(name):
         name = shared.demangle_c_symbol_name(name)
-        library_fns_list.append(name)
+        library_syms.add(name)
   finally:
     settings.ONLY_CALC_JS_SYMBOLS = False
     settings.INCLUDE_FULL_LIBRARY = old_full
 
-  return library_fns_list
+  return library_syms
 
 
 def filter_link_flags(flags, using_lld):
@@ -1318,9 +1319,12 @@ def phase_setup(state):
   state.compile_only = state.has_dash_c or state.has_dash_S or state.has_header_inputs or state.preprocess_only
 
   if state.compile_only:
-    for key in settings_map:
-      if key not in COMPILE_TIME_SETTINGS:
-        diagnostics.warning('unused-command-line-argument', "linker setting ignored during compilation: '%s'" % key)
+    # TODO(sbc): Re-enable these warnings once we are sure we don't have any false
+    # positives.  See: https://github.com/emscripten-core/emscripten/pull/14109
+    pass
+    # for key in settings_map:
+    #   if key not in COMPILE_TIME_SETTINGS:
+    #     diagnostics.warning('unused-command-line-argument', "linker setting ignored during compilation: '%s'" % key)
   else:
     ldflags = emsdk_ldflags(newargs)
     for f in ldflags:
@@ -1367,7 +1371,18 @@ def phase_setup(state):
   for s in user_js_defines:
     settings[s[0]] = s[1]
 
-  shared.verify_settings()
+  if settings.SAFE_HEAP not in [0, 1]:
+    exit_with_error('emcc: SAFE_HEAP must be 0 or 1')
+
+  if not settings.WASM:
+    # When the user requests non-wasm output, we enable wasm2js. that is,
+    # we still compile to wasm normally, but we compile the final output
+    # to js.
+    settings.WASM = 1
+    settings.WASM2JS = 1
+  if settings.WASM == 2:
+    # Requesting both Wasm and Wasm2JS support
+    settings.WASM2JS = 1
 
   if (options.oformat == OFormat.WASM or settings.PURE_WASI) and not settings.SIDE_MODULE:
     # if the output is just a wasm file, it will normally be a standalone one,
@@ -1754,7 +1769,7 @@ def phase_setup(state):
       '$stackTrace'
     ]
 
-  if settings.FILESYSTEM:
+  if settings.FILESYSTEM and not settings.BOOTSTRAPPING_STRUCT_INFO:
     # to flush streams on FS exit, we need to be able to call fflush
     # we only include it if the runtime is exitable, or when ASSERTIONS
     # (ASSERTIONS will check that streams do not need to be flushed,
@@ -1762,7 +1777,7 @@ def phase_setup(state):
     if settings.EXIT_RUNTIME or settings.ASSERTIONS:
       settings.EXPORTED_FUNCTIONS += ['_fflush']
 
-  if settings.SUPPORT_ERRNO:
+  if settings.SUPPORT_ERRNO and not settings.BOOTSTRAPPING_STRUCT_INFO:
     # so setErrNo JS library function can report errno back to C
     settings.EXPORTED_FUNCTIONS += ['___errno_location']
 
@@ -2370,11 +2385,10 @@ def phase_link(linker_arguments, wasm_target):
   # if using the wasm backend, we might be using vanilla LLVM, which does not allow our
   # fastcomp deferred linking opts.
   # TODO: we could check if this is a fastcomp build, and still speed things up here
-  js_funcs = None
+  js_syms = None
   if settings.LLD_REPORT_UNDEFINED and settings.ERROR_ON_UNDEFINED_SYMBOLS:
-    with ToolchainProfiler.profile_block('JS symbol generation'):
-      js_funcs = get_all_js_syms()
-  building.link_lld(linker_arguments, wasm_target, external_symbol_list=js_funcs)
+    js_syms = get_all_js_syms()
+  building.link_lld(linker_arguments, wasm_target, external_symbols=js_syms)
 
 
 @ToolchainProfiler.profile_block('post_link')
