@@ -3860,6 +3860,11 @@ ok
                                                        (int)&emscripten_run_script );
                                        }''')
     self.set_setting('MAIN_MODULE', 1)
+    # also test main module with 4GB of memory. we need to emit a "maximum"
+    # clause then, even though 4GB is the maximum; see
+    # https://github.com/emscripten-core/emscripten/issues/14130
+    self.set_setting('ALLOW_MEMORY_GROWTH', '1')
+    self.set_setting('MAXIMUM_MEMORY', '4GB')
     self.do_runf('test_sig.c', '')
 
   @needs_dylink
@@ -8276,6 +8281,9 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_create(self):
     self.set_setting('EXIT_RUNTIME')
+    # test that the node environment can be specified by itself, and that still
+    # works with pthreads (even though we did not specify 'node,worker')
+    self.set_setting('ENVIRONMENT', 'node')
     self.do_run_in_out_file_test('core', 'pthread', 'create.cpp')
 
   @node_pthreads
@@ -8284,6 +8292,8 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('EXIT_RUNTIME')
     if not self.has_changed_setting('INITIAL_MEMORY'):
       self.set_setting('INITIAL_MEMORY', '64mb')
+    # test that the node and worker environments can be specified
+    self.set_setting('ENVIRONMENT', 'node,worker')
     self.do_run_in_out_file_test('pthread', 'test_pthread_c11_threads.c')
 
   @node_pthreads
