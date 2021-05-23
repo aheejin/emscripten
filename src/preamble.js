@@ -747,12 +747,16 @@ function instrumentWasmTableWithAbort() {
 #endif
 
 #if EXPORT_ES6
-// Use bundler-friendly `new URL(..., import.meta.url)` pattern; works in browsers too.
-var wasmBinaryFile = new URL('{{{ WASM_BINARY_FILE }}}', import.meta.url).toString();
-#else
-var wasmBinaryFile = '{{{ WASM_BINARY_FILE }}}';
-if (!isDataURI(wasmBinaryFile)) {
-  wasmBinaryFile = locateFile(wasmBinaryFile);
+if (Module['locateFile']) {
+#endif
+  var wasmBinaryFile = '{{{ WASM_BINARY_FILE }}}';
+  if (!isDataURI(wasmBinaryFile)) {
+    wasmBinaryFile = locateFile(wasmBinaryFile);
+  }
+#if EXPORT_ES6
+} else {
+  // Use bundler-friendly `new URL(..., import.meta.url)` pattern; works in browsers too.
+  var wasmBinaryFile = new URL('{{{ WASM_BINARY_FILE }}}', import.meta.url).toString();
 }
 #endif
 
@@ -955,7 +959,7 @@ function createWasm() {
 
     Module['asm'] = exports;
 
-#if MAIN_MODULE
+#if MAIN_MODULE && AUTOLOAD_DYLIBS
     var metadata = getDylinkMetadata(module);
     if (metadata.neededDynlibs) {
       dynamicLibraries = metadata.neededDynlibs.concat(dynamicLibraries);
