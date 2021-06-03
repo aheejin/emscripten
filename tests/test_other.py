@@ -210,6 +210,13 @@ class other(RunnerCore):
     src = read_file('subdir/hello_world.worker.js')
     self.assertContained('import("./hello_world.mjs")', src)
 
+  def test_emcc_output_worker_mjs_single_file(self):
+    self.run_process([EMCC, '-o', 'hello_world.mjs', '-pthread',
+                      test_file('hello_world.c'), '-s', 'SINGLE_FILE=1'])
+    src = read_file('hello_world.mjs')
+    self.assertNotContained("new URL('data:", src)
+    self.assertContained("new Worker(new URL('hello_world.worker.js', import.meta.url))", src)
+
   def test_export_es6_implies_modularize(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-s', 'EXPORT_ES6=1'])
     src = read_file('a.out.js')
@@ -1392,7 +1399,12 @@ int f() {
     self.run_process([EMCC, 'main.c', '-L.', '-lexport', '-s', 'EXPORTED_FUNCTIONS=%s' % full_export_name])
     self.assertTrue(self.is_exported_in_wasm(export_name, 'a.out.wasm'))
 
-  def test_embed_file(self):
+  @parameterized({
+    'embed': (['--embed-file', 'somefile.txt'],),
+    'embed-twice': (['--embed-file', 'somefile.txt', '--embed-file', 'somefile.txt'],),
+    'preload': (['--preload-file', 'somefile.txt'],)
+  })
+  def test_include_file(self, args):
     create_file('somefile.txt', 'hello from a file with lots of data and stuff in it thank you very much')
     create_file('main.cpp', r'''
       #include <stdio.h>
@@ -1407,12 +1419,10 @@ int f() {
       }
     ''')
 
-    self.run_process([EMXX, 'main.cpp', '--embed-file', 'somefile.txt'])
-    self.assertContained('|hello from a file wi|', self.run_js('a.out.js'))
-
-    # preload twice, should not err
-    self.run_process([EMXX, 'main.cpp', '--embed-file', 'somefile.txt', '--embed-file', 'somefile.txt'])
-    self.assertContained('|hello from a file wi|', self.run_js('a.out.js'))
+    self.run_process([EMXX, 'main.cpp'] + args)
+    # run in node.js to ensure we verify that file preloading works there
+    result = self.run_js('a.out.js', engine=config.NODE_JS)
+    self.assertContained('|hello from a file wi|', result)
 
   def test_embed_file_dup(self):
     ensure_dir(self.in_dir('tst', 'test1'))
@@ -9535,6 +9545,12 @@ Module.arguments has been replaced with plain arguments_ (the initial value can 
 
     out = self.run_process([EMXX, test_file('hello_world.cpp'), '-Wl,-version-script,foo'], stderr=PIPE).stderr
     self.assertContained('warning: ignoring unsupported linker flag: `-version-script`', out)
+
+  def test_supported_linker_flag_skip_next(self):
+    # Regression test for a bug where skipping an unsupported linker flag
+    # could skip the next unrelated linker flag.
+    err = self.expect_fail([EMXX, test_file('hello_world.cpp'), '-Wl,-rpath=foo', '-lbar'])
+    self.assertContained('error: unable to find library -lbar', err)
 
   def test_linker_flags_pass_through(self):
     err = self.expect_fail([EMXX, test_file('hello_world.cpp'), '-Wl,--waka'])
