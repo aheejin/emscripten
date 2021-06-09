@@ -301,6 +301,20 @@ class Library:
     """
     return shared.Cache.get_lib(self.get_filename(), self.build)
 
+  def get_link_flag(self):
+    """
+    Gets the link flags needed to use the library.
+
+    This will trigger a build if this library is not in the cache.
+    """
+    fullpath = self.get_path()
+    # For non-libaries (e.g. crt1.o) we pass the entire path to the linker
+    if self.get_ext() != '.a':
+      return fullpath
+    # For libraries (.a) files, we pass the abbreviated `-l` form.
+    base = shared.unsuffixed_basename(fullpath)
+    return '-l' + shared.strip_prefix(base, 'lib')
+
   def get_files(self):
     """
     Gets a list of source files for this library.
@@ -477,13 +491,14 @@ class Library:
 
     This returns a dictionary of simple names to Library objects.
     """
-    result = {}
-    for subclass in cls.get_inheritance_tree():
-      if subclass.name:
-        library = subclass.get_default_variation()
-        if library.can_build() and library.can_use():
-          result[subclass.name] = library
-    return result
+    if not hasattr(cls, 'useable_variations'):
+      cls.useable_variations = {}
+      for subclass in cls.get_inheritance_tree():
+        if subclass.name:
+          library = subclass.get_default_variation()
+          if library.can_build() and library.can_use():
+            cls.useable_variations[subclass.name] = library
+    return cls.useable_variations
 
 
 class MTLibrary(Library):
@@ -680,7 +695,7 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
     # musl modules
     ignore = [
         'ipc', 'passwd', 'signal', 'sched', 'ipc', 'time', 'linux',
-        'aio', 'exit', 'legacy', 'mq', 'search', 'setjmp', 'env',
+        'aio', 'exit', 'legacy', 'mq', 'setjmp', 'env',
         'ldso'
     ]
 
@@ -1090,8 +1105,8 @@ class libal(Library):
   src_files = ['al.c']
 
 
-class libgl(MTLibrary):
-  name = 'libgl'
+class libGL(MTLibrary):
+  name = 'libGL'
 
   src_dir = ['system', 'lib', 'gl']
   src_files = ['gl.c', 'webgl1.c', 'libprocaddr.c']
@@ -1488,7 +1503,7 @@ def calculate(input_files, forced):
     logger.debug('including %s (%s)' % (lib.name, lib.get_filename()))
 
     need_whole_archive = lib.name in force_include and lib.get_ext() == '.a'
-    libs_to_link.append((lib.get_path(), need_whole_archive))
+    libs_to_link.append((lib.get_link_flag(), need_whole_archive))
 
   if settings.USE_PTHREADS:
     add_library('crtbegin')
@@ -1512,7 +1527,7 @@ def calculate(input_files, forced):
     add_library('libcompiler_rt')
   else:
     if settings.AUTO_NATIVE_LIBRARIES:
-      add_library('libgl')
+      add_library('libGL')
       add_library('libal')
       add_library('libhtml5')
 

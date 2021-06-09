@@ -175,7 +175,9 @@ commands:
       - run:
           name: download firefox
           command: |
-            wget -O ~/ff.tar.bz2 "https://download.mozilla.org/?product=firefox-devedition-latest-ssl&os=linux64&lang=en-US"
+            # Temporarily pinned to beta rather then dev.
+            # See https://github.com/emscripten-core/emscripten/issues/14401
+            wget -O ~/ff.tar.bz2 "https://download.mozilla.org/?product=firefox-beta-latest-ssl&os=linux64&lang=en-US"
             tar -C ~ -xf ~/ff.tar.bz2
       - run:
           name: configure firefox
@@ -283,7 +285,9 @@ commands:
       - run:
           name: download chrome
           command: |
-            wget -O ~/chrome.deb https://dl.google.com/linux/direct/google-chrome-beta_current_amd64.deb
+            # Using stable rather than beta until we can fix
+            # https://github.com/emscripten-core/emscripten/issues/14369
+            wget -O ~/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
             dpkg -i ~/chrome.deb
       - run:
           name: run tests
@@ -459,6 +463,7 @@ jobs:
       # clang can compile but not link in the current setup, see
       # https://github.com/emscripten-core/emscripten/pull/11382#pullrequestreview-428902638
       EMTEST_LACKS_NATIVE_CLANG: "1"
+      EMTEST_SKIP_V8: "1"
     steps:
       - checkout
       - run:
@@ -476,6 +481,8 @@ jobs:
           test_targets: "other.test_emcc_cflags other.test_stdin other.test_bad_triple wasm2.test_sse1 wasm2.test_ccall other.test_closure_externs other.test_binaryen_debug other.test_js_optimizer_parse_error other.test_output_to_nowhere other.test_emcc_dev_null other.test_cmake* other.test_system_include_paths other.test_emar_response_file wasm2.test_utf16 other.test_special_chars_in_arguments"
   test-mac:
     executor: mac
+    environment:
+      EMTEST_SKIP_V8: "1"
     steps:
       - run:
           name: Install brew package dependencies

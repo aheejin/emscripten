@@ -38,8 +38,7 @@ logger = logging.getLogger("test_core")
 
 def wasm_simd(f):
   def decorated(self):
-    if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:
-      self.skipTest('wasm simd only supported in d8 for now')
+    self.require_v8()
     if not self.is_wasm():
       self.skipTest('wasm2js only supports MVP for now')
     if '-O3' in self.emcc_args:
@@ -47,18 +46,14 @@ def wasm_simd(f):
     self.emcc_args.append('-msimd128')
     self.emcc_args.append('-fno-lax-vector-conversions')
     self.v8_args.append('--experimental-wasm-simd')
-    self.js_engines = [config.V8_ENGINE]
     f(self)
   return decorated
 
 
-def bleeding_edge_wasm_backend(f):
+def needs_non_trapping_float_to_int(f):
   def decorated(self):
-    if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:
-      self.skipTest('only works in d8 for now')
     if not self.is_wasm():
       self.skipTest('wasm2js only supports MVP for now')
-    self.js_engines = [config.V8_ENGINE]
     f(self)
   return decorated
 
@@ -69,8 +64,8 @@ def also_with_wasm_bigint(f):
     f(self)
     if self.is_wasm():
       self.set_setting('WASM_BIGINT')
+      self.require_node()
       self.node_args.append('--experimental-wasm-bigint')
-      self.js_engines = [config.NODE_JS]
       f(self)
   return decorated
 
@@ -99,14 +94,12 @@ def with_both_exception_handling(f):
       # Wasm EH is currently supported only in wasm backend and V8
       if not self.is_wasm():
         self.skipTest('wasm2js does not support wasm exceptions')
-      if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:
-        self.skipTest('d8 required to run wasm eh tests')
+      self.require_v8()
       # FIXME Temporarily disabled. Enable this later when the bug is fixed.
       if '-fsanitize=address' in self.emcc_args:
         self.skipTest('Wasm EH does not work with asan yet')
       self.emcc_args.append('-fwasm-exceptions')
       self.v8_args.append('--experimental-wasm-eh')
-      self.js_engines = [config.V8_ENGINE]
       f(self)
     else:
       self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
@@ -270,13 +263,15 @@ class TestCoreBase(RunnerCore):
   def is_wasm2js(self):
     return self.get_setting('WASM') == 0
 
+  def can_use_closure(self):
+    return '-g' not in self.emcc_args and '--profiling' not in self.emcc_args and ('-O2' in self.emcc_args or '-Os' in self.emcc_args)
+
   # Use closure in some tests for some additional coverage
   def maybe_closure(self):
-    if '--closure=1' not in self.emcc_args:
-      if '-g' not in self.emcc_args and ('-O2' in self.emcc_args or '-Os' in self.emcc_args):
-        self.emcc_args += ['--closure=1']
-        logger.debug('using closure compiler..')
-        return True
+    if '--closure=1' not in self.emcc_args and self.can_use_closure():
+      self.emcc_args += ['--closure=1']
+      logger.debug('using closure compiler..')
+      return True
     return False
 
   def assertStartswith(self, output, prefix):
@@ -918,51 +913,7 @@ base align: 0, 0, 0, 0'''])
     self.do_core_test('test_linked_list.c')
 
   def test_sup(self):
-      src = '''
-        #include <stdio.h>
-
-        struct S4   { int x;          }; // size: 4
-        struct S4_2 { short x, y;     }; // size: 4, but for alignment purposes, 2
-        struct S6   { short x, y, z;  }; // size: 6
-        struct S6w  { char x[6];      }; // size: 6 also
-        struct S6z  { int x; short y; }; // size: 8, since we align to a multiple of the biggest - 4
-
-        struct C___  { S6 a, b, c; int later; };
-        struct Carr  { S6 a[3]; int later; }; // essentially the same, but differently defined
-        struct C__w  { S6 a; S6w b; S6 c; int later; }; // same size, different struct
-        struct Cp1_  { int pre; short a; S6 b, c; int later; }; // fillers for a
-        struct Cp2_  { int a; short pre; S6 b, c; int later; }; // fillers for a (get addr of the other filler)
-        struct Cint  { S6 a; int  b; S6 c; int later; }; // An int (different size) for b
-        struct C4__  { S6 a; S4   b; S6 c; int later; }; // Same size as int from before, but a struct
-        struct C4_2  { S6 a; S4_2 b; S6 c; int later; }; // Same size as int from before, but a struct with max element size 2
-        struct C__z  { S6 a; S6z  b; S6 c; int later; }; // different size, 8 instead of 6
-
-        int main()
-        {
-          #define TEST(struc) \\
-          { \\
-            struc *s = 0; \\
-            printf("*%s: %d,%d,%d,%d<%zu*\\n", #struc, (int)&(s->a), (int)&(s->b), (int)&(s->c), (int)&(s->later), sizeof(struc)); \\
-          }
-          #define TEST_ARR(struc) \\
-          { \\
-            struc *s = 0; \\
-            printf("*%s: %d,%d,%d,%d<%zu*\\n", #struc, (int)&(s->a[0]), (int)&(s->a[1]), (int)&(s->a[2]), (int)&(s->later), sizeof(struc)); \\
-          }
-          printf("sizeofs:%zu,%zu\\n", sizeof(S6), sizeof(S6z));
-          TEST(C___);
-          TEST_ARR(Carr);
-          TEST(C__w);
-          TEST(Cp1_);
-          TEST(Cp2_);
-          TEST(Cint);
-          TEST(C4__);
-          TEST(C4_2);
-          TEST(C__z);
-          return 0;
-        }
-      '''
-      self.do_run(src, 'sizeofs:6,8\n*C___: 0,6,12,20<24*\n*Carr: 0,6,12,20<24*\n*C__w: 0,6,12,20<24*\n*Cp1_: 4,6,12,20<24*\n*Cp2_: 0,6,12,20<24*\n*Cint: 0,8,12,20<24*\n*C4__: 0,8,12,20<24*\n*C4_2: 0,6,10,16<20*\n*C__z: 0,8,16,24<28*')
+    self.do_run_in_out_file_test(test_file('core/test_sup.cpp'))
 
   @also_with_standalone_wasm()
   def test_assert(self):
@@ -1067,51 +1018,7 @@ int main()
     self.do_run(src, r'''d is at 24''')
 
   def test_setjmp_noleak(self):
-    src = r'''
-#include <setjmp.h>
-#include <stdio.h>
-#include <assert.h>
-
-jmp_buf env;
-
-void luaWork(int d){
-  int x;
-  printf("d is at %d\n", d);
-
-  longjmp(env, 1);
-}
-
-#include <malloc.h>
-#include <stdlib.h>
-
-void dump() {
-  struct mallinfo m = mallinfo();
-  printf("dump: %d , %d\n", m.arena, m.uordblks);
-}
-
-void work(int n)
-{
-  printf("work %d\n", n);
-  dump();
-
-  if(!setjmp(env)){
-    luaWork(n);
-  }
-
-  if (n > 0) work(n-1);
-}
-
-int main() {
-  struct mallinfo m1 = mallinfo();
-  dump();
-  work(10);
-  dump();
-  struct mallinfo m2 = mallinfo();
-  assert(m1.uordblks == m2.uordblks);
-  printf("ok.\n");
-}
-'''
-    self.do_run(src, r'''ok.''')
+    self.do_runf(test_file('core/test_setjmp_noleak.c'), 'ok.')
 
   @with_both_exception_handling
   def test_exceptions(self):
@@ -2416,6 +2323,12 @@ The current type of b is: 9
     self.do_run_in_out_file_test('pthread/test_pthread_dispatch_after_exit.c')
 
   @node_pthreads
+  def test_pthread_nested_work_queue(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PTHREAD_POOL_SIZE', 1)
+    self.do_run_in_out_file_test('pthread/test_pthread_nested_work_queue.c')
+
+  @node_pthreads
   def test_pthread_thread_local_storage(self):
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('EXIT_RUNTIME')
@@ -2606,13 +2519,8 @@ The current type of b is: 9
 
   def prep_dlfcn_main(self):
     self.set_setting('MAIN_MODULE')
+    self.set_setting('NODERAWFS')
     self.clear_setting('SIDE_MODULE')
-
-    create_file('lib_so_pre.js', '''
-    if (!Module['preRun']) Module['preRun'] = [];
-    Module['preRun'].push(function() { FS.createDataFile('/', 'liblib.so', %s, true, false, false); });
-''' % str(list(bytearray(read_binary('liblib.so')))))
-    self.emcc_args += ['--pre-js', 'lib_so_pre.js']
 
   def build_dlfcn_lib(self, filename):
     if self.is_wasm():
@@ -2993,7 +2901,6 @@ Var: 42
     for i in range(10):
       curr = '%d.so' % i
       shutil.copyfile('liblib.so', curr)
-      self.emcc_args += ['--embed-file', curr]
 
     self.prep_dlfcn_main()
     self.set_setting('INITIAL_MEMORY', '128mb')
@@ -3507,14 +3414,10 @@ ok
     shutil.move(indir('liblib.so'), indir('libb.so'))
 
     self.set_setting('MAIN_MODULE')
+    self.set_setting('NODERAWFS')
     self.clear_setting('SIDE_MODULE')
-    self.set_setting('EXPORT_ALL')
-    self.emcc_args += ['--embed-file', '.@/']
 
-    # XXX in wasm each lib load currently takes 5MB; default INITIAL_MEMORY=16MB is thus not enough
-    self.set_setting('INITIAL_MEMORY', '32mb')
-
-    src = r'''
+    create_file('main.c', r'''
       #include <dlfcn.h>
       #include <assert.h>
       #include <stddef.h>
@@ -3536,11 +3439,11 @@ ok
 
         return 0;
       }
-      '''
-    self.do_run(src, 'a: loaded\nb: loaded\na: loaded\n')
+      ''')
+    self.do_runf('main.c', 'a: loaded\nb: loaded\na: loaded\n')
 
   @needs_dylink
-  @bleeding_edge_wasm_backend
+  @needs_non_trapping_float_to_int
   def test_dlfcn_feature_in_lib(self):
     self.emcc_args.append('-mnontrapping-fptoint')
 
@@ -5279,9 +5182,7 @@ main( int argv, char ** argc ) {
     self.emcc_args += ['-lnodefs.js']
     self.set_setting('SYSCALL_DEBUG')
     self.do_runf(test_file('fs/test_nodefs_rw.c'), 'success')
-    if '-g' not in self.emcc_args:
-      print('closure')
-      self.emcc_args += ['--closure=1']
+    if self.maybe_closure():
       self.do_runf(test_file('fs/test_nodefs_rw.c'), 'success')
 
   @also_with_noderawfs
@@ -5774,7 +5675,7 @@ int main(void) {
 
     test([])
 
-  @bleeding_edge_wasm_backend
+  @needs_non_trapping_float_to_int
   def test_fasta_nontrapping(self):
     self.emcc_args += ['-mnontrapping-fptoint']
     self.test_fasta()
@@ -6422,9 +6323,7 @@ void* operator new(size_t size) {
     self.set_setting('EXPORTED_FUNCTIONS', ['_get_int', '_get_float', '_get_bool', '_get_string', '_print_int', '_print_float', '_print_bool', '_print_string', '_multi', '_pointer', '_call_ccall_again', '_malloc'])
     self.do_core_test('test_ccall.cpp')
 
-    if '-O2' in self.emcc_args and '-g' not in self.emcc_args:
-      print('with closure')
-      self.emcc_args += ['--closure=1']
+    if self.maybe_closure():
       self.do_core_test('test_ccall.cpp')
 
   def test_EXPORTED_RUNTIME_METHODS(self):
@@ -7340,9 +7239,9 @@ someweirdtext
     self.emcc_args += ['-DRUN_FROM_JS_SHELL']
     self.do_run_in_out_file_test('emscripten_log/emscripten_log.cpp')
     # test closure compiler as well
-    print('closure')
-    self.emcc_args += ['--closure=1', '-g1'] # extra testing
-    self.do_run_in_out_file_test('emscripten_log/emscripten_log_with_closure.cpp')
+    if self.maybe_closure():
+      self.emcc_args += ['-g1'] # extra testing
+      self.do_run_in_out_file_test('emscripten_log/emscripten_log_with_closure.cpp')
 
   def test_float_literals(self):
     self.do_run_in_out_file_test('test_float_literals.cpp')
@@ -7583,19 +7482,23 @@ Module['onRuntimeInitialized'] = function() {
   @no_asan('asyncify stack operations confuse asan')
   def test_emscripten_scan_registers(self):
     self.set_setting('ASYNCIFY')
-    self.do_core_test('emscripten_scan_registers.cpp')
+    self.do_core_test('test_emscripten_scan_registers.cpp')
 
   def test_asyncify_assertions(self):
     self.set_setting('ASYNCIFY')
     self.set_setting('ASYNCIFY_IMPORTS', ['suspend'])
     self.set_setting('ASSERTIONS')
-    self.do_core_test('asyncify_assertions.cpp')
+    self.do_core_test('test_asyncify_assertions.c', assert_returncode=NON_ZERO)
 
+  @no_lsan('leaks asyncify stack during exit')
+  @no_asan('leaks asyncify stack during exit')
   def test_asyncify_during_exit(self):
     self.set_setting('ASYNCIFY')
     self.set_setting('ASSERTIONS')
     self.set_setting('EXIT_RUNTIME', 1)
-    self.do_core_test('asyncify_during_exit.cpp', assert_returncode=1)
+    self.do_core_test('test_asyncify_during_exit.cpp', assert_returncode=1)
+    print('NO_ASYNC')
+    self.do_core_test('test_asyncify_during_exit.cpp', emcc_args=['-DNO_ASYNC'], out_suffix='_no_async')
 
   @no_asan('asyncify stack operations confuse asan')
   @no_wasm2js('TODO: lazy loading in wasm2js')
@@ -8679,9 +8582,9 @@ wasm2ss = make_run('wasm2ss', emcc_args=['-O2'], settings={'STACK_OVERFLOW_CHECK
 # Add DEFAULT_TO_CXX=0
 strict = make_run('strict', emcc_args=[], settings={'STRICT': 1})
 
-lsan = make_run('lsan', emcc_args=['-fsanitize=leak', '-O2'], settings={'ALLOW_MEMORY_GROWTH': 1})
-asan = make_run('asan', emcc_args=['-fsanitize=address', '-O2'], settings={'ALLOW_MEMORY_GROWTH': 1, 'INITIAL_MEMORY': '500mb'})
-asani = make_run('asani', emcc_args=['-fsanitize=address', '-O2', '--pre-js', os.path.join(os.path.dirname(__file__), 'asan-no-leak.js')],
+lsan = make_run('lsan', emcc_args=['-fsanitize=leak', '--profiling', '-O2'], settings={'ALLOW_MEMORY_GROWTH': 1})
+asan = make_run('asan', emcc_args=['-fsanitize=address', '--profiling', '-O2'], settings={'ALLOW_MEMORY_GROWTH': 1, 'INITIAL_MEMORY': '500mb'})
+asani = make_run('asani', emcc_args=['-fsanitize=address', '--profiling', '-O2', '--pre-js', os.path.join(os.path.dirname(__file__), 'asan-no-leak.js')],
                  settings={'ALLOW_MEMORY_GROWTH': 1, 'INITIAL_MEMORY': '500mb'})
 
 # Experimental modes (not tested by CI)
