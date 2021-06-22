@@ -163,12 +163,6 @@ LibraryManager.library = {
 #endif
   },
 
-  _exit__sig: 'vi',
-  _exit: 'exit',
-
-  _Exit__sig: 'vi',
-  _Exit: 'exit',
-
 #if MINIMAL_RUNTIME
   $exit: function(status) {
     throw 'exit(' + status + ')';
@@ -431,11 +425,6 @@ LibraryManager.library = {
   // stdlib.h
   // ==========================================================================
 
-  _ZSt9terminatev__deps: ['exit'],
-  _ZSt9terminatev: function() {
-    _exit(-1234);
-  },
-
 #if MINIMAL_RUNTIME && !EXIT_RUNTIME
   atexit__sig: 'v', // atexit unsupported in MINIMAL_RUNTIME
   atexit: function(){},
@@ -450,15 +439,6 @@ LibraryManager.library = {
   },
   __cxa_atexit: 'atexit',
 
-#endif
-
-  // used in rust, clang when doing thread_local statics
-#if USE_PTHREADS
-  __cxa_thread_atexit: 'pthread_cleanup_push',
-  __cxa_thread_atexit_impl: 'pthread_cleanup_push',
-#else
-  __cxa_thread_atexit: 'atexit',
-  __cxa_thread_atexit_impl: 'atexit',
 #endif
 
   // TODO: There are currently two abort() functions that get imported to asm module scope: the built-in runtime function abort(),
@@ -3569,7 +3549,6 @@ LibraryManager.library = {
     throw 'unwind';
   },
 
-  emscripten_force_exit__deps: ['$runtimeKeepaliveCounter'],
   emscripten_force_exit__proxy: 'sync',
   emscripten_force_exit__sig: 'vi',
   emscripten_force_exit: function(status) {
@@ -3586,16 +3565,8 @@ LibraryManager.library = {
   },
 
 #if !MINIMAL_RUNTIME
-  $runtimeKeepaliveCounter: 0,
-
-  $keepRuntimeAlive__deps: ['$runtimeKeepaliveCounter'],
-  $keepRuntimeAlive: function() {
-    return noExitRuntime || runtimeKeepaliveCounter > 0;
-  },
-
   // Callable in pthread without __proxy needed.
   $runtimeKeepalivePush__sig: 'v',
-  $runtimeKeepalivePush__deps: ['$runtimeKeepaliveCounter'],
   $runtimeKeepalivePush: function() {
     runtimeKeepaliveCounter += 1;
 #if RUNTIME_DEBUG
@@ -3604,7 +3575,6 @@ LibraryManager.library = {
   },
 
   $runtimeKeepalivePop__sig: 'v',
-  $runtimeKeepalivePop__deps: ['$runtimeKeepaliveCounter'],
   $runtimeKeepalivePop: function() {
 #if ASSERTIONS
     assert(runtimeKeepaliveCounter > 0);
@@ -3614,7 +3584,6 @@ LibraryManager.library = {
     err('runtimeKeepalivePop -> counter=' + runtimeKeepaliveCounter);
 #endif
   },
-
 
   // Used to call user callbacks from the embedder / event loop.  For example
   // setTimeout or any other kind of event handler that calls into user case
@@ -3691,9 +3660,33 @@ LibraryManager.library = {
   },
 #endif
 
+  $safeSetTimeout: function(func, timeout) {
+    {{{ runtimeKeepalivePush() }}}
+    return setTimeout(function() {
+      {{{ runtimeKeepalivePop() }}}
+      callUserCallback(func);
+    }, timeout);
+  },
+
   $asmjsMangle: function(x) {
     var unmangledSymbols = {{{ buildStringArray(WASM_SYSTEM_EXPORTS) }}};
     return x.indexOf('dynCall_') == 0 || unmangledSymbols.includes(x) ? x : '_' + x;
+  },
+
+  $asyncLoad: function(url, onload, onerror, noRunDep) {
+    var dep = !noRunDep ? getUniqueRunDependency('al ' + url) : '';
+    readAsync(url, function(arrayBuffer) {
+      assert(arrayBuffer, 'Loading data file "' + url + '" failed (no arrayBuffer).');
+      onload(new Uint8Array(arrayBuffer));
+      if (dep) removeRunDependency(dep);
+    }, function(event) {
+      if (onerror) {
+        onerror();
+      } else {
+        throw 'Loading data file "' + url + '" failed.';
+      }
+    });
+    if (dep) addRunDependency(dep);
   },
 
 #if RELOCATABLE

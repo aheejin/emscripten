@@ -2602,9 +2602,9 @@ void wakaw::Cm::RasterBase<wakaw::watwat::Polocator>::merbine1<wakaw::Cm::Raster
   def test_demangle_malloc_infinite_loop_crash(self):
     self.run_process([EMXX, test_file('malloc_demangle_infinite_loop.cpp'), '-g', '-s', 'ABORTING_MALLOC', '-s', 'DEMANGLE_SUPPORT'])
     output = self.run_js('a.out.js', assert_returncode=NON_ZERO)
-    if output.count('Cannot enlarge memory arrays') > 4:
+    if output.count('Cannot enlarge memory arrays') > 5:
       print(output)
-    self.assertLess(output.count('Cannot enlarge memory arrays'),  5)
+    self.assertLess(output.count('Cannot enlarge memory arrays'),  6)
 
   @require_node
   def test_module_exports_with_closure(self):
@@ -3880,7 +3880,11 @@ int main(int argc, char **argv) {
     self.run_process([EMXX, 'code.cpp'])
     self.assertContained('I am ' + os.path.realpath(self.get_dir()).replace('\\', '/') + '/a.out.js', self.run_js('a.out.js').replace('\\', '/'))
 
-  def test_returncode(self):
+  @parameterized({
+    'no_exit_runtime': [True],
+    '': [False],
+  })
+  def test_returncode(self, no_exit):
     create_file('src.cpp', r'''
       #include <stdio.h>
       #include <stdlib.h>
@@ -3893,23 +3897,22 @@ int main(int argc, char **argv) {
       }
     ''')
     for code in [0, 123]:
-      for no_exit in [0, 1]:
-        for call_exit in [0, 1]:
-          for async_compile in [0, 1]:
-            self.run_process([EMXX, 'src.cpp', '-DCODE=%d' % code, '-s', 'EXIT_RUNTIME=%d' % (1 - no_exit), '-DCALL_EXIT=%d' % call_exit, '-s', 'WASM_ASYNC_COMPILATION=%d' % async_compile])
-            for engine in config.JS_ENGINES:
-              # async compilation can't return a code in d8
-              if async_compile and engine == config.V8_ENGINE:
-                continue
-              print(code, no_exit, call_exit, async_compile, engine)
-              proc = self.run_process(engine + ['a.out.js'], stderr=PIPE, check=False)
-              # we always emit the right exit code, whether we exit the runtime or not
-              self.assertEqual(proc.returncode, code)
-              msg = 'but EXIT_RUNTIME is not set, so halting execution but not exiting the runtime or preventing further async execution (build with EXIT_RUNTIME=1, if you want a true shutdown)'
-              if no_exit and call_exit:
-                self.assertContained(msg, proc.stderr)
-              else:
-                self.assertNotContained(msg, proc.stderr)
+      for call_exit in [0, 1]:
+        for async_compile in [0, 1]:
+          self.run_process([EMXX, 'src.cpp', '-DCODE=%d' % code, '-s', 'EXIT_RUNTIME=%d' % (1 - no_exit), '-DCALL_EXIT=%d' % call_exit, '-s', 'WASM_ASYNC_COMPILATION=%d' % async_compile])
+          for engine in config.JS_ENGINES:
+            # async compilation can't return a code in d8
+            if async_compile and engine == config.V8_ENGINE:
+              continue
+            print(code, call_exit, async_compile, engine)
+            proc = self.run_process(engine + ['a.out.js'], stderr=PIPE, check=False)
+            msg = 'but EXIT_RUNTIME is not set, so halting execution but not exiting the runtime or preventing further async execution (build with EXIT_RUNTIME=1, if you want a true shutdown)'
+            if no_exit and call_exit:
+              self.assertContained(msg, proc.stderr)
+            else:
+              self.assertNotContained(msg, proc.stderr)
+            # we always emit the right exit code, whether we exit the runtime or not
+            self.assertEqual(proc.returncode, code)
 
   def test_emscripten_force_exit_NO_EXIT_RUNTIME(self):
     create_file('src.cpp', r'''
@@ -4226,10 +4229,9 @@ int main() {
     # a program which includes a non-trivial syscall, but disables the filesystem.
     create_file('src.c', r'''
 #include <sys/time.h>
-#include <stddef.h>
-extern int __sys_openat(int);
+#include <fcntl.h>
 int main() {
-  return __sys_openat(0);
+  return openat(0, "foo", 0);
 }''')
     self.run_process([EMCC, 'src.c', '-s', 'NO_FILESYSTEM'])
 
@@ -7091,7 +7093,7 @@ int main() {
 
   @node_pthreads
   def test_metadce_minimal_pthreads(self):
-    self.run_metadce_test('minimal.c', ['-Oz', '-sUSE_PTHREADS', '-sPROXY_TO_PTHREAD'], [], [])
+    self.run_metadce_test('minimal_main.c', ['-Oz', '-sUSE_PTHREADS', '-sPROXY_TO_PTHREAD'], [], [])
 
   @parameterized({
     'noexcept': (['-O2'],                    [], ['waka']), # noqa
@@ -8282,7 +8284,7 @@ _d
     proc = self.run_process([EMCC, test_file('hello_world.c'), '-s', 'ASYNCIFY', '-s', "ASYNCIFY_ONLY=[DOS_ReadFile(unsigned short, unsigned char*, unsigned short*, bool)]"], stdout=PIPE, stderr=PIPE)
     self.assertContained('emcc: ASYNCIFY list contains an item without balanced parentheses', proc.stderr)
     self.assertContained('   DOS_ReadFile(unsigned short', proc.stderr)
-    self.assertContained('Try to quote the entire argument', proc.stderr)
+    self.assertContained('Try using a response file', proc.stderr)
 
   def test_asyncify_response_file(self):
     create_file('a.txt', r'''[
@@ -9173,7 +9175,7 @@ int main(void) {
     # DEFAULT_PTHREAD_STACK_SIZE.
     self.do_smart_test(test_file('other/test_proxy_to_pthread_stack.c'),
                        ['success'],
-                       emcc_args=['-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-s', 'DEFAULT_PTHREAD_STACK_SIZE=64kb', '-s', 'TOTAL_STACK=128kb'])
+                       emcc_args=['-s', 'USE_PTHREADS', '-s', 'PROXY_TO_PTHREAD', '-s', 'DEFAULT_PTHREAD_STACK_SIZE=64kb', '-s', 'TOTAL_STACK=128kb', '-s', 'EXIT_RUNTIME'])
 
   @parameterized({
     'async': ['-s', 'WASM_ASYNC_COMPILATION'],
@@ -10657,3 +10659,58 @@ kill -9 $$
     # Here we use NO_AUTO_NATIVE_LIBRARIES to disable the implictly linking that normally
     # includes the native GL library.
     self.run_process([EMCC, test_file('other/test_explict_gl_linking.c'), '-sNO_AUTO_NATIVE_LIBRARIES', '-lGL'])
+
+  def test_no_main_with_PROXY_TO_PTHREAD(self):
+    create_file('lib.cpp', r'''
+#include <emscripten.h>
+EMSCRIPTEN_KEEPALIVE
+void foo() {}
+''')
+    err = self.expect_fail([EMCC, 'lib.cpp', '-pthread', '-sPROXY_TO_PTHREAD'])
+    self.assertContained('emcc: error: PROXY_TO_PTHREAD proxies main() for you, but no main exists', err)
+
+  def test_archive_bad_extension(self):
+    # Regression test for https://github.com/emscripten-core/emscripten/issues/14012
+    # where llvm_nm_multiple would be confused by archives names like object files.
+    create_file('main.c', '''
+    #include <sys/socket.h>
+    int main() {
+       return (int)&accept;
+    }
+    ''')
+
+    self.run_process([EMCC, '-c', 'main.c'])
+    self.run_process([EMAR, 'crs', 'libtest.bc', 'main.o'])
+    self.run_process([EMCC, 'libtest.bc', 'libtest.bc'])
+
+  def test_split_dwarf_implicit_compile(self):
+    # Verify that the dwo file is generated in the current working directory, even when implicitly
+    # compiling (compile+link).
+    self.run_process([EMCC, test_file('hello_world.c'), '-g', '-gsplit-dwarf'])
+    self.assertExists('hello_world.dwo')
+
+  @parameterized({
+    '': [[]],
+    'strict': [['-sSTRICT']],
+    'no_allow': [['-sALLOW_UNIMPLEMENTED_SYSCALLS=0']],
+  })
+  def test_unimplemented_syscalls(self, args):
+    create_file('main.c', '''
+    #include <assert.h>
+    #include <errno.h>
+    #include <sys/mman.h>
+
+    int main() {
+      assert(mincore(0, 0, 0) == -1);
+      assert(errno == ENOSYS);
+      return 0;
+    }
+    ''')
+    cmd = [EMCC, 'main.c', '-sASSERTIONS'] + args
+    if args:
+      err = self.expect_fail(cmd)
+      self.assertContained('error: attempt to link unsupport syscall: __sys_mincore (use -s ALLOW_UNIMPLEMENTED_SYSCALLS (the default) to allow linking with a stub version', err)
+    else:
+      self.run_process(cmd)
+      err = self.run_js('a.out.js')
+      self.assertContained('warning: unsupported syscall: __sys_mincore', err)

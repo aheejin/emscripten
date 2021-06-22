@@ -658,7 +658,8 @@ var LibraryPThread = {
 #endif
     return navigator['hardwareConcurrency'];
   },
-
+    
+  {{{ USE_LSAN || USE_ASAN ? 'emscripten_builtin_' : '' }}}pthread_create__sig: 'iiiii',
   {{{ USE_LSAN || USE_ASAN ? 'emscripten_builtin_' : '' }}}pthread_create__deps: ['$spawnThread', 'pthread_self', 'memalign', 'emscripten_sync_run_in_main_thread_4'],
   {{{ USE_LSAN || USE_ASAN ? 'emscripten_builtin_' : '' }}}pthread_create: function(pthread_ptr, attr, start_routine, arg) {
     if (typeof SharedArrayBuffer === 'undefined') {
@@ -1055,23 +1056,15 @@ var LibraryPThread = {
     if (!ENVIRONMENT_IS_PTHREAD) _exit(status);
     else PThread.threadExit(status);
     // pthread_exit is marked noReturn, so we must not return from it.
-    if (ENVIRONMENT_IS_NODE) {
-      // exit the pthread properly on node, as a normal JS exception will halt
-      // the entire application.
-      process.exit(status);
-    }
     throw 'unwind';
   },
 
-  pthread_cleanup_push__sig: 'vii',
-  pthread_cleanup_push: function(routine, arg) {
-    PThread.threadExitHandlers.push(function() { {{{ makeDynCall('vi', 'routine') }}}(arg) });
+  __cxa_thread_atexit__sig: 'vii',
+  __cxa_thread_atexit: function(routine, arg) {
+    PThread.threadExitHandlers.push(function() { {{{ makeDynCall('vi', 'routine') }}}(arg) }); 
   },
+  __cxa_thread_atexit_impl: '__cxa_thread_atexit',
 
-  pthread_cleanup_pop: function(execute) {
-    var routine = PThread.threadExitHandlers.pop();
-    if (execute) routine();
-  },
 
   // Returns 0 on success, or one of the values -ETIMEDOUT, -EWOULDBLOCK or -EINVAL on error.
   emscripten_futex_wait__deps: ['emscripten_main_thread_process_queued_calls'],

@@ -2336,6 +2336,12 @@ The current type of b is: 9
     self.set_setting('INITIAL_MEMORY', '300mb')
     self.do_run_in_out_file_test('pthread/test_pthread_thread_local_storage.cpp')
 
+  @node_pthreads
+  def test_pthread_cleanup(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PTHREAD_POOL_SIZE', 4)
+    self.do_run_in_out_file_test('pthread/test_pthread_cleanup.cpp')
+
   def test_tcgetattr(self):
     self.do_runf(test_file('termios/test_tcgetattr.c'), 'success')
 
@@ -7513,7 +7519,7 @@ Module['onRuntimeInitialized'] = function() {
     self.set_setting('ASYNCIFY')
     self.set_setting('ASSERTIONS')
     self.set_setting('EXIT_RUNTIME', 1)
-    self.do_core_test('test_asyncify_during_exit.cpp', assert_returncode=1)
+    self.do_core_test('test_asyncify_during_exit.cpp', assert_returncode=NON_ZERO)
     print('NO_ASYNC')
     self.do_core_test('test_asyncify_during_exit.cpp', emcc_args=['-DNO_ASYNC'], out_suffix='_no_async')
 
@@ -8246,6 +8252,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_pthread_create_pool(self):
     # with a pool, we can synchronously depend on workers being available
     self.set_setting('PTHREAD_POOL_SIZE', '2')
+    self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-DALLOW_SYNC']
     self.do_run_in_out_file_test('core/pthread/create.cpp')
 
@@ -8253,6 +8260,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_pthread_create_proxy(self):
     # with PROXY_TO_PTHREAD, we can synchronously depend on workers being available
     self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-DALLOW_SYNC']
     self.do_run_in_out_file_test('core/pthread/create.cpp')
 
@@ -8260,12 +8268,14 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_pthread_create_embind_stack_check(self):
     # embind should work with stack overflow checks (see #12356)
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
+    self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['--bind']
     self.do_run_in_out_file_test('core/pthread/create.cpp')
 
   @node_pthreads
   def test_pthread_exceptions(self):
     self.set_setting('PTHREAD_POOL_SIZE', '2')
+    self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-fexceptions']
     self.do_run_in_out_file_test('core/pthread/exceptions.cpp')
 
@@ -8507,6 +8517,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
     # 'none' should fail to link because the dependency on ntohs was not added.
     err = self.expect_fail([EMCC, 'connect.c', '-sREVERSE_DEPS=none'])
     self.assertContained('undefined symbol: ntohs', err)
+
+  def test_emscripten_async_call(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test(test_file('core/test_emscripten_async_call.c'))
 
 
 # Generate tests for everything

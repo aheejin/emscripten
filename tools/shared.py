@@ -31,6 +31,7 @@ from . import cache, tempfiles, colored_logger
 from . import diagnostics
 from . import config
 from . import filelock
+from . import utils
 from .settings import settings
 from . import mylog
 
@@ -245,7 +246,7 @@ def timeout_run(proc, timeout=None, full_output=False, check=True):
   if check and proc.returncode != 0:
     raise subprocess.CalledProcessError(proc.returncode, '', stdout, stderr)
   if TRACK_PROCESS_SPAWNS:
-    logging.info('Process ' + str(proc.pid) + ' finished after ' + str(time.time() - start) + ' seconds. Exit code: ' + str(proc.returncode))
+    logging.info(f'Process {proc.pid} finished after {time.time() - start} seconds. Exit code: {proc.returncode}')
   return '\n'.join(out) if full_output else out[0]
 
 
@@ -255,7 +256,7 @@ def get_npm_cmd(name):
   else:
     cmd = config.NODE_JS + [path_from_root('node_modules', '.bin', name)]
   if not os.path.exists(cmd[-1]):
-    exit_with_error('%s was not found! Please run "npm install" in Emscripten root directory to set up npm dependencies' % name)
+    exit_with_error(f'{name} was not found! Please run "npm install" in Emscripten root directory to set up npm dependencies')
   return cmd
 
 
@@ -324,7 +325,8 @@ def check_node_version():
     return False
 
   if version < EXPECTED_NODE_VERSION:
-    diagnostics.warning('version-check', 'node version appears too old (seeing "%s", expected "%s")', actual, 'v' + ('.'.join(map(str, EXPECTED_NODE_VERSION))))
+    expected = '.'.join(str(v) for v in EXPECTED_NODE_VERSION)
+    diagnostics.warning('version-check', f'node version appears too old (seeing "{actual}", expected "v{expected}")')
     return False
 
   return True
@@ -340,8 +342,8 @@ def set_version_globals():
 
 
 def generate_sanity():
-  sanity_file_content = EMSCRIPTEN_VERSION + '|' + config.LLVM_ROOT + '|' + get_clang_version()
-  config_data = read_file(config.EM_CONFIG)
+  sanity_file_content = f'{EMSCRIPTEN_VERSION}|{config.LLVM_ROOT}|{get_clang_version()}'
+  config_data = utils.read_file(config.EM_CONFIG)
   checksum = binascii.crc32(config_data.encode())
   sanity_file_content += '|%#x\n' % checksum
   return sanity_file_content
@@ -409,7 +411,7 @@ def check_sanity(force=False):
   sanity_file = Cache.get_path('sanity.txt')
   with Cache.lock():
     if os.path.exists(sanity_file):
-      sanity_data = read_file(sanity_file)
+      sanity_data = utils.read_file(sanity_file)
       if sanity_data != expected:
         logger.debug('old sanity: %s' % sanity_data)
         logger.debug('new sanity: %s' % expected)
@@ -503,7 +505,7 @@ class Configuration:
 
     self.TEMP_DIR = os.environ.get("EMCC_TEMP_DIR", tempfile.gettempdir())
     if not os.path.isdir(self.TEMP_DIR):
-      exit_with_error("The temporary directory `" + self.TEMP_DIR + "` does not exist! Please make sure that the path is correct.")
+      exit_with_error(f'The temporary directory `{self.TEMP_DIR}` does not exist! Please make sure that the path is correct.')
 
     self.CANONICAL_TEMP_DIR = get_canonical_temp_dir(self.TEMP_DIR)
 
@@ -512,7 +514,7 @@ class Configuration:
       try:
         safe_ensure_dirs(self.EMSCRIPTEN_TEMP_DIR)
       except Exception as e:
-        exit_with_error(str(e) + 'Could not create canonical temp dir. Check definition of TEMP_DIR in ' + config.EM_CONFIG)
+        exit_with_error(str(e) + f'Could not create canonical temp dir. Check definition of TEMP_DIR in {config.EM_CONFIG}')
 
       # Since the canonical temp directory is, by definition, the same
       # between all processes that run in DEBUG mode we need to use a multi
@@ -791,7 +793,7 @@ def read_and_preprocess(filename, expand_macros=False):
     args += ['--expandMacros']
 
   run_js_tool(path_from_root('tools/preprocessor.js'), args, True, stdout=open(stdout, 'w'), cwd=dirname)
-  out = read_file(stdout)
+  out = utils.read_file(stdout)
 
   return out
 
@@ -800,24 +802,6 @@ def do_replace(input_, pattern, replacement):
   if pattern not in input_:
     exit_with_error('expected to find pattern in input JS: %s' % pattern)
   return input_.replace(pattern, replacement)
-
-
-def read_file(file_path):
-  """Read from a file opened in text mode"""
-  with open(file_path) as fh:
-    return fh.read()
-
-
-def read_binary(file_path):
-  """Read from a file opened in binary mode"""
-  with open(file_path, 'rb') as fh:
-    return fh.read()
-
-
-def write_file(file_path, text):
-  """Write to a file opened in text mode"""
-  with open(file_path, 'w') as fh:
-    fh.write(text)
 
 
 # ============================================================================

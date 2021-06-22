@@ -304,10 +304,10 @@ mergeInto(LibraryManager.library, {
     },
   },
 
-  emscripten_sleep__deps: ['$Browser'],
+  emscripten_sleep__deps: ['$safeSetTimeout'],
   emscripten_sleep: function(ms) {
     Asyncify.handleSleep(function(wakeUp) {
-      Browser.safeSetTimeout(wakeUp, ms);
+      safeSetTimeout(wakeUp, ms);
     });
   },
 
@@ -334,10 +334,10 @@ mergeInto(LibraryManager.library, {
     });
   },
 
-  emscripten_wget_data__deps: ['$Browser'],
+  emscripten_wget_data__deps: ['$asyncLoad', 'malloc'],
   emscripten_wget_data: function(url, pbuffer, pnum, perror) {
     Asyncify.handleSleep(function(wakeUp) {
-      Browser.asyncLoad(UTF8ToString(url), function(byteArray) {
+      asyncLoad(UTF8ToString(url), function(byteArray) {
         // can only allocate the buffer after the wakeUp, not during an asyncing
         var buffer = _malloc(byteArray.length); // must be freed by caller!
         HEAPU8.set(byteArray, buffer);
