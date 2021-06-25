@@ -32,10 +32,10 @@ if __name__ == '__main__':
 from tools.shared import try_delete, config
 from tools.shared import EMCC, EMXX, EMAR, EMRANLIB, PYTHON, FILE_PACKAGER, WINDOWS, EM_BUILD_VERBOSE
 from tools.shared import CLANG_CC, CLANG_CXX, LLVM_AR, LLVM_DWARFDUMP, EMCMAKE, EMCONFIGURE
-from runner import RunnerCore, path_from_root, is_slow_test, ensure_dir, disabled, make_executable
-from runner import env_modify, no_mac, no_windows, requires_native_clang, with_env_modify
-from runner import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
-from runner import compiler_for, read_file, read_binary, EMBUILDER, require_v8, require_node
+from common import RunnerCore, path_from_root, is_slow_test, ensure_dir, disabled, make_executable
+from common import env_modify, no_mac, no_windows, requires_native_clang, with_env_modify
+from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
+from common import compiler_for, read_file, read_binary, EMBUILDER, require_v8, require_node
 from tools import shared, building, utils, deps_info
 import jsrun
 import clang_native
@@ -5725,6 +5725,14 @@ int main(int argc,char** argv) {
     self.assertContained('hello1_val by hello1:3', out)
     self.assertContained('hello1_val by hello2:3', out)
 
+  def test_dlopen_blocking(self):
+    create_file('side.c', 'int foo = 42;\n')
+    self.run_process([EMCC, 'side.c', '-o', 'libside.so', '-s', 'SIDE_MODULE'])
+    self.set_setting('MAIN_MODULE', 2)
+    self.set_setting('EXIT_RUNTIME')
+    # Under node this should should always works because we can do synchronous readBinary
+    self.do_other_test('test_dlopen_blocking.c')
+
   def test_dlsym_rtld_default(self):
     create_file('main.c', r'''
 #include <stdio.h>
@@ -10309,10 +10317,16 @@ exec "$@"
   def test_syslog(self):
     self.do_other_test('test_syslog.c')
 
-  def test_split_module(self):
+  @parameterized({
+    '': (False,),
+    'custom': (True,),
+  })
+  def test_split_module(self, customLoader):
     self.set_setting('SPLIT_MODULE')
     self.emcc_args += ['-g', '-Wno-experimental']
     self.emcc_args += ['--post-js', test_file('other/test_split_module.post.js')]
+    if customLoader:
+      self.emcc_args += ['--pre-js', test_file('other/test_load_split_module.pre.js')]
     self.emcc_args += ['-sEXPORTED_FUNCTIONS=_malloc,_free']
     self.do_other_test('test_split_module.c')
     self.assertExists('test_split_module.wasm')
@@ -10327,6 +10341,7 @@ exec "$@"
     os.rename('secondary.wasm', 'test_split_module.deferred.wasm')
     result = self.run_js('test_split_module.js')
     self.assertNotIn('profile', result)
+    self.assertContainedIf('Custom handler for loading split module.', result, condition=customLoader)
     self.assertIn('Hello! answer: 42', result)
 
   def test_split_main_module(self):
@@ -10436,8 +10451,6 @@ exec "$@"
         cmd.append('-sUSE_OFFSET_CONVERTER')
       if 'embind' in function:
         cmd.append('--bind')
-      if 'fetch' in function:
-        cmd.append('-sFETCH')
       if 'websocket' in function:
         cmd += ['-sPROXY_POSIX_SOCKETS', '-lwebsocket.js']
       if function == 'Mix_LoadWAV_RW':

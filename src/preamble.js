@@ -424,14 +424,14 @@ function exitRuntime() {
   checkStackCookie();
 #endif
 #if USE_PTHREADS
+#if EXIT_RUNTIME
+  PThread.runExitHandlers();
+#endif
   if (ENVIRONMENT_IS_PTHREAD) return; // PThreads reuse the runtime from the main thread.
 #endif
 #if EXIT_RUNTIME
   callRuntimeCallbacks(__ATEXIT__);
   <<< ATEXITS >>>
-#if USE_PTHREADS
-  PThread.runExitHandlers();
-#endif
 #endif
   runtimeExited = true;
 }
@@ -507,11 +507,6 @@ function getUniqueRunDependency(id) {
 }
 
 function addRunDependency(id) {
-#if USE_PTHREADS
-  // We should never get here in pthreads (could no-op this out if called in pthreads, but that might indicate a bug in caller side,
-  // so good to be very explicit)
-  assert(!ENVIRONMENT_IS_PTHREAD, "addRunDependency cannot be used in a pthread worker");
-#endif
   runDependencies++;
 
 #if expectToReceiveOnModule('monitorRunDependencies')
@@ -841,6 +836,7 @@ var wasmOffsetConverter;
 #endif
 
 #if SPLIT_MODULE
+{{{ makeModuleReceiveWithVar('loadSplitModule', 'loadSplitModule', 'instantiateSync',  true) }}}
 var splitModuleProxyHandler = {
   'get': function(target, prop, receiver) {
     return function() {
@@ -848,7 +844,7 @@ var splitModuleProxyHandler = {
       var imports = {'primary': Module['asm']};
       // Replace '.wasm' suffix with '.deferred.wasm'.
       var deferred = wasmBinaryFile.slice(0, -5) + '.deferred.wasm'
-      instantiateSync(deferred, imports);
+      loadSplitModule(deferred, imports, prop);
       err('instantiated deferred module, continuing');
 #if RELOCATABLE
       // When the table is dynamically laid out, the placeholder functions names
@@ -966,11 +962,13 @@ function createWasm() {
 
     Module['asm'] = exports;
 
-#if MAIN_MODULE && AUTOLOAD_DYLIBS
+#if MAIN_MODULE
+#if AUTOLOAD_DYLIBS
     var metadata = getDylinkMetadata(module);
     if (metadata.neededDynlibs) {
       dynamicLibraries = metadata.neededDynlibs.concat(dynamicLibraries);
     }
+#endif
     mergeLibSymbols(exports, 'main')
 #endif
 

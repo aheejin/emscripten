@@ -12,7 +12,7 @@ See
 import glob
 import os
 
-from runner import RunnerCore, path_from_root
+from common import RunnerCore, path_from_root
 from tools import config
 from tools.shared import EMCC
 import test_posixtest_browser
@@ -139,6 +139,7 @@ unsupported = {
 # TODO investigate these tests.
 flaky = {
   'test_pthread_cond_signal_1_1': 'flaky: https://github.com/emscripten-core/emscripten/issues/13283',
+  'test_pthread_barrier_wait_2_1': 'flaky: https://github.com/emscripten-core/emscripten/issues/14508',
 }
 
 # Mark certain tests as not passing
@@ -163,10 +164,7 @@ def make_test(name, testfile, browser):
             '-sTOTAL_MEMORY=256mb',
             '-sPTHREAD_POOL_SIZE=40']
     if browser:
-      # Only are only needed for browser tests of the was btest
-      # injects headers using `-include` flag.
-      args += ['-Wno-macro-redefined', '-D_GNU_SOURCE']
-      self.btest(testfile, args=args, expected='exit:0')
+      self.btest_exit(testfile, args=args)
     else:
       self.run_process([EMCC, testfile, '-o', 'test.js'] + args)
       self.run_js('test.js', engine=engine)

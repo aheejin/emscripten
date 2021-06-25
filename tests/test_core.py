@@ -24,11 +24,11 @@ from tools.shared import try_delete, PIPE
 from tools.shared import PYTHON, EMCC, EMAR
 from tools.utils import WINDOWS, MACOS
 from tools import shared, building, config, webassembly
-from runner import RunnerCore, path_from_root, requires_native_clang, test_file
-from runner import skip_if, needs_dylink, no_windows, is_slow_test, create_file, parameterized
-from runner import env_modify, with_env_modify, disabled, node_pthreads
-from runner import read_file, read_binary, require_node
-from runner import NON_ZERO, WEBIDL_BINDER, EMBUILDER, EMMAKE
+from common import RunnerCore, path_from_root, requires_native_clang, test_file
+from common import skip_if, needs_dylink, no_windows, is_slow_test, create_file, parameterized
+from common import env_modify, with_env_modify, disabled, node_pthreads
+from common import read_file, read_binary, require_node
+from common import NON_ZERO, WEBIDL_BINDER, EMBUILDER, EMMAKE
 import clang_native
 
 # decorators for limiting which modes a test can run in
@@ -2342,6 +2342,11 @@ The current type of b is: 9
     self.set_setting('PTHREAD_POOL_SIZE', 4)
     self.do_run_in_out_file_test('pthread/test_pthread_cleanup.cpp')
 
+  @node_pthreads
+  def test_pthread_setspecific_mainthread(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test('pthread/test_pthread_setspecific_mainthread.c')
+
   def test_tcgetattr(self):
     self.do_runf(test_file('termios/test_tcgetattr.c'), 'success')
 
@@ -2553,10 +2558,7 @@ The current type of b is: 9
         return 0;
       }
       '''
-    self.do_run(src, 'error: Could not load dynamic lib: libfoo.so\nError: No such file or directory')
-    print('without assertions, the error is less clear')
-    self.set_setting('ASSERTIONS', 0)
-    self.do_run(src, 'error: Could not load dynamic lib: libfoo.so\nError: FS error')
+    self.do_run(src, "error: Could not load dynamic lib: libfoo.so\nError: ENOENT: no such file or directory, open 'libfoo.so'")
 
   @needs_dylink
   def test_dlfcn_basic(self):
@@ -7463,20 +7465,16 @@ Module['onRuntimeInitialized'] = function() {
       self.set_setting('ASYNCIFY_ONLY', '@response.file')
     self.set_setting('ASYNCIFY')
     self.emcc_args += args
-    try:
+
+    if should_pass:
       self.do_core_test('test_asyncify_lists.cpp', assert_identical=True)
-      if not should_pass:
-        should_pass = True
-        raise Exception('should not have passed')
-    except Exception:
-      if should_pass:
-        raise
+    else:
+      self.do_runf(test_file('core/test_asyncify_lists.cpp'), 'exception thrown', assert_returncode=NON_ZERO)
 
     # use of ASYNCIFY_* options may require intermediate debug info. that should
     # not end up emitted in the final binary
     if self.is_wasm():
-      with open('test_asyncify_lists.wasm', 'rb') as f:
-        binary = f.read()
+      binary = read_binary('test_asyncify_lists.wasm')
       # there should be no name section
       self.assertFalse(b'name' in binary)
       # in a fully-optimized build, imports and exports are minified too and we

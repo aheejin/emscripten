@@ -20,9 +20,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.request import urlopen
 
-from runner import BrowserCore, RunnerCore, path_from_root, has_browser, EMTEST_BROWSER, Reporting
-from runner import create_file, parameterized, ensure_dir, disabled, test_file, WEBIDL_BINDER, EMMAKE
-from runner import read_file
+from common import BrowserCore, RunnerCore, path_from_root, has_browser, EMTEST_BROWSER, Reporting
+from common import create_file, parameterized, ensure_dir, disabled, test_file, WEBIDL_BINDER, EMMAKE
+from common import read_file
 from tools import shared
 from tools import system_libs
 from tools.shared import EMCC, WINDOWS, FILE_PACKAGER, PIPE
@@ -426,7 +426,13 @@ If manually bisecting:
     self.compile_btest([cpp, '--pre-js', data_js_file, '-o', abs_page_file, '-s', 'FORCE_FILESYSTEM'])
     self.run_browser(page_file, '|load me right before|.', '/report_result?0')
 
-  def test_preload_caching(self):
+  @parameterized({
+    '0': (0,),
+    '1mb': (1 * 1024 * 1024,),
+    '100mb': (100 * 1024 * 1024,),
+    '150mb': (150 * 1024 * 1024,),
+  })
+  def test_preload_caching(self, extra_size):
     create_file('main.cpp', r'''
       #include <stdio.h>
       #include <string.h>
@@ -473,14 +479,13 @@ If manually bisecting:
     # chrome's limit on IndexedDB item sizes, see
     # https://cs.chromium.org/chromium/src/content/renderer/indexed_db/webidbdatabase_impl.cc?type=cs&q=%22The+serialized+value+is+too+large%22&sq=package:chromium&g=0&l=177
     # https://cs.chromium.org/chromium/src/out/Debug/gen/third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h?type=cs&sq=package:chromium&g=0&l=60
-    for extra_size in (0, 1 * 1024 * 1024, 100 * 1024 * 1024, 150 * 1024 * 1024):
-      if is_chrome() and extra_size >= 100 * 1024 * 1024:
-        continue
-      create_file('somefile.txt', '''load me right before running the code please''' + ('_' * extra_size))
-      print('size:', os.path.getsize('somefile.txt'))
-      self.compile_btest(['main.cpp', '--use-preload-cache', '--js-library', 'test.js', '--preload-file', 'somefile.txt', '-o', 'page.html', '-s', 'ALLOW_MEMORY_GROWTH'])
-      self.run_browser('page.html', 'You should see |load me right before|.', '/report_result?1')
-      self.run_browser('page.html', 'You should see |load me right before|.', '/report_result?2')
+    if is_chrome() and extra_size >= 100 * 1024 * 1024:
+      self.skipTest('chrome bug')
+    create_file('somefile.txt', '''load me right before running the code please''' + ('_' * extra_size))
+    print('size:', os.path.getsize('somefile.txt'))
+    self.compile_btest(['main.cpp', '--use-preload-cache', '--js-library', 'test.js', '--preload-file', 'somefile.txt', '-o', 'page.html', '-s', 'ALLOW_MEMORY_GROWTH'])
+    self.run_browser('page.html', 'You should see |load me right before|.', '/report_result?1')
+    self.run_browser('page.html', 'You should see |load me right before|.', '/report_result?2')
 
   def test_preload_caching_indexeddb_name(self):
     create_file('somefile.txt', '''load me right before running the code please''')
@@ -3533,6 +3538,15 @@ window.close = function() {
     # same wasm side module works
     self.btest_exit(self.in_dir('main.c'), args=['-s', 'MAIN_MODULE=2', '-O2', '-s', 'EXPORT_ALL', 'side.wasm'])
 
+  def test_dlopen_blocking(self):
+    create_file('side.c', 'int foo = 42;\n')
+    self.run_process([EMCC, 'side.c', '-o', 'libside.so', '-s', 'SIDE_MODULE', '-s', 'USE_PTHREADS', '-Wno-experimental'])
+    # Attempt to use dlopen without preloading the side module should fail on the main thread
+    # since the syncronous `readBinary` function does not exist.
+    self.btest_exit(test_file('other/test_dlopen_blocking.c'), assert_returncode=1, args=['-s', 'MAIN_MODULE=2'])
+    # But with PROXY_TO_PTHEAD it does work, since we can do blocking and sync XHR in a worker.
+    self.btest_exit(test_file('other/test_dlopen_blocking.c'), args=['-s', 'MAIN_MODULE=2', '-s', 'PROXY_TO_PTHREAD', '-s', 'USE_PTHREADS', '-Wno-experimental'])
+
   # verify that dynamic linking works in all kinds of in-browser environments.
   # don't mix different kinds in a single test.
   @parameterized({
@@ -3942,7 +3956,7 @@ window.close = function() {
   # Test that the main thread is able to use pthread_set/getspecific.
   @requires_threads
   def test_pthread_setspecific_mainthread(self):
-    self.btest(test_file('pthread/test_pthread_setspecific_mainthread.cpp'), expected='0', args=['-s', 'INITIAL_MEMORY=64MB', '-O3', '-s', 'USE_PTHREADS'], also_asmjs=True)
+    self.btest_exit(test_file('pthread/test_pthread_setspecific_mainthread.c'), args=['-s', 'INITIAL_MEMORY=64MB', '-O3', '-s', 'USE_PTHREADS'], also_asmjs=True)
 
   # Test that pthreads have access to filesystem.
   @requires_threads
