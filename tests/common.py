@@ -42,24 +42,16 @@ logger = logging.getLogger('common')
 # test suite to run using another browser command line than the default system
 # browser.  Setting '0' as the browser disables running a browser (but we still
 # see tests compile)
-EMTEST_BROWSER = os.getenv('EMTEST_BROWSER')
-
-EMTEST_DETECT_TEMPFILE_LEAKS = int(os.getenv('EMTEST_DETECT_TEMPFILE_LEAKS', '0'))
-
-# TODO(sbc): Remove this check for the legacy name once its been around for a while.
-assert 'EM_SAVE_DIR' not in os.environ, "Please use EMTEST_SAVE_DIR instead of EM_SAVE_DIR"
-
-EMTEST_SAVE_DIR = int(os.getenv('EMTEST_SAVE_DIR', '0'))
-
+EMTEST_BROWSER = None
+EMTEST_DETECT_TEMPFILE_LEAKS = None
+EMTEST_SAVE_DIR = None
 # generally js engines are equivalent, testing 1 is enough. set this
 # to force testing on all js engines, good to find js engine bugs
-EMTEST_ALL_ENGINES = os.getenv('EMTEST_ALL_ENGINES')
-
-EMTEST_SKIP_SLOW = os.getenv('EMTEST_SKIP_SLOW')
-
-EMTEST_LACKS_NATIVE_CLANG = os.getenv('EMTEST_LACKS_NATIVE_CLANG')
-
-EMTEST_VERBOSE = int(os.getenv('EMTEST_VERBOSE', '0')) or shared.DEBUG
+EMTEST_ALL_ENGINES = None
+EMTEST_SKIP_SLOW = None
+EMTEST_LACKS_NATIVE_CLANG = None
+EMTEST_VERBOSE = None
+EMTEST_REBASELINE = None
 
 TEST_ROOT = path_from_root('tests')
 
@@ -372,6 +364,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       else:
         self.fail('d8 required to run this test.  Use EMTEST_SKIP_V8 to skip')
     self.js_engines = [config.V8_ENGINE]
+    self.emcc_args.append('-sENVIRONMENT=shell')
 
   def require_node(self):
     if not config.NODE_JS or config.NODE_JS not in config.JS_ENGINES:
@@ -1571,8 +1564,8 @@ def build_library(name,
                   build_dir,
                   output_dir,
                   generated_libs,
-                  configure=['sh', './configure'],
-                  make=['make'],
+                  configure,
+                  make,
                   make_args=[],
                   cache=None,
                   cache_name=None,
@@ -1603,11 +1596,18 @@ def build_library(name,
     env = os.environ.copy()
   env.update(env_init)
 
-  if configure:
-    if configure[0] == 'cmake':
-      configure = [EMCMAKE] + configure
+  if not native:
+    # Inject emcmake, emconfigure or emmake accordingly, but only if we are
+    # cross compiling.
+    if configure:
+      if configure[0] == 'cmake':
+        configure = [EMCMAKE] + configure
+      else:
+        configure = [EMCONFIGURE] + configure
     else:
-      configure = [EMCONFIGURE] + configure
+      make = [EMMAKE] + make
+
+  if configure:
     try:
       with open(os.path.join(project_dir, 'configure_out'), 'w') as out:
         with open(os.path.join(project_dir, 'configure_err'), 'w') as err:

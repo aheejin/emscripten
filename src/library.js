@@ -125,6 +125,7 @@ LibraryManager.library = {
   // sys/file.h
   // ==========================================================================
 
+  flock__unimplemented: true,
   flock: function(fd, operation) {
     // int flock(int fd, int operation);
     // Pretend to succeed
@@ -134,6 +135,7 @@ LibraryManager.library = {
   chroot__deps: ['$setErrNo'],
   chroot__proxy: 'sync',
   chroot__sig: 'ii',
+  chroot__unimplemented: true,
   chroot: function(path) {
     // int chroot(const char *path);
     // http://pubs.opengroup.org/onlinepubs/7908799/xsh/chroot.html
@@ -143,6 +145,7 @@ LibraryManager.library = {
 
   execve__deps: ['$setErrNo'],
   execve__sig: 'iiii',
+  execve__unimplemented: true,
   execve: function(path, argv, envp) {
     // int execve(const char *pathname, char *const argv[],
     //            char *const envp[]);
@@ -173,6 +176,7 @@ LibraryManager.library = {
   // processes.
   fork__deps: ['$setErrNo'],
   fork__sig: 'i',
+  fork__unimplemented: true,
   fork: function() {
     // pid_t fork(void);
     // http://pubs.opengroup.org/onlinepubs/000095399/functions/fork.html
@@ -184,17 +188,17 @@ LibraryManager.library = {
   posix_spawn: 'fork',
 
   setgroups__deps: ['$setErrNo', 'sysconf'],
+  setgroups__unimplemented: true,
   setgroups: function(ngroups, gidset) {
     // int setgroups(int ngroups, const gid_t *gidset);
     // https://developer.apple.com/library/mac/#documentation/Darwin/Reference/ManPages/man2/setgroups.2.html
     if (ngroups < 1 || ngroups > _sysconf({{{ cDefine('_SC_NGROUPS_MAX') }}})) {
       setErrNo({{{ cDefine('EINVAL') }}});
       return -1;
-    } else {
-      // We have just one process/user/group, so it makes no sense to set groups.
-      setErrNo({{{ cDefine('EPERM') }}});
-      return -1;
     }
+    // We have just one process/user/group, so it makes no sense to set groups.
+    setErrNo({{{ cDefine('EPERM') }}});
+    return -1;
   },
 
   emscripten_get_heap_max: function() {
@@ -245,7 +249,7 @@ LibraryManager.library = {
       return 1 /*success*/;
     } catch(e) {
 #if ASSERTIONS
-      console.error('emscripten_realloc_buffer: Attempted to grow heap from ' + buffer.byteLength  + ' bytes to ' + size + ' bytes, but got error: ' + e);
+      err('emscripten_realloc_buffer: Attempted to grow heap from ' + buffer.byteLength  + ' bytes to ' + size + ' bytes, but got error: ' + e);
 #endif
     }
     // implicit 0 return to save code size (caller will cast "undefined" into 0
@@ -338,7 +342,7 @@ LibraryManager.library = {
       var replacement = emscripten_realloc_buffer(newSize);
 #if ASSERTIONS == 2
       var t1 = _emscripten_get_now();
-      console.log('Heap resize call from ' + oldSize + ' to ' + newSize + ' took ' + (t1 - t0) + ' msecs. Success: ' + !!replacement);
+      out('Heap resize call from ' + oldSize + ' to ' + newSize + ' took ' + (t1 - t0) + ' msecs. Success: ' + !!replacement);
 #endif
       if (replacement) {
 #if ASSERTIONS && WASM2JS
@@ -504,17 +508,6 @@ LibraryManager.library = {
   __assert_fail: function(condition, filename, line, func) {
     abort('Assertion failed: ' + UTF8ToString(condition) + ', at: ' + [filename ? UTF8ToString(filename) : 'unknown filename', line, func ? UTF8ToString(func) : 'unknown function']);
   },
-
-  // ==========================================================================
-  // pwd.h
-  // ==========================================================================
-
-  // TODO: Implement.
-  // http://pubs.opengroup.org/onlinepubs/009695399/basedefs/pwd.h.html
-  getpwuid: function(uid) {
-    return 0; // NULL
-  },
-
 
   // ==========================================================================
   // time.h
@@ -759,6 +752,7 @@ LibraryManager.library = {
   },
 
   stime__deps: ['$setErrNo'],
+  stime__unimplemented: true,
   stime: function(when) {
     setErrNo({{{ cDefine('EPERM') }}});
     return -1;
@@ -1393,6 +1387,7 @@ LibraryManager.library = {
     return _strptime(buf, format, tm); // no locale support yet
   },
 
+  getdate__unimplemented: true,
   getdate: function(string) {
     // struct tm *getdate(const char *string);
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/getdate.html
@@ -1483,6 +1478,7 @@ LibraryManager.library = {
   // ==========================================================================
 
   times__deps: ['$zeroMemory'],
+  times__unimplemented: true,
   times: function(buffer) {
     // clock_t times(struct tms *buffer);
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/times.html
@@ -1492,26 +1488,6 @@ LibraryManager.library = {
     }
     return 0;
   },
-
-  // ==========================================================================
-  // sys/types.h
-  // ==========================================================================
-  // http://www.kernel.org/doc/man-pages/online/pages/man3/minor.3.html
-  makedev__sig: 'iii',
-  makedev: function(maj, min) {
-    return ((maj) << 8 | (min));
-  },
-  gnu_dev_makedev: 'makedev',
-  major__sig: 'ii',
-  major: function(dev) {
-    return ((dev) >> 8);
-  },
-  gnu_dev_major: 'major',
-  minor__sig: 'ii',
-  minor: function(dev) {
-    return ((dev) & 0xff);
-  },
-  gnu_dev_minor: 'minor',
 
   // ==========================================================================
   // setjmp.h
@@ -1537,9 +1513,11 @@ LibraryManager.library = {
     return this.longjmp__deps;
   },
   // will never be emitted, as the dep errors at compile time
+  longjmp__unimplemented: true,
   longjmp: function(env, value) {
     abort('longjmp not supported');
   },
+  setjmp__unimplemented: true,
   setjmp: function(env, value) {
     abort('setjmp not supported');
   },
@@ -1551,6 +1529,7 @@ LibraryManager.library = {
 
   wait__deps: ['$setErrNo'],
   wait__sig: 'ii',
+  wait__unimplemented: true,
   wait: function(stat_loc) {
     // pid_t wait(int *stat_loc);
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/wait.html
@@ -2556,22 +2535,36 @@ LibraryManager.library = {
 
   // pwd.h
 
+  getpwnam__unimplemented: true,
   getpwnam: function() { throw 'getpwnam: TODO' },
+  getpwnam_r__unimplemented: true,
   getpwnam_r: function() { throw 'getpwnam_r: TODO' },
+  getpwuid__unimplemented: true,
   getpwuid: function() { throw 'getpwuid: TODO' },
+  getpwuid_r__unimplemented: true,
   getpwuid_r: function() { throw 'getpwuid_r: TODO' },
+  setpwent__unimplemented: true,
   setpwent: function() { throw 'setpwent: TODO' },
+  getpwent__unimplemented: true,
   getpwent: function() { throw 'getpwent: TODO' },
+  endpwent__unimplemented: true,
   endpwent: function() { throw 'endpwent: TODO' },
 
   // grp.h
 
+  getgrgid__unimplemented: true,
   getgrgid: function() { throw 'getgrgid: TODO' },
+  getgrgid_r__unimplemented: true,
   getgrgid_r: function() { throw 'getgrgid_r: TODO' },
+  getgrnam__unimplemented: true,
   getgrnam: function() { throw 'getgrnam: TODO' },
+  getgrnam_r__unimplemented: true,
   getgrnam_r: function() { throw 'getgrnam_r: TODO' },
+  getgrent__unimplemented: true,
   getgrent: function() { throw 'getgrent: TODO' },
+  endgrent__unimplemented: true,
   endgrent: function() { throw 'endgrent: TODO' },
+  setgrent__unimplemented: true,
   setgrent: function() { throw 'setgrent: TODO' },
 
   // random.h
@@ -2891,7 +2884,7 @@ LibraryManager.library = {
 
     if (flags & 1 /*EM_LOG_CONSOLE*/) {
       if (flags & 4 /*EM_LOG_ERROR*/) {
-        console.error(str);
+        err(str);
       } else if (flags & 2 /*EM_LOG_WARN*/) {
         console.warn(str);
       } else if (flags & 512 /*EM_LOG_INFO*/) {
@@ -2899,7 +2892,7 @@ LibraryManager.library = {
       } else if (flags & 256 /*EM_LOG_DEBUG*/) {
         console.debug(str);
       } else {
-        console.log(str);
+        out(str);
       }
     } else if (flags & 6 /*EM_LOG_ERROR|EM_LOG_WARN*/) {
       err(str);
@@ -3687,6 +3680,30 @@ LibraryManager.library = {
       }
     });
     if (dep) addRunDependency(dep);
+  },
+
+  $alignMemory: function(size, alignment) {
+#if ASSERTIONS
+    assert(alignment, "alignment argument is required");
+#endif
+    return Math.ceil(size / alignment) * alignment;
+  },
+
+  // Allocate memory for an mmap operation. This allocates space of the right
+  // page-aligned size, and clears the allocated space.
+  $mmapAlloc__deps: ['$zeroMemory', '$alignMemory'],
+  $mmapAlloc: function(size) {
+#if hasExportedFunction('_memalign')
+    size = alignMemory(size, {{{ WASM_PAGE_SIZE }}});
+    var ptr = _memalign({{{ WASM_PAGE_SIZE }}}, size);
+    if (!ptr) return 0;
+    zeroMemory(ptr, size);
+    return ptr;
+#elif ASSERTIONS
+    abort('internal error: mmapAlloc called but `memalign` native symbol not exported');
+#else
+    abort();
+#endif
   },
 
 #if RELOCATABLE

@@ -37,6 +37,7 @@ from common import env_modify, no_mac, no_windows, requires_native_clang, with_e
 from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
 from common import compiler_for, read_file, read_binary, EMBUILDER, require_v8, require_node
 from tools import shared, building, utils, deps_info
+import common
 import jsrun
 import clang_native
 from tools import line_endings
@@ -48,8 +49,6 @@ emconfig = shared.bat_suffix(path_from_root('em-config'))
 emsize = shared.bat_suffix(path_from_root('emsize'))
 wasm_dis = Path(building.get_binaryen_bin(), 'wasm-dis')
 wasm_opt = Path(building.get_binaryen_bin(), 'wasm-opt')
-
-EMTEST_REBASELINE = int(os.getenv('EMTEST_REBASELINE', '0'))
 
 
 class temp_directory():
@@ -512,7 +511,7 @@ f.close()
         self.clear()
         wasm = '=0' not in str(mode)
         print('  mode', mode, 'wasm?', wasm)
-        self.run_process([EMCC, test_file('hello_world.c')] + opts + mode)
+        self.run_process([EMCC, test_file('hello_world.c'), '-sENVIRONMENT=node,shell'] + opts + mode)
         self.assertExists('a.out.js')
         if wasm:
           self.assertExists('a.out.wasm')
@@ -2756,7 +2755,7 @@ int main()
     return 0;
 }
     ''')
-    self.run_process([EMXX, 'src.cpp', '--embed-file', 'src.cpp'])
+    self.run_process([EMXX, 'src.cpp', '--embed-file', 'src.cpp', '-sENVIRONMENT=node,shell'])
     for engine in config.JS_ENGINES:
       out = self.run_js('a.out.js', engine=engine)
       self.assertContained('File size: 724', out)
@@ -3899,7 +3898,7 @@ int main(int argc, char **argv) {
     for code in [0, 123]:
       for call_exit in [0, 1]:
         for async_compile in [0, 1]:
-          self.run_process([EMXX, 'src.cpp', '-DCODE=%d' % code, '-s', 'EXIT_RUNTIME=%d' % (1 - no_exit), '-DCALL_EXIT=%d' % call_exit, '-s', 'WASM_ASYNC_COMPILATION=%d' % async_compile])
+          self.run_process([EMXX, 'src.cpp', '-sENVIRONMENT=node,shell', '-DCODE=%d' % code, '-s', 'EXIT_RUNTIME=%d' % (1 - no_exit), '-DCALL_EXIT=%d' % call_exit, '-s', 'WASM_ASYNC_COMPILATION=%d' % async_compile])
           for engine in config.JS_ENGINES:
             # async compilation can't return a code in d8
             if async_compile and engine == config.V8_ENGINE:
@@ -6973,7 +6972,7 @@ int main() {
   def assertFileContents(self, filename, contents):
     contents = contents.replace('\r', '')
 
-    if EMTEST_REBASELINE:
+    if common.EMTEST_REBASELINE:
       with open(filename, 'w') as f:
         f.write(contents)
       return
@@ -7038,7 +7037,7 @@ int main() {
       # measure the wasm size without the name section
       self.run_process([wasm_opt, 'a.out.wasm', '--strip-debug', '--all-features', '-o', 'a.out.nodebug.wasm'])
       wasm_size = os.path.getsize('a.out.nodebug.wasm')
-      if EMTEST_REBASELINE:
+      if common.EMTEST_REBASELINE:
         with open(size_file, 'w') as f:
           f.write(f'{wasm_size}\n')
 
@@ -8792,7 +8791,7 @@ int main () {
     try:
       expected_results = json.loads(read_file(results_file))
     except Exception:
-      if not EMTEST_REBASELINE:
+      if not common.EMTEST_REBASELINE:
         raise
 
     args = [EMCC, '-o', 'a.html'] + args + sources
@@ -8861,7 +8860,7 @@ int main () {
       # happens in wasm2js, so it may be platform-nondeterminism in closure
       # compiler).
       # TODO: identify what is causing this. meanwhile allow some amount of slop
-      if not EMTEST_REBASELINE:
+      if not common.EMTEST_REBASELINE:
         if js:
           slop = 30
         else:
@@ -8882,7 +8881,7 @@ int main () {
     print('Total output size=' + str(total_output_size) + ' bytes, expected total size=' + str(total_expected_size) + ', delta=' + str(total_output_size - total_expected_size) + print_percent(total_output_size, total_expected_size))
     print('Total output size gzipped=' + str(total_output_size_gz) + ' bytes, expected total size gzipped=' + str(total_expected_size_gz) + ', delta=' + str(total_output_size_gz - total_expected_size_gz) + print_percent(total_output_size_gz, total_expected_size_gz))
 
-    if EMTEST_REBASELINE:
+    if common.EMTEST_REBASELINE:
       open(results_file, 'w').write(json.dumps(obtained_results, indent=2) + '\n')
     else:
       if total_output_size > total_expected_size:
@@ -9248,7 +9247,7 @@ int main(void) {
 
   def test_INCOMING_MODULE_JS_API(self):
     def test(args):
-      self.run_process([EMCC, test_file('hello_world.c'), '-O3', '--closure=1'] + args)
+      self.run_process([EMCC, test_file('hello_world.c'), '-O3', '--closure=1', '-sENVIRONMENT=node,shell'] + args)
       for engine in config.JS_ENGINES:
         self.assertContained('hello, world!', self.run_js('a.out.js', engine=engine))
       # ignore \r which on windows can increase the size
@@ -9259,7 +9258,7 @@ int main(void) {
     # Changing this option to [] should decrease code size.
     self.assertLess(changed, normal)
     # Check an absolute code size as well, with some slack.
-    self.assertLess(abs(changed - 5872), 150)
+    self.assertLess(abs(changed - 5001), 150)
 
   def test_llvm_includes(self):
     create_file('atomics.c', '#include <stdatomic.h>')
@@ -9592,7 +9591,7 @@ Module.arguments has been replaced with plain arguments_ (the initial value can 
 
   def test_non_wasm_without_wasm_in_vm(self):
     # Test that our non-wasm output does not depend on wasm support in the vm.
-    self.run_process([EMXX, test_file('hello_world.cpp'), '-s', 'WASM=0'])
+    self.run_process([EMXX, test_file('hello_world.cpp'), '-s', 'WASM=0', '-sENVIRONMENT=node,shell'])
     js = read_file('a.out.js')
     with open('a.out.js', 'w') as f:
       f.write('var WebAssembly = null;\n' + js)
@@ -10387,7 +10386,7 @@ exec "$@"
   def test_gen_struct_info(self):
     # This tests is fragile and will need updating any time any of the refereced
     # structs or defines change.   However its easy to rebaseline with
-    # EMTEST_REBASELINE and it prrevents regressions or unintended changes
+    # EMTEST_REBASELINE and it prevents regressions or unintended changes
     # to the output json.
     self.run_process([PYTHON, path_from_root('tools/gen_struct_info.py'), '-o', 'out.json'])
     self.assertFileContents(test_file('reference_struct_info.json'), read_file('out.json'))
@@ -10499,8 +10498,8 @@ exec "$@"
   def test_shell_Oz(self):
     # regression test for -Oz working on non-web, non-node environments that
     # lack TextDecoder
-    self.run_process([EMCC, test_file('hello_world.c'), '-Oz'])
-    self.assertContained('hello, world!', self.run_js('a.out.js'))
+    self.emcc_args += ['-Oz']
+    self.do_runf(test_file('hello_world.c'), 'hello, world!')
 
   def test_runtime_keepalive(self):
     self.uses_es6 = True
@@ -10727,3 +10726,16 @@ void foo() {}
       self.run_process(cmd)
       err = self.run_js('a.out.js')
       self.assertContained('warning: unsupported syscall: __sys_mincore', err)
+
+  @require_v8
+  def test_missing_shell_support(self):
+    # By default shell support is not included
+    self.run_process([EMCC, test_file('hello_world.c')])
+    err = self.run_js('a.out.js', assert_returncode=NON_ZERO)
+    self.assertContained('shell environment detected but not enabled at build time.', err)
+
+  def test_removed_runtime_function(self):
+    create_file('post.js', 'alignMemory(100, 4);')
+    self.run_process([EMCC, test_file('hello_world.c'), '--post-js=post.js'])
+    err = self.run_js('a.out.js', assert_returncode=NON_ZERO)
+    self.assertContained('`alignMemory` is now a library function and not included by default; add it to your library.js __deps or to DEFAULT_LIBRARY_FUNCS_TO_INCLUDE on the command line', err)
