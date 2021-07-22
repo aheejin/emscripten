@@ -843,10 +843,10 @@ def get_cflags(options, user_args):
     cflags.append('-fvisibility=default')
 
   if settings.LTO:
-    cflags.append('-flto=' + settings.LTO)
+    if not any(a.startswith('-flto') for a in user_args):
+      cflags.append('-flto=' + settings.LTO)
   else:
-    # With LTO mode these args get passed instead
-    # at link time when the backend runs.
+    # In LTO mode these args get passed instead at link time when the backend runs.
     for a in building.llvm_backend_args():
       cflags += ['-mllvm', a]
 
@@ -1859,6 +1859,7 @@ def phase_linker_setup(options, state, newargs, settings_map):
       '_emscripten_sync_run_in_main_thread_4',
       '_emscripten_tls_init',
       '_pthread_self',
+      '_pthread_testcancel',
     ]
     # Some of these symbols are using by worker.js but otherwise unreferenced.
     # Because emitDCEGraph only considered the main js file, and not worker.js
