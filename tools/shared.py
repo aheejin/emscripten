@@ -39,7 +39,7 @@ from . import mylog
 DEBUG = int(os.environ.get('EMCC_DEBUG', '0'))
 DEBUG_SAVE = DEBUG or int(os.environ.get('EMCC_DEBUG_SAVE', '0'))
 EXPECTED_NODE_VERSION = (4, 1, 1)
-EXPECTED_LLVM_VERSION = "13.0"
+EXPECTED_LLVM_VERSION = "14.0"
 PYTHON = sys.executable
 
 # Used only when EM_PYTHON_MULTIPROCESSING=1 env. var is set.

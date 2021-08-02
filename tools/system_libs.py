@@ -758,6 +758,11 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
         path_components=['system', 'lib', 'pthread'],
         filenames=[
           'library_pthread.c',
+          'pthread_create.c',
+          'pthread_detach.c',
+          'pthread_join.c',
+          'pthread_testcancel.c',
+          'emscripten_proxy_main.c',
           'emscripten_thread_state.s',
         ])
     else:
@@ -1062,7 +1067,7 @@ class libmalloc(MTLibrary):
   def get_files(self):
     malloc_base = self.malloc.replace('-memvalidate', '').replace('-verbose', '').replace('-debug', '')
     malloc = shared.path_from_root('system', 'lib', {
-      'dlmalloc': 'dlmalloc.c', 'emmalloc': 'emmalloc.cpp',
+      'dlmalloc': 'dlmalloc.c', 'emmalloc': 'emmalloc.c',
     }[malloc_base])
     sbrk = shared.path_from_root('system', 'lib', 'sbrk.c')
     return [malloc, sbrk]
