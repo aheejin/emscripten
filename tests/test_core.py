@@ -1037,11 +1037,11 @@ int main()
       self.do_run_from_file(test_file('core/test_exceptions.cpp'), test_file('core/test_exceptions_caught.out'))
 
       self.set_setting('DISABLE_EXCEPTION_CATCHING')
-      # TODO: Node currently returns 0 for unhandled promise rejections.
-      # Switch this to True when they change their default
-      expect_fail = False
-      if not self.is_wasm():
-        expect_fail = True
+      expect_fail = True
+      if self.is_wasm() and not is_optimizing(self.emcc_args):
+        # TODO: Debug builds with MINIMAL_RUNTIME currrently catch unhandled exceptions
+        # thrown during `_main`
+        expect_fail = False
       self.do_run_from_file(test_file('core/test_exceptions.cpp'), test_file('core/test_exceptions_uncaught.out'), assert_returncode=NON_ZERO if expect_fail else 0)
 
   @with_both_exception_handling
@@ -1895,9 +1895,11 @@ int main(int argc, char **argv) {
     self.set_setting('MINIMAL_RUNTIME')
     src = test_file('core/test_memorygrowth.c')
     # Fail without memory growth
-    expect_fail = False
-    if not self.is_wasm():
-      expect_fail = True
+    expect_fail = True
+    if self.is_wasm() and not is_optimizing(self.emcc_args):
+      # TODO: Debug builds with MINIMAL_RUNTIME currrently catch unhandled exceptions
+      # thrown during `_main`
+      expect_fail = False
     self.do_runf(src, 'OOM', assert_returncode=NON_ZERO if expect_fail else 0)
     # Win with it
     self.set_setting('ALLOW_MEMORY_GROWTH')
@@ -2012,15 +2014,14 @@ int main(int argc, char **argv) {
     self.do_core_test('test_memorygrowth_3.c')
 
   @parameterized({
-    'nogrow': (['-s', 'ALLOW_MEMORY_GROWTH=0'],),
-    'grow': (['-s', 'ALLOW_MEMORY_GROWTH'],)
+    'nogrow': ([],),
+    'grow': (['-sALLOW_MEMORY_GROWTH', '-sMAXIMUM_MEMORY=18MB'],)
   })
   @no_asan('requires more memory when growing')
   def test_aborting_new(self, args):
     # test that C++ new properly errors if we fail to malloc when growth is
     # enabled, with or without growth
     self.emcc_args += args
-    self.set_setting('MAXIMUM_MEMORY', '18MB')
     self.do_core_test('test_aborting_new.cpp')
 
   @no_wasm2js('no WebAssembly.Memory()')
@@ -2362,6 +2363,17 @@ The current type of b is: 9
     self.set_setting('PROXY_TO_PTHREAD')
     self.add_pre_run("Module.onAbort = function() { console.log('onAbort called'); }")
     self.do_run_in_out_file_test('pthread/test_pthread_abort.c', assert_returncode=NON_ZERO)
+
+  @no_asan('ASan does not support custom memory allocators')
+  @no_lsan('LSan does not support custom memory allocators')
+  @node_pthreads
+  def test_pthread_emmalloc(self):
+    self.emcc_args += ['-fno-builtin']
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('ASSERTIONS=2')
+    self.set_setting('MALLOC', 'emmalloc')
+    self.do_core_test('test_emmalloc.c')
 
   def test_tcgetattr(self):
     self.do_runf(test_file('termios/test_tcgetattr.c'), 'success')

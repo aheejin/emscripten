@@ -400,7 +400,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     super().setUp()
     self.settings_mods = {}
     self.emcc_args = ['-Werror']
-    self.node_args = ['--stack-trace-limit=50']
+    self.node_args = ['--stack-trace-limit=50', '--unhandled-rejections=throw']
     self.v8_args = []
     self.env = {}
     self.temp_files_before_run = []
@@ -1535,7 +1535,8 @@ class BrowserCore(RunnerCore):
     assert expected or reference, 'a btest must either expect an output, or have a reference image'
     if args is None:
       args = []
-    original_args = args.copy()
+    original_args = args
+    args = args.copy()
     if not os.path.exists(filename):
       filename = test_file(filename)
     if reference:
