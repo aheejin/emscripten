@@ -2562,13 +2562,8 @@ The current type of b is: 9
     self.clear_setting('SIDE_MODULE')
 
   def build_dlfcn_lib(self, filename):
-    if self.is_wasm():
-      # emcc emits a wasm in this case
-      self.build(filename, js_outfile=False)
-      shutil.move(shared.unsuffixed(filename) + '.wasm', 'liblib.so')
-    else:
-      self.build(filename)
-      shutil.move(shared.unsuffixed(filename) + '.js', 'liblib.so')
+    outfile = self.build(filename, js_outfile=not self.is_wasm())
+    shutil.move(outfile, 'liblib.so')
 
   @needs_dylink
   def test_dlfcn_missing(self):
@@ -5475,6 +5470,9 @@ Module['onRuntimeInitialized'] = function() {
       if fs == 'NODEFS':
         self.emcc_args += ['-lnodefs.js']
       self.do_run_in_out_file_test('unistd/misc.c', js_engines=[config.NODE_JS], interleaved_output=False)
+
+  def test_unistd_fstatfs(self):
+    self.do_run_in_out_file_test('unistd/fstatfs.c')
 
   # i64s in the API, which we'd need to legalize for JS, so in standalone mode
   # all we can test is wasm VMs

@@ -55,8 +55,6 @@ var LibraryPThread = {
       // things.
       PThread['receiveObjectTransfer'] = PThread.receiveObjectTransfer;
       PThread['threadInit'] = PThread.threadInit;
-      PThread['threadCancel'] = PThread.threadCancel;
-      PThread['threadExit'] = PThread.threadExit;
       PThread['setExitStatus'] = PThread.setExitStatus;
 #endif
     },
@@ -142,49 +140,8 @@ var LibraryPThread = {
       ___pthread_tsd_run_dtors();
     },
 
-    runExitHandlersAndDeinitThread: function(tb, exitCode) {
-      // Disable all cancellation so that executing the cleanup handlers won't trigger another JS
-      // canceled exception to be thrown.
-      Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.canceldisable }}} ) >> 2, 1/*PTHREAD_CANCEL_DISABLE*/);
-      Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.cancelasync }}} ) >> 2, 0/*PTHREAD_CANCEL_DEFERRED*/);
-      PThread.runExitHandlers();
-
-      Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.threadExitCode }}} ) >> 2, exitCode);
-      // When we publish this, the main thread is free to deallocate the thread object and we are done.
-      // Therefore set _pthread_self = 0; above to 'release' the object in this worker thread.
-      Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.threadStatus }}} ) >> 2, 1); // Mark the thread as no longer running.
-
-      _emscripten_futex_wake(tb + {{{ C_STRUCTS.pthread.threadStatus }}}, {{{ cDefine('INT_MAX') }}}); // wake all threads
-
-      // Not hosting a pthread anymore in this worker, reset the info structures to null.
-      __emscripten_thread_init(0, 0, 0); // Unregister the thread block inside the wasm module.
-    },
-
     setExitStatus: function(status) {
       EXITSTATUS = status;
-    },
-
-    // Called when we are performing a pthread_exit(), either explicitly called
-    // by programmer, or implicitly when leaving the thread main function.
-    threadExit: function(exitCode) {
-      var tb = _pthread_self();
-      if (tb) { // If we haven't yet exited?
-#if PTHREADS_DEBUG
-        out('Pthread 0x' + tb.toString(16) + ' exited.');
-#endif
-        PThread.runExitHandlersAndDeinitThread(tb, exitCode);
-
-        if (ENVIRONMENT_IS_PTHREAD) {
-          // Note: in theory we would like to return any offscreen canvases back to the main thread,
-          // but if we ever fetched a rendering context for them that would not be valid, so we don't try.
-          postMessage({ 'cmd': 'exit' });
-        }
-      }
-    },
-
-    threadCancel: function() {
-      PThread.runExitHandlersAndDeinitThread(_pthread_self(), -1/*PTHREAD_CANCELED*/);
-      postMessage({ 'cmd': 'cancelDone' });
     },
 
     terminateAllThreads: function() {
@@ -896,10 +853,12 @@ var LibraryPThread = {
     for (;;) {
       var threadStatus = Atomics.load(HEAPU32, (thread + {{{ C_STRUCTS.pthread.threadStatus }}} ) >> 2);
       if (threadStatus == 1) { // Exited?
-        var threadExitCode = Atomics.load(HEAPU32, (thread + {{{ C_STRUCTS.pthread.threadExitCode }}} ) >> 2);
-        if (status) {{{ makeSetValue('status', 0, 'threadExitCode', 'i32') }}};
-        Atomics.store(HEAPU32, (thread + {{{ C_STRUCTS.pthread.detached }}} ) >> 2, 1); // Mark the thread as detached.
-
+        if (status) {
+          var result = Atomics.load(HEAPU32, (thread + {{{ C_STRUCTS.pthread.result }}} ) >> 2);
+          {{{ makeSetValue('status', 0, 'result', 'i32') }}};
+        }
+        // Mark the thread as detached.
+        Atomics.store(HEAPU32, (thread + {{{ C_STRUCTS.pthread.detached }}} ) >> 2, 1);
         if (!ENVIRONMENT_IS_PTHREAD) cleanupThread(thread);
         else postMessage({ 'cmd': 'cleanupThread', 'thread': thread });
         return 0;
@@ -992,12 +951,40 @@ var LibraryPThread = {
 
   __pthread_exit_js__deps: ['exit'],
   __pthread_exit_js: function(status) {
+    // Called when we are performing a pthread_exit(), either explicitly called
+    // by programmer, or implicitly when leaving the thread main function.
     if (!ENVIRONMENT_IS_PTHREAD) {
       PThread.runExitHandlers();
       _exit(status);
-    } else PThread.threadExit(status);
-    // pthread_exit is marked noReturn, so we must not return from it.
-    throw 'unwind';
+      // unreachable
+
+    }
+
+    var tb = _pthread_self();
+#if PTHREADS_DEBUG
+    assert(tb);
+    out('Pthread 0x' + tb.toString(16) + ' exited.');
+#endif
+
+    // Disable all cancellation so that executing the cleanup handlers won't trigger another JS
+    // canceled exception to be thrown.
+    Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.canceldisable }}} ) >> 2, 1/*PTHREAD_CANCEL_DISABLE*/);
+    Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.cancelasync }}} ) >> 2, 0/*PTHREAD_CANCEL_DEFERRED*/);
+    PThread.runExitHandlers();
+
+    Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.result }}} ) >> 2, status);
+    // When we publish this, the main thread is free to deallocate the thread object and we are done.
+    // Therefore set _pthread_self = 0; above to 'release' the object in this worker thread.
+    Atomics.store(HEAPU32, (tb + {{{ C_STRUCTS.pthread.threadStatus }}} ) >> 2, 1); // Mark the thread as no longer running.
+
+    _emscripten_futex_wake(tb + {{{ C_STRUCTS.pthread.threadStatus }}}, {{{ cDefine('INT_MAX') }}}); // wake all threads
+
+    // Not hosting a pthread anymore in this worker, reset the info structures to null.
+    __emscripten_thread_init(0, 0, 0); // Unregister the thread block inside the wasm module.
+
+    // Note: in theory we would like to return any offscreen canvases back to the main thread,
+    // but if we ever fetched a rendering context for them that would not be valid, so we don't try.
+    postMessage({ 'cmd': 'exit' });
   },
 
   __cxa_thread_atexit__sig: 'vii',

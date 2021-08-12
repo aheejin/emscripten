@@ -7773,6 +7773,9 @@ end
   def test_full_js_library_no_exception_throwing(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sDISABLE_EXCEPTION_THROWING'])
 
+  def test_full_js_library_minimal_runtime(self):
+    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sMINIMAL_RUNTIME'])
+
   def test_closure_full_js_library(self):
     # test for closure errors in the entire JS library
     # We must ignore various types of errors that are expected in this situation, as we
@@ -10001,10 +10004,15 @@ Module.arguments has been replaced with plain arguments_ (the initial value can 
     err = self.expect_fail([EMCC, '-std=gnu11', '-c', 'foo.h'])
     self.assertContained("'-std=gnu11' not allowed with 'C++'", err)
 
-    # If we disable DEFAULT_TO_CXX the emcc can be used with cflags, but can't be used to build
-    # C++ headers
+    # If we disable DEFAULT_TO_CXX the emcc can be used with C-only flags (e.g. -std=gnu11),
     self.run_process([EMCC, '-std=gnu11', '-c', 'foo.h', '-s', 'DEFAULT_TO_CXX=0'])
+
+    # But can't be used to build C++ headers
     err = self.expect_fail([EMCC, '-c', 'cxxfoo.h', '-s', 'DEFAULT_TO_CXX=0'])
+    self.assertContained("'string' file not found", err)
+
+    # Check that STRICT also disables DEFAULT_TO_CXX
+    err = self.expect_fail([EMCC, '-c', 'cxxfoo.h', '-s', 'STRICT'])
     self.assertContained("'string' file not found", err)
 
     # Using em++ should alwasy work for C++ headers
@@ -10831,6 +10839,11 @@ void foo() {}
       self.run_process(cmd)
       err = self.run_js('a.out.js')
       self.assertContained('warning: unsupported syscall: __sys_mincore', err)
+
+      # Setting ASSERTIONS=0 should avoid the runtime warning
+      self.run_process(cmd + ['-sASSERTIONS=0'])
+      err = self.run_js('a.out.js')
+      self.assertNotContained('warning: unsupported syscall', err)
 
   @require_v8
   def test_missing_shell_support(self):
