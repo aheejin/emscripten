@@ -250,6 +250,10 @@ no_minimal_runtime = make_no_decorator_for_setting('MINIMAL_RUNTIME')
 no_safe_heap = make_no_decorator_for_setting('SAFE_HEAP')
 
 
+def is_sanitizing(args):
+  return '-fsanitize=' in str(args)
+
+
 class TestCoreBase(RunnerCore):
   def is_wasm2js(self):
     return self.get_setting('WASM') == 0
@@ -1030,6 +1034,7 @@ int main()
     self.set_setting('EXIT_RUNTIME')
     self.maybe_closure()
     self.set_setting('MINIMAL_RUNTIME')
+    self.emcc_args += ['--pre-js', test_file('minimal_runtime_exit_handling.js')]
     for support_longjmp in [0, 1]:
       self.set_setting('SUPPORT_LONGJMP', support_longjmp)
 
@@ -1037,12 +1042,7 @@ int main()
       self.do_run_from_file(test_file('core/test_exceptions.cpp'), test_file('core/test_exceptions_caught.out'))
 
       self.set_setting('DISABLE_EXCEPTION_CATCHING')
-      expect_fail = True
-      if self.is_wasm() and not is_optimizing(self.emcc_args):
-        # TODO: Debug builds with MINIMAL_RUNTIME currrently catch unhandled exceptions
-        # thrown during `_main`
-        expect_fail = False
-      self.do_run_from_file(test_file('core/test_exceptions.cpp'), test_file('core/test_exceptions_uncaught.out'), assert_returncode=NON_ZERO if expect_fail else 0)
+      self.do_run_from_file(test_file('core/test_exceptions.cpp'), test_file('core/test_exceptions_uncaught.out'), assert_returncode=NON_ZERO)
 
   @with_both_exception_handling
   def test_exceptions_custom(self):
@@ -1895,12 +1895,7 @@ int main(int argc, char **argv) {
     self.set_setting('MINIMAL_RUNTIME')
     src = test_file('core/test_memorygrowth.c')
     # Fail without memory growth
-    expect_fail = True
-    if self.is_wasm() and not is_optimizing(self.emcc_args):
-      # TODO: Debug builds with MINIMAL_RUNTIME currrently catch unhandled exceptions
-      # thrown during `_main`
-      expect_fail = False
-    self.do_runf(src, 'OOM', assert_returncode=NON_ZERO if expect_fail else 0)
+    self.do_runf(src, 'OOM', assert_returncode=NON_ZERO)
     # Win with it
     self.set_setting('ALLOW_MEMORY_GROWTH')
     self.do_runf(src, '*pre: hello,4.955*\n*hello,4.955*\n*hello,4.955*')
@@ -3529,6 +3524,7 @@ ok
 
   def dylink_testf(self, main, side, expected=None, force_c=False, main_emcc_args=[],
                    main_module=2,
+                   so_name='liblib.so',
                    need_reverse=True, **kwargs):
     self.maybe_closure()
     # Same as dylink_test but takes source code as filenames on disc.
@@ -3548,13 +3544,13 @@ ok
       self.run_process([EMCC] + side + self.get_emcc_args() + ['-o', out_file])
     else:
       out_file = self.build(side, js_outfile=(side_suffix == 'js'))
-    shutil.move(out_file, 'liblib.so')
+    shutil.move(out_file, so_name)
 
     # main settings
     self.set_setting('MAIN_MODULE', main_module)
     self.clear_setting('SIDE_MODULE')
     self.emcc_args += main_emcc_args
-    self.emcc_args.append('liblib.so')
+    self.emcc_args.append(so_name)
 
     if force_c:
       self.emcc_args.append('-nostdlib++')
@@ -5323,6 +5319,9 @@ Module['onRuntimeInitialized'] = function() {
   def test_sigalrm(self):
     self.do_runf(test_file('test_sigalrm.c'), 'Received alarm!')
 
+  def test_signals(self):
+    self.do_core_test(test_file('test_signals.c'))
+
   @no_windows('https://github.com/emscripten-core/emscripten/issues/8882')
   def test_unistd_access(self):
     self.uses_es6 = True
@@ -5377,6 +5376,7 @@ Module['onRuntimeInitialized'] = function() {
   def test_unistd_truncate_noderawfs(self):
     self.uses_es6 = True
     self.set_setting('NODERAWFS')
+    self.maybe_closure()
     self.do_run_in_out_file_test('unistd/truncate.c', js_engines=[config.NODE_JS])
 
   def test_unistd_swab(self):
@@ -7369,7 +7369,6 @@ someweirdtext
 
   # needs setTimeout which only node has
   @require_node
-  @no_asan('asan is not compatible with asyncify stack operations; may also need to not instrument asan_c_load_4, TODO')
   def test_async_hello(self):
     # needs to flush stdio streams
     self.set_setting('EXIT_RUNTIME')
@@ -7395,7 +7394,6 @@ int main() {
     self.do_runf('main.c', 'HelloWorld!99')
 
   @require_node
-  @no_asan('asyncify stack operations confuse asan')
   def test_async_ccall_bad(self):
     # check bad ccall use
     # needs to flush stdio streams
@@ -7427,7 +7425,6 @@ Module['onRuntimeInitialized'] = function() {
     self.do_runf('main.c', 'The call to main is running asynchronously.')
 
   @require_node
-  @no_asan('asyncify stack operations confuse asan')
   def test_async_ccall_good(self):
     # check reasonable ccall use
     # needs to flush stdio streams
@@ -7452,7 +7449,6 @@ Module['onRuntimeInitialized'] = function() {
     self.emcc_args += ['--pre-js', 'pre.js']
     self.do_runf('main.c', 'HelloWorld')
 
-  @no_asan('asyncify stack operations confuse asan')
   def test_async_ccall_promise(self):
     print('check ccall promise')
     self.set_setting('ASYNCIFY')
@@ -7485,7 +7481,6 @@ Module['onRuntimeInitialized'] = function() {
     self.emcc_args += ['--pre-js', 'pre.js']
     self.do_runf('main.c', 'first\nsecond\n6.4')
 
-  @no_asan('asyncify stack operations confuse asan')
   def test_fibers_asyncify(self):
     self.set_setting('ASYNCIFY')
     self.maybe_closure()
@@ -7504,12 +7499,13 @@ Module['onRuntimeInitialized'] = function() {
     'onlylist_a': (['-s', 'ASYNCIFY_ONLY=["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()","bar()"]'], True),
     'onlylist_b': (['-s', 'ASYNCIFY_ONLY=["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()"]'], True),
     'onlylist_c': (['-s', 'ASYNCIFY_ONLY=["main","__original_main","foo(int, double)","baz()","c_baz"]'], False),
-    'onlylist_d': (['-s', 'ASYNCIFY_ONLY=["foo(int, double)","baz()","c_baz","Structy::funcy()"]'], False),
+    'onlylist_d': (['-s', 'ASYNCIFY_ONLY=["foo(int, double)","baz()","c_baz","Structy::funcy()"]'], False, None, True),
     'onlylist_b_response': ([], True,  '["main","__original_main","foo(int, double)","baz()","c_baz","Structy::funcy()"]'),
     'onlylist_c_response': ([], False, '["main","__original_main","foo(int, double)","baz()","c_baz"]'),
   })
-  @no_asan('asan is not compatible with asyncify stack operations; may also need to not instrument asan_c_load_4, TODO')
-  def test_asyncify_lists(self, args, should_pass, response=None):
+  def test_asyncify_lists(self, args, should_pass, response=None, no_san=False):
+    if no_san and is_sanitizing(self.emcc_args):
+      self.skipTest('remaining asyncify+sanitizer TODO')
     if response is not None:
       create_file('response.file', response)
       self.set_setting('ASYNCIFY_ONLY', '@response.file')
@@ -7523,7 +7519,9 @@ Module['onRuntimeInitialized'] = function() {
 
     # use of ASYNCIFY_* options may require intermediate debug info. that should
     # not end up emitted in the final binary
-    if self.is_wasm():
+    # (note that we can't check this if sanitizers run, as they include a lot of
+    # static strings that would match the search)
+    if self.is_wasm() and not is_sanitizing(self.emcc_args):
       binary = read_binary('test_asyncify_lists.wasm')
       # there should be no name section
       self.assertFalse(b'name' in binary)
@@ -7537,7 +7535,6 @@ Module['onRuntimeInitialized'] = function() {
     'ignoreindirect': (['-s', 'ASYNCIFY_IGNORE_INDIRECT'], False),
     'add': (['-s', 'ASYNCIFY_IGNORE_INDIRECT', '-s', 'ASYNCIFY_ADD=["__original_main","main","virt()"]'], True),
   })
-  @no_asan('asan is not compatible with asyncify stack operations; may also need to not instrument asan_c_load_4, TODO')
   def test_asyncify_indirect_lists(self, args, should_pass):
     self.set_setting('ASYNCIFY')
     self.emcc_args += args
@@ -7550,7 +7547,6 @@ Module['onRuntimeInitialized'] = function() {
       if should_pass:
         raise
 
-  @no_asan('asyncify stack operations confuse asan')
   def test_emscripten_scan_registers(self):
     self.set_setting('ASYNCIFY')
     self.do_core_test('test_emscripten_scan_registers.cpp')
@@ -8399,7 +8395,15 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('PTHREAD_POOL_SIZE', 2)
     main = test_file('core/pthread/test_pthread_dylink.c')
     side = test_file('core/pthread/test_pthread_dylink_side.c')
-    self.dylink_testf(main, side, "success", need_reverse=False)
+
+    # test with a long .so name, as a regression test for
+    # https://github.com/emscripten-core/emscripten/issues/14833
+    # where we had a bug with long names + TextDecoder + pthreads + dylink
+    very_long_name = 'very_very_very_very_very_very_very_very_very_long.so'
+
+    self.dylink_testf(main, side, "success",
+                      so_name=very_long_name,
+                      need_reverse=False)
 
   @needs_dylink
   @node_pthreads

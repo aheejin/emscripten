@@ -846,16 +846,20 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
           'getitimer.c',
           'killpg.c',
           'setitimer.c',
+          'sigorset.c',
+          'sigandset.c',
           'sigaddset.c',
           'sigdelset.c',
           'sigemptyset.c',
           'sigfillset.c',
           'sigismember.c',
+          'siginterrupt.c',
           'signal.c',
           'sigprocmask.c',
           'sigrtmax.c',
           'sigrtmin.c',
           'sigwait.c',
+          'sigwaitinfo.c',
         ])
 
     libc_files += files_in_path(
@@ -864,6 +868,11 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
           'extras.c',
           'wasi-helpers.c',
           'emscripten_get_heap_size.c',
+          'raise.c',
+          'kill.c',
+          'sigaction.c',
+          'sigtimedwait.c',
+          'pthread_sigmask.c',
         ])
 
     libc_files += files_in_path(
@@ -894,8 +903,9 @@ class libsockets(MuslInternalLibrary, MTLibrary):
   cflags = ['-Os', '-fno-builtin']
 
   def get_files(self):
-    network_dir = shared.path_from_root('system', 'lib', 'libc', 'musl', 'src', 'network')
-    return [os.path.join(network_dir, x) for x in LIBC_SOCKETS]
+    return files_in_path(
+      path_components=['system', 'lib', 'libc', 'musl', 'src', 'network'],
+      filenames=LIBC_SOCKETS)
 
   def can_use(self):
     return super(libsockets, self).can_use() and not settings.PROXY_POSIX_SOCKETS
