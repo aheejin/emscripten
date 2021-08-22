@@ -445,16 +445,8 @@ LibraryManager.library = {
   // TODO: There are currently two abort() functions that get imported to asm module scope: the built-in runtime function abort(),
   // and this function _abort(). Remove one of these, importing two functions for the same purpose is wasteful.
   abort__sig: 'v',
-  // Proxy synchronously, which will have the effect of halting the program
-  // and killing all threads, including this one.
-  abort__proxy: 'sync',
   abort: function() {
-#if MINIMAL_RUNTIME
-    // In MINIMAL_RUNTIME the module object does not exist, so its behavior to abort is to throw directly.
-    throw 'abort';
-#else
     abort();
-#endif
   },
 
   // This object can be modified by the user during startup, which affects
@@ -2620,10 +2612,12 @@ LibraryManager.library = {
   },
 
   // http://pubs.opengroup.org/onlinepubs/000095399/functions/alarm.html
-  alarm__deps: ['raise'],
+  alarm__deps: ['raise', '$callUserCallback'],
   alarm: function(seconds) {
     setTimeout(function() {
-      _raise({{{ cDefine('SIGALRM') }}});
+      callUserCallback(function() {
+        _raise({{{ cDefine('SIGALRM') }}});
+      });
     }, seconds*1000);
   },
 
@@ -3598,12 +3592,27 @@ LibraryManager.library = {
   },
 
   $handleException: function(e) {
-    if (e instanceof ExitStatus || e === 'unwind') {
+    // Certain exception types we do not treat as errors since they are used for
+    // internal control flow.
+    // 1. ExitStatus, which is thrown by exit()
+    // 2. "unwind", which is thrown by emscripten_unwind_to_js_event_loop() and others
+    //    that wish to return to JS event loop.
+    if (e instanceof ExitStatus || e == 'unwind') {
       return;
     }
-    // And actual unexpected user-exectpion occured
-    if (e && typeof e === 'object' && e.stack) err('exception thrown: ' + [e, e.stack]);
+    // Anything else is an unexpected exception and we treat it as hard error.
+    var toLog = e;
+#if ASSERTIONS
+    if (e && typeof e === 'object' && e.stack) {
+      toLog = [e, e.stack];
+    }
+#endif
+    err('exception thrown: ' + toLog);
+#if MINIMAL_RUNTIME
     throw e;
+#else
+    quit_(1, e);
+#endif
   },
 
 #if !MINIMAL_RUNTIME

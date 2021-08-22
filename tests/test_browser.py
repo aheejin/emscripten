@@ -231,7 +231,7 @@ If manually bisecting:
 
   def test_emscripten_log(self):
     self.btest_exit(test_file('emscripten_log/emscripten_log.cpp'),
-                    args=['--pre-js', path_from_root('src', 'emscripten-source-map.min.js'), '-gsource-map'])
+                    args=['--pre-js', path_from_root('src/emscripten-source-map.min.js'), '-gsource-map'])
 
   def test_preload_file(self):
     create_file('somefile.txt', 'load me right before running the code please')
@@ -574,7 +574,7 @@ If manually bisecting:
     # change the file package base dir to look in a "cdn". note that normally
     # you would add this in your own custom html file etc., and not by
     # modifying the existing shell in this manner
-    default_shell = read_file(path_from_root('src', 'shell.html'))
+    default_shell = read_file(path_from_root('src/shell.html'))
     create_file('shell.html', default_shell.replace('var Module = {', '''
     var Module = {
       locateFile: function(path, prefix) {
@@ -668,7 +668,7 @@ If manually bisecting:
     test()
 
     # TODO: CORS, test using a full url for locateFile
-    # create_file('shell.html', read_file(path_from_root('src', 'shell.html')).replace('var Module = {', 'var Module = { locateFile: function (path) {return "http:/localhost:8888/cdn/" + path;}, '))
+    # create_file('shell.html', read_file(path_from_root('src/shell.html')).replace('var Module = {', 'var Module = { locateFile: function (path) {return "http:/localhost:8888/cdn/" + path;}, '))
     # test()
 
   def test_dev_random(self):
@@ -2438,6 +2438,11 @@ void *getBindBuffer() {
     self.compile_btest([test_file('worker_api_worker_sleep.cpp'), '-o', 'worker.js', '-s', 'BUILD_AS_WORKER', '-s', 'EXPORTED_FUNCTIONS=_one', '-s', 'ASYNCIFY'])
     self.btest('worker_api_main.cpp', expected='566')
 
+  def test_worker_api_with_pthread_compilation_fails(self):
+    self.run_process([EMCC, '-c', '-o', 'hello.o', test_file('hello_world.c')])
+    stderr = self.expect_fail([EMCC, 'hello.o', '-o', 'a.js', '-g', '--closure=1', '-s', 'USE_PTHREADS', '-s', 'BUILD_AS_WORKER=1'])
+    self.assertContained('error: USE_PTHREADS + BUILD_AS_WORKER require separate modes that don\'t work together, see https://github.com/emscripten-core/emscripten/issues/8854', stderr)
+
   def test_emscripten_async_wget2(self):
     self.btest_exit('test_emscripten_async_wget2.cpp')
 
@@ -3678,7 +3683,7 @@ window.close = function() {
   # pthreads tests
 
   def prep_no_SAB(self):
-    create_file('html.html', read_file(path_from_root('src', 'shell_minimal.html')).replace('''<body>''', '''<body>
+    create_file('html.html', read_file(path_from_root('src/shell_minimal.html')).replace('''<body>''', '''<body>
       <script>
         SharedArrayBuffer = undefined;
         Atomics = undefined;
@@ -3987,7 +3992,7 @@ window.close = function() {
     ''')
 
     # Test that it is possible to define "Module.locateFile" string to locate where worker.js will be loaded from.
-    create_file('shell.html', read_file(path_from_root('src', 'shell.html')).replace('var Module = {', 'var Module = { locateFile: function (path, prefix) {if (path.endsWith(".wasm")) {return prefix + path;} else {return "cdn/" + path;}}, '))
+    create_file('shell.html', read_file(path_from_root('src/shell.html')).replace('var Module = {', 'var Module = { locateFile: function (path, prefix) {if (path.endsWith(".wasm")) {return prefix + path;} else {return "cdn/" + path;}}, '))
     self.compile_btest(['main.cpp', '--shell-file', 'shell.html', '-s', 'WASM=0', '-s', 'IN_TEST_HARNESS', '-s', 'USE_PTHREADS', '-s', 'PTHREAD_POOL_SIZE', '-o', 'test.html'], reporting=Reporting.JS_ONLY)
     shutil.move('test.worker.js', Path('cdn/test.worker.js'))
     if os.path.exists('test.html.mem'):
@@ -3995,7 +4000,7 @@ window.close = function() {
     self.run_browser('test.html', '', '/report_result?exit:0')
 
     # Test that it is possible to define "Module.locateFile(foo)" function to locate where worker.js will be loaded from.
-    create_file('shell2.html', read_file(path_from_root('src', 'shell.html')).replace('var Module = {', 'var Module = { locateFile: function(filename) { if (filename == "test.worker.js") return "cdn/test.worker.js"; else return filename; }, '))
+    create_file('shell2.html', read_file(path_from_root('src/shell.html')).replace('var Module = {', 'var Module = { locateFile: function(filename) { if (filename == "test.worker.js") return "cdn/test.worker.js"; else return filename; }, '))
     self.compile_btest(['main.cpp', '--shell-file', 'shell2.html', '-s', 'WASM=0', '-s', 'IN_TEST_HARNESS', '-s', 'USE_PTHREADS', '-s', 'PTHREAD_POOL_SIZE', '-o', 'test2.html'], reporting=Reporting.JS_ONLY)
     try_delete('test.worker.js')
     self.run_browser('test2.html', '', '/report_result?exit:0')
@@ -4263,7 +4268,7 @@ window.close = function() {
   def test_wasm_locate_file(self):
     # Test that it is possible to define "Module.locateFile(foo)" function to locate where worker.js will be loaded from.
     ensure_dir('cdn')
-    create_file('shell2.html', read_file(path_from_root('src', 'shell.html')).replace('var Module = {', 'var Module = { locateFile: function(filename) { if (filename == "test.wasm") return "cdn/test.wasm"; else return filename; }, '))
+    create_file('shell2.html', read_file(path_from_root('src/shell.html')).replace('var Module = {', 'var Module = { locateFile: function(filename) { if (filename == "test.wasm") return "cdn/test.wasm"; else return filename; }, '))
     self.compile_btest([test_file('browser_test_hello_world.c'), '--shell-file', 'shell2.html', '-o', 'test.html'])
     shutil.move('test.wasm', Path('cdn/test.wasm'))
     self.run_browser('test.html', '', '/report_result?0')
@@ -4858,7 +4863,7 @@ window.close = function() {
         return 0;
       }
     ''')
-    create_file('shell.html', read_file(path_from_root('src', 'shell.html')).replace('Emscripten-Generated Code', 'Emscripten-Generated Emoji 😅'))
+    create_file('shell.html', read_file(path_from_root('src/shell.html')).replace('Emscripten-Generated Code', 'Emscripten-Generated Emoji 😅'))
     self.btest_exit('main.cpp', args=['--shell-file', 'shell.html'])
 
   # Tests the functionality of the emscripten_thread_sleep() function.

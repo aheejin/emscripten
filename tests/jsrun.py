@@ -10,7 +10,7 @@ import common
 from subprocess import Popen, PIPE, CalledProcessError
 from tools import mylog
 
-from tools import shared
+from tools import shared, utils
 
 WORKING_ENGINES = {} # Holds all configured engines and whether they work: maps path -> True/False
 
@@ -60,7 +60,7 @@ def check_engine(engine):
   if engine_path not in WORKING_ENGINES:
     logging.debug('Checking JS engine %s' % engine)
     try:
-      output = run_js(shared.path_from_root('tests/hello_world.js'), engine, skip_check=True)
+      output = run_js(utils.path_from_root('tests/hello_world.js'), engine, skip_check=True)
       if 'hello, world!' in output:
         WORKING_ENGINES[engine_path] = True
       else:

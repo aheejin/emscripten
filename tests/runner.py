@@ -37,10 +37,10 @@ sys.path.append(__rootpath__)
 import jsrun
 import parallel_testsuite
 import common
-from tools import shared, config
+from tools import shared, config, utils
 
 
-sys.path.append(shared.path_from_root('third_party/websockify'))
+sys.path.append(utils.path_from_root('third_party/websockify'))
 
 logger = logging.getLogger("runner")
 
@@ -78,6 +78,7 @@ non_core_test_modes = [
   'wasm2ss',
   'posixtest',
   'posixtest_browser',
+  'minimal0',
 ]
 
 
