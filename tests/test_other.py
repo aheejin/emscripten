@@ -1958,9 +1958,9 @@ int f() {
         # Calling main later should still work, filesystem etc. must be set up.
         print('call main later')
         src = read_file('a.out.js')
-        src += '\nModule.callMain();\n'
+        src += '\nconsole.log("callMain -> " + Module.callMain());\n'
         create_file('a.out.js', src)
-        self.assertContained('hello from main', self.run_js('a.out.js'))
+        self.assertContained('hello from main\ncallMain -> 0\n', self.run_js('a.out.js'))
 
     # Use postInit
     create_file('pre.js', '''
@@ -7498,6 +7498,7 @@ int main() {
   # We have LTO tests covered in 'wasmltoN' targets in test_core.py, but they
   # don't run as a part of Emscripten CI, so we add a separate LTO test here.
   @require_v8
+  @disabled('https://github.com/emscripten-core/emscripten/issues/14947')
   def test_lto_wasm_exceptions(self):
     self.set_setting('EXCEPTION_DEBUG')
     self.emcc_args += ['-fwasm-exceptions', '-flto']

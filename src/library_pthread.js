@@ -9,7 +9,10 @@ var LibraryPThread = {
   $PThread__deps: ['_emscripten_thread_init',
                    'emscripten_futex_wake', '$killThread',
                    '$cancelThread', '$cleanupThread',
+                   'exit',
+#if !MINIMAL_RUNTIME
                    '$handleException',
+#endif
                    ],
   $PThread: {
     // Contains all Workers that are idle/unused and not currently hosting an
@@ -55,7 +58,9 @@ var LibraryPThread = {
       // things.
       PThread['receiveObjectTransfer'] = PThread.receiveObjectTransfer;
       PThread['threadInit'] = PThread.threadInit;
+#if !MINIMAL_RUNTIME
       PThread['setExitStatus'] = PThread.setExitStatus;
+#endif
 #endif
     },
     // Maps pthread_t to pthread info objects
@@ -128,9 +133,11 @@ var LibraryPThread = {
     },
 #endif
 
+#if !MINIMAL_RUNTIME
     setExitStatus: function(status) {
       EXITSTATUS = status;
     },
+#endif
 
     terminateAllThreads: function() {
       for (var t in PThread.pthreads) {
@@ -302,11 +309,15 @@ var LibraryPThread = {
 #if ASSERTIONS
           err("exitProcess requested by worker");
 #endif
+#if MINIMAL_RUNTIME
+          _exit(d['returnCode']);
+#else
           try {
-            exit(d['returnCode']);
+            _exit(d['returnCode']);
           } catch (e) {
             handleException(e);
           }
+#endif
         } else if (cmd === 'cancelDone') {
           PThread.returnWorkerToPool(worker);
         } else if (e.data.target === 'setimmediate') {

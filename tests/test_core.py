@@ -4576,10 +4576,10 @@ main main sees -524, -534, 72.
       expected='3 hello world!',
       need_reverse=False)
 
-  @disabled('https://github.com/emscripten-core/emscripten/issues/13773')
+  @needs_dylink
   def test_dylink_weak(self):
-    # Verify that weakly symbols can be defined in both side module and main
-    # module
+    # Verify that weakly defined symbols can be defined in both side module and main
+    # module but that only one gets used at runtime.
     main = test_file('core/test_dylink_weak_main.c')
     side = test_file('core/test_dylink_weak_side.c')
     self.dylink_testf(main, side, force_c=True, need_reverse=False)
@@ -8237,7 +8237,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_safe_stack(self):
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('TOTAL_STACK', 65536)
-    if is_optimizing(self.emcc_args):
+    if self.is_optimizing():
       expected = ['abort(stack overflow)']
     else:
       expected = ['abort(stack overflow)', '__handle_stack_overflow']
@@ -8251,7 +8251,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('TOTAL_STACK', 65536)
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('USE_PTHREADS')
-    if is_optimizing(self.emcc_args):
+    if self.is_optimizing():
       expected = ['abort(stack overflow)']
     else:
       expected = ['abort(stack overflow)', '__handle_stack_overflow']
@@ -8262,7 +8262,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_safe_stack_alloca(self):
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('TOTAL_STACK', 65536)
-    if is_optimizing(self.emcc_args):
+    if self.is_optimizing():
       expected = ['abort(stack overflow)']
     else:
       expected = ['abort(stack overflow)', '__handle_stack_overflow']

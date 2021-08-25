@@ -457,7 +457,7 @@ def link_lld(args, target, external_symbols=None):
   # Wasm exception handling. This is a CodeGen option for the LLVM backend, so
   # wasm-ld needs to take this for the LTO mode.
   if settings.EXCEPTION_HANDLING:
-    cmd += ['-mllvm', '-exception-model=wasm']
+    cmd += ['-mllvm', '-exception-model=wasm', '-mllvm', '-wasm-enable-eh']
 
   # For relocatable output (generating an object file) we don't pass any of the
   # normal linker flags that are used when building and exectuable
@@ -752,6 +752,17 @@ def check_closure_compiler(cmd, args, env, allowed_to_fail):
   return True
 
 
+# Remove this once we require python3.7 and can use std.isascii.
+# See: https://docs.python.org/3/library/stdtypes.html#str.isascii
+def isascii(s):
+  try:
+    s.encode('ascii')
+  except UnicodeEncodeError:
+    return False
+  else:
+    return True
+
+
 @ToolchainProfiler.profile_block('closure_compiler')
 def closure_compiler(filename, pretty, advanced=True, extra_closure_args=None):
   env = shared.env_with_node_in_path()
@@ -823,7 +834,7 @@ def closure_compiler(filename, pretty, advanced=True, extra_closure_args=None):
   if settings.DYNCALLS:
     CLOSURE_EXTERNS += [path_from_root('src/closure-externs/dyncall-externs.js')]
 
-  if settings.MINIMAL_RUNTIME and settings.USE_PTHREADS and not settings.MODULARIZE:
+  if settings.MINIMAL_RUNTIME and settings.USE_PTHREADS:
     CLOSURE_EXTERNS += [path_from_root('src/minimal_runtime_worker_externs.js')]
 
   args = ['--compilation_level', 'ADVANCED_OPTIMIZATIONS' if advanced else 'SIMPLE_OPTIMIZATIONS']
@@ -842,6 +853,8 @@ def closure_compiler(filename, pretty, advanced=True, extra_closure_args=None):
   outfile = tempfiles.get('.cc.js').name  # Safe 7-bit filename
 
   def move_to_safe_7bit_ascii_filename(filename):
+    if isascii(filename):
+      return filename
     safe_filename = tempfiles.get('.js').name  # Safe 7-bit filename
     shutil.copyfile(filename, safe_filename)
     return os.path.relpath(safe_filename, tempfiles.tmpdir)
