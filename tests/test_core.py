@@ -2324,6 +2324,13 @@ The current type of b is: 9
     self.do_run_in_out_file_test('pthread/test_pthread_dispatch_after_exit.c', interleaved_output=False)
 
   @node_pthreads
+  def test_pthread_atexit(self):
+    # Test to ensure threads are still running when atexit-registered functions are called
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PTHREAD_POOL_SIZE', 1)
+    self.do_run_in_out_file_test('pthread/test_pthread_atexit.c')
+
+  @node_pthreads
   def test_pthread_nested_work_queue(self):
     self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE', 1)
@@ -4588,14 +4595,15 @@ main main sees -524, -534, 72.
   @node_pthreads
   @needs_dylink
   def test_dylink_tls(self):
-    # We currently can't export TLS symbols from module since we don't have
-    # and ABI for signaling which exports are TLS and which are regular
-    # data exports.
-
-    # TODO(sbc): Add tests that depend on importing/exported TLS symbols
-    # once we figure out how to do that.
     self.emcc_args.append('-Wno-experimental')
     self.dylink_testf(test_file('core/test_dylink_tls.c'),
+                      need_reverse=False)
+
+  @node_pthreads
+  @needs_dylink
+  def test_dylink_tls_export(self):
+    self.emcc_args.append('-Wno-experimental')
+    self.dylink_testf(test_file('core/test_dylink_tls_export.c'),
                       need_reverse=False)
 
   def test_random(self):
@@ -7439,11 +7447,15 @@ Module['onRuntimeInitialized'] = function() {
     self.emcc_args += ['--pre-js', 'pre.js']
     self.do_runf('main.c', 'HelloWorld')
 
-  def test_async_ccall_promise(self):
-    print('check ccall promise')
+  @parameterized({
+    '': (False,),
+    'exit_runtime': (True,),
+  })
+  def test_async_ccall_promise(self, exit_runtime):
     self.set_setting('ASYNCIFY')
     self.set_setting('ASSERTIONS')
     self.set_setting('INVOKE_RUN', 0)
+    self.set_setting('EXIT_RUNTIME', exit_runtime)
     self.set_setting('EXPORTED_FUNCTIONS', ['_stringf', '_floatf'])
     create_file('main.c', r'''
 #include <stdio.h>
@@ -8397,6 +8409,12 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_emscripten_futexes(self):
     self.set_setting('USE_PTHREADS')
     self.do_run_in_out_file_test('core/pthread/emscripten_futexes.c')
+
+  @node_pthreads
+  def test_stdio_locking(self):
+    self.set_setting('PTHREAD_POOL_SIZE', '2')
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test('core', 'test_stdio_locking.c')
 
   @needs_dylink
   @node_pthreads
