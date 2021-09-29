@@ -2051,30 +2051,27 @@ var LibraryJSEvents = {
 #if ASSERTIONS
       assert(e);
 #endif
-      var touches = {};
-      var et = e.touches;
+      var t, touches = {}, et = e.touches;
+      // To ease marshalling different kinds of touches that browser reports (all touches are listed in e.touches, 
+      // only changed touches in e.changedTouches, and touches on target at a.targetTouches), mark a boolean in
+      // each Touch object so that we can later loop only once over all touches we see to marshall over to Wasm.
+
       for (var i = 0; i < et.length; ++i) {
-        var touch = et[i];
-#if ASSERTIONS
-        // Verify that browser does not recycle touch objects with old stale data, but reports new ones each time.
-        assert(!touch.isChanged);
-        assert(!touch.onTarget);
-#endif
-        touches[touch.identifier] = touch;
+        t = et[i];
+        // Browser might recycle the generated Touch objects between each frame (Firefox on Android), so reset any
+        // changed/target states we may have set from previous frame.
+        t.isChanged = t.onTarget = 0;
+        touches[t.identifier] = t;
       }
-      et = e.changedTouches;
-      for (var i = 0; i < et.length; ++i) {
-        var touch = et[i];
-#if ASSERTIONS
-        // Verify that browser does not recycle touch objects with old stale data, but reports new ones each time.
-        assert(!touch.onTarget);
-#endif
-        touch.isChanged = 1;
-        touches[touch.identifier] = touch;
+      // Mark which touches are part of the changedTouches list.
+      for (var i = 0; i < e.changedTouches.length; ++i) {
+        t = e.changedTouches[i];
+        t.isChanged = 1;
+        touches[t.identifier] = t;
       }
-      et = e.targetTouches;
-      for (var i = 0; i < et.length; ++i) {
-        touches[et[i].identifier].onTarget = 1;
+      // Mark which touches are part of the targetTouches list.
+      for (var i = 0; i < e.targetTouches.length; ++i) {
+        touches[e.targetTouches[i].identifier].onTarget = 1;
       }
 
 #if USE_PTHREADS
@@ -2676,12 +2673,35 @@ var LibraryJSEvents = {
     return requestAnimationFrame(tick);
   },
 
+  // Just like setImmediate but returns an i32 that can be passed back
+  // to wasm rather than a JS object.
+  $setImmediateWrapped: function(func) {
+    if (!setImmediateWrapped.mapping) setImmediateWrapped.mapping = [];
+    var id = setImmediateWrapped.mapping.length;
+    setImmediateWrapped.mapping[id] = setImmediate(function() {
+      setImmediateWrapped.mapping[id] = undefined;
+      func();
+    });
+    return id;
+  },
+
+  // Just like clearImmediate but takes an i32 rather than an object.
+  $clearImmediateWrapped: function(id) {
+#if ASSERTIONS
+    assert(id);
+    assert(setImmediateWrapped.mapping[id]);
+#endif
+    clearImmediate(setImmediateWrapped.mapping[id]);
+    setImmediateWrapped.mapping[id] = undefined;
+  },
+
+  $polyfillSetImmediate__deps: ['$setImmediateWrapped', '$clearImmediateWrapped'],
   $polyfillSetImmediate__postset:
     'var emSetImmediate;\n' +
     'var emClearImmediate;\n' +
     'if (typeof setImmediate !== "undefined") {\n' +
-      'emSetImmediate = setImmediate;\n' +
-      'emClearImmediate = clearImmediate;\n' +
+      'emSetImmediate = setImmediateWrapped;\n' +
+      'emClearImmediate = clearImmediateWrapped;\n' +
     '} else if (typeof addEventListener === "function") {\n' +
       'var __setImmediate_id_counter = 0;\n' +
       'var __setImmediate_queue = [];\n' +

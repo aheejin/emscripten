@@ -110,7 +110,8 @@ var LibraryManager = {
         }
         libraries.push('library_noderawfs.js');
       }
-    }
+    } 
+    // TODO: populate with libraries.push('library_wasmfs.js') later
 
     // Additional JS libraries (without AUTO_JS_LIBRARIES, link to these explicitly via -lxxx.js)
     if (AUTO_JS_LIBRARIES) {
@@ -187,6 +188,9 @@ var LibraryManager = {
 
     for (var filename of libraries) {
       var src = read(filename);
+      if (VERBOSE) {
+        printErr('processing: ' + filename);
+      }
       var processed = undefined;
       try {
         processed = processMacros(preprocess(src, filename));

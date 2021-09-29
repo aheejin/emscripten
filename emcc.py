@@ -38,7 +38,7 @@ from urllib.parse import quote
 
 
 import emscripten
-from tools import shared, system_libs, utils
+from tools import shared, system_libs, utils, ports
 from tools import colored_logger, diagnostics, building
 from tools import mylog
 from tools.shared import unsuffixed, unsuffixed_basename, WINDOWS, safe_copy
@@ -770,6 +770,10 @@ def emsdk_cflags(user_args):
       if n in hay:
         return True
 
+  # relaxed-simd implies simd128.
+  if '-mrelaxed-simd' in user_args:
+      user_args += ['-msimd128']
+
   if array_contains_any_of(user_args, SIMD_INTEL_FEATURE_TOWER) or array_contains_any_of(user_args, SIMD_NEON_FLAGS):
     if '-msimd128' not in user_args:
       exit_with_error('Passing any of ' + ', '.join(SIMD_INTEL_FEATURE_TOWER + SIMD_NEON_FLAGS) + ' flags also requires passing -msimd128!')
@@ -867,7 +871,7 @@ def get_cflags(user_args):
   #   -Wno-implicit-function-declaration
   cflags += ['-Werror=implicit-function-declaration']
 
-  system_libs.add_ports_cflags(cflags, settings)
+  ports.add_cflags(cflags, settings)
 
   if os.environ.get('EMMAKEN_NO_SDK') or '-nostdinc' in user_args:
     return cflags
@@ -1776,6 +1780,12 @@ def phase_linker_setup(options, state, newargs, settings_map):
     settings.FETCH = 1
     settings.JS_LIBRARIES.append((0, 'library_asmfs.js'))
 
+  if settings.WASMFS:
+    state.forced_stdlibs.append('libwasmfs')
+    settings.FILESYSTEM = 0
+    settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
+    # settings.JS_LIBRARIES.append((0, 'library_wasmfs.js')) TODO: populate with library_wasmfs.js later
+
   # Explicitly drop linking in a malloc implementation if program is not using any dynamic allocation calls.
   if not settings.USES_DYNAMIC_ALLOC:
     settings.MALLOC = 'none'
@@ -1893,6 +1903,9 @@ def phase_linker_setup(options, state, newargs, settings_map):
       '_pthread_testcancel',
       '_exit',
     ]
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += [
+      '$exitOnMainThread',
+    ]
     # Some of these symbols are using by worker.js but otherwise unreferenced.
     # Because emitDCEGraph only considered the main js file, and not worker.js
     # we have explicitly mark these symbols as user-exported so that they will
@@ -1926,11 +1939,6 @@ def phase_linker_setup(options, state, newargs, settings_map):
       'addRunDependency',
       'removeRunDependency',
     ]
-
-  if not settings.MINIMAL_RUNTIME or settings.EXIT_RUNTIME:
-    # MINIMAL_RUNTIME only needs callRuntimeCallbacks in certain cases, but the normal runtime
-    # always does.
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$callRuntimeCallbacks']
 
   if settings.USE_PTHREADS:
     # memalign is used to ensure allocated thread stacks are aligned.
@@ -2042,9 +2050,6 @@ def phase_linker_setup(options, state, newargs, settings_map):
     if options.shell_path == utils.path_from_root('src/shell.html'):
       options.shell_path = utils.path_from_root('src/shell_minimal_runtime.html')
 
-    if settings.EXIT_RUNTIME:
-      settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['proc_exit']
-
     if settings.ASSERTIONS:
       # In ASSERTIONS-builds, functions UTF8ArrayToString() and stringToUTF8Array() (which are not JS library functions), both
       # use warnOnce(), which in MINIMAL_RUNTIME is a JS library function, so explicitly have to mark dependency to warnOnce()
@@ -2132,13 +2137,14 @@ def phase_linker_setup(options, state, newargs, settings_map):
 
   if 'leak' in sanitize:
     settings.USE_LSAN = 1
-    settings.EXIT_RUNTIME = 1
+    default_setting('EXIT_RUNTIME', 1)
 
     if settings.LINKABLE:
       exit_with_error('LSan does not support dynamic linking')
 
   if 'address' in sanitize:
     settings.USE_ASAN = 1
+    default_setting('EXIT_RUNTIME', 1)
     if not settings.UBSAN_RUNTIME:
       settings.UBSAN_RUNTIME = 2
 
@@ -2217,6 +2223,14 @@ def phase_linker_setup(options, state, newargs, settings_map):
     # a higher global base is useful for optimizing load/store offsets, as it
     # enables the --post-emscripten pass
     settings.GLOBAL_BASE = 1024
+
+  if settings.MINIMAL_RUNTIME:
+    if settings.EXIT_RUNTIME:
+      settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['proc_exit', '$callRuntimeCallbacks']
+  else:
+    # MINIMAL_RUNTIME only needs callRuntimeCallbacks in certain cases, but the normal runtime
+    # always does.
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$callRuntimeCallbacks']
 
   # various settings require malloc/free support from JS
   if settings.RELOCATABLE or \
@@ -2315,6 +2329,8 @@ def phase_linker_setup(options, state, newargs, settings_map):
   settings.PROFILING_FUNCS = options.profiling_funcs
   settings.SOURCE_MAP_BASE = options.source_map_base or ''
 
+  settings.LINK_AS_CXX = (run_via_emxx or settings.DEFAULT_TO_CXX) and '-nostdlib++' not in newargs
+
   return target, wasm_target
 
 
@@ -2375,16 +2391,16 @@ def phase_compile_inputs(options, state, newargs, input_files):
       return True
     return False
 
-  def get_compiler(cxx):
-    if cxx:
+  def get_compiler(src_file):
+    if use_cxx(src_file):
       return CXX
     return CC
 
   def get_clang_command(src_file):
-    return get_compiler(use_cxx(src_file)) + get_cflags(state.orig_args) + compile_args + [src_file]
+    return get_compiler(src_file) + get_cflags(state.orig_args) + compile_args + [src_file]
 
   def get_clang_command_asm(src_file):
-    return get_compiler(use_cxx(src_file)) + get_clang_flags() + compile_args + [src_file]
+    return get_compiler(src_file) + get_clang_flags() + compile_args + [src_file]
 
   # preprocessor-only (-E) support
   if state.mode == Mode.PREPROCESS_ONLY:
@@ -2486,13 +2502,8 @@ def phase_calculate_system_libraries(state, linker_arguments, linker_inputs, new
   # link in ports and system libraries, if necessary
   if not settings.SIDE_MODULE:
     # Ports are always linked into the main module, never the size module.
-    extra_files_to_link += system_libs.get_ports_libs(settings)
+    extra_files_to_link += ports.get_libs(settings)
   if '-nostdlib' not in newargs and '-nodefaultlibs' not in newargs:
-    settings.LINK_AS_CXX = run_via_emxx
-    # Traditionally we always link as C++.  For compatibility we continue to do that,
-    # unless running in strict mode.
-    if not settings.STRICT and '-nostdlib++' not in newargs:
-      settings.LINK_AS_CXX = True
     extra_files_to_link += system_libs.calculate([f for _, f in sorted(linker_inputs)] + extra_files_to_link, forced=state.forced_stdlibs)
   linker_arguments.extend(extra_files_to_link)
 
@@ -2730,10 +2741,10 @@ def version_string():
     git_rev = run_process(
       ['git', 'rev-parse', 'HEAD'],
       stdout=PIPE, stderr=PIPE, cwd=utils.path_from_root()).stdout.strip()
-    revision_suffix = '-git (%s)' % git_rev
-  elif os.path.exists(utils.path_from_root('emscripten-revision.txt')):
-    git_rev = read_file(utils.path_from_root('emscripten-revision.txt')).strip()
     revision_suffix = ' (%s)' % git_rev
+  elif os.path.exists(utils.path_from_root('emscripten-revision.txt')):
+    rev = read_file(utils.path_from_root('emscripten-revision.txt')).strip()
+    revision_suffix = ' (%s)' % rev
   return f'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) {shared.EMSCRIPTEN_VERSION}{revision_suffix}'
 
 
@@ -2942,7 +2953,7 @@ def parse_args(newargs):
       should_exit = True
     elif check_flag('--clear-ports'):
       logger.info('clearing ports and cache as requested by --clear-ports')
-      system_libs.Ports.erase()
+      ports.clear()
       shared.Cache.erase()
       shared.check_sanity(force=True) # this is a good time for a sanity check
       should_exit = True
@@ -2951,7 +2962,7 @@ def parse_args(newargs):
       shared.check_sanity(force=True)
       should_exit = True
     elif check_flag('--show-ports'):
-      system_libs.show_ports()
+      ports.show_ports()
       should_exit = True
     elif check_arg('--memory-init-file'):
       options.memory_init_file = int(consume_arg())

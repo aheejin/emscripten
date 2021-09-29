@@ -294,7 +294,7 @@ LibraryManager.library = {
 
     // Memory resize rules:
     // 1. Always increase heap size to at least the requested size, rounded up to next page multiple.
-    // 2a. If MEMORY_GROWTH_LINEAR_STEP == -1, excessively resize the heap geometrically: increase the heap size according to 
+    // 2a. If MEMORY_GROWTH_LINEAR_STEP == -1, excessively resize the heap geometrically: increase the heap size according to
     //                                         MEMORY_GROWTH_GEOMETRIC_STEP factor (default +20%),
     //                                         At most overreserve by MEMORY_GROWTH_GEOMETRIC_CAP bytes (default 96MB).
     // 2b. If MEMORY_GROWTH_LINEAR_STEP != -1, excessively resize the heap linearly: increase the heap size by at least MEMORY_GROWTH_LINEAR_STEP bytes.
@@ -441,19 +441,23 @@ LibraryManager.library = {
 #endif
   },
   __cxa_atexit: 'atexit',
-
 #endif
 
-  // TODO: There are currently two abort() functions that get imported to asm module scope: the built-in runtime function abort(),
-  // and this function _abort(). Remove one of these, importing two functions for the same purpose is wasteful.
+  // TODO: There are currently two abort() functions that get imported to asm
+  // module scope: the built-in runtime function abort(), and this library
+  // function _abort(). Remove one of these, importing two functions for the
+  // same purpose is wasteful.
   abort__sig: 'v',
   abort: function() {
-    abort();
+#if ASSERTIONS
+    abort('native code called abort()');
+#else
+    abort('');
+#endif
   },
 
   // This object can be modified by the user during startup, which affects
-  // the initial values of the environment accessible by getenv. (This works
-  // in both fastcomp and upstream).
+  // the initial values of the environment accessible by getenv.
   $ENV: {},
 
   getloadavg: function(loadavg, nelem) {
@@ -722,7 +726,7 @@ LibraryManager.library = {
     var summerOffset = summer.getTimezoneOffset();
 
     // Local standard timezone offset. Local standard time is not adjusted for daylight savings.
-    // This code uses the fact that getTimezoneOffset returns a greater value during Standard Time versus Daylight Saving Time (DST). 
+    // This code uses the fact that getTimezoneOffset returns a greater value during Standard Time versus Daylight Saving Time (DST).
     // Thus it determines the expected output during Standard Time, and it compares whether the output of the given date the same (Standard) or less (DST).
     var stdTimezoneOffset = Math.max(winterOffset, summerOffset);
 
@@ -2645,6 +2649,9 @@ LibraryManager.library = {
     {{{ makeEval('return eval(UTF8ToString(ptr))|0;') }}}
   },
 
+  // We use builtin_malloc and builtin_free here because otherwise lsan will
+  // report the last returned string as a leak.
+  emscripten_run_script_string__deps: ['emscripten_builtin_malloc', 'emscripten_builtin_free'],
   emscripten_run_script_string__sig: 'ii',
   emscripten_run_script_string: function(ptr) {
     {{{ makeEval("var s = eval(UTF8ToString(ptr));") }}}
@@ -2655,9 +2662,9 @@ LibraryManager.library = {
     var me = _emscripten_run_script_string;
     var len = lengthBytesUTF8(s);
     if (!me.bufferSize || me.bufferSize < len+1) {
-      if (me.bufferSize) _free(me.buffer);
+      if (me.bufferSize) _emscripten_builtin_free(me.buffer);
       me.bufferSize = len+1;
-      me.buffer = _malloc(me.bufferSize);
+      me.buffer = _emscripten_builtin_malloc(me.bufferSize);
     }
     stringToUTF8(s, me.buffer, me.bufferSize);
     return me.buffer;
@@ -2930,6 +2937,9 @@ LibraryManager.library = {
     _emscripten_log_js(flags, str);
   },
 
+  // We never free the return values of this function so we need to allocate
+  // using builtin_malloc to avoid LSan reporting these as leaks.
+  emscripten_get_compiler_setting__deps: ['emscripten_builtin_malloc'],
   emscripten_get_compiler_setting: function(name) {
 #if RETAIN_COMPILER_SETTINGS
     name = UTF8ToString(name);
@@ -2939,10 +2949,11 @@ LibraryManager.library = {
 
     if (!_emscripten_get_compiler_setting.cache) _emscripten_get_compiler_setting.cache = {};
     var cache = _emscripten_get_compiler_setting.cache;
-    var fullname = name + '__str';
-    var fullret = cache[fullname];
+    var fullret = cache[name];
     if (fullret) return fullret;
-    return cache[fullname] = allocate(intArrayFromString(ret + ''), ALLOC_NORMAL);
+    cache[name] = _emscripten_builtin_malloc(ret.length + 1);
+    stringToUTF8(ret + '', cache[name], ret.length + 1);
+    return cache[name];
 #else
     throw 'You must build with -s RETAIN_COMPILER_SETTINGS=1 for getCompilerSetting or emscripten_get_compiler_setting to work';
 #endif
@@ -2983,9 +2994,9 @@ LibraryManager.library = {
       // we pack index and offset into a "return address"
       return wasmOffsetConverter.convert(+match[1], +match[2]);
     } else if (match = /:(\d+):\d+(?:\)|$)/.exec(frame)) {
-      // if we are in js, we can use the js line number as the "return address"
-      // this should work for wasm2js and fastcomp
-      // we tag the high bit to distinguish this from wasm addresses
+      // If we are in js, we can use the js line number as the "return address".
+      // This should work for wasm2js.  We tag the high bit to distinguish this
+      // from wasm addresses.
       return 0x80000000 | +match[1];
     } else {
       // return 0 if we can't find any
@@ -3093,15 +3104,17 @@ LibraryManager.library = {
   },
 
   // Look up the function name from our stack frame cache with our PC representation.
-  emscripten_pc_get_function__deps: [
 #if USE_OFFSET_CONVERTER
+  emscripten_pc_get_function__deps: [
     '$UNWIND_CACHE',
-    '$withBuiltinMalloc',
+    'free',
 #if MINIMAL_RUNTIME
     '$allocateUTF8',
 #endif
-#endif
   ],
+  // Don't treat allocation of _emscripten_pc_get_function.ret as a leak
+  emscripten_pc_get_function__noleakcheck: true,
+#endif
   emscripten_pc_get_function: function (pc) {
 #if !USE_OFFSET_CONVERTER
     abort('Cannot use emscripten_pc_get_function without -s USE_OFFSET_CONVERTER');
@@ -3123,10 +3136,8 @@ LibraryManager.library = {
     } else {
       name = wasmOffsetConverter.getName(pc);
     }
-    withBuiltinMalloc(function () {
-      if (_emscripten_pc_get_function.ret) _free(_emscripten_pc_get_function.ret);
-      _emscripten_pc_get_function.ret = allocateUTF8(name);
-    });
+    if (_emscripten_pc_get_function.ret) _free(_emscripten_pc_get_function.ret);
+    _emscripten_pc_get_function.ret = allocateUTF8(name);
     return _emscripten_pc_get_function.ret;
 #endif
   },
@@ -3163,19 +3174,19 @@ LibraryManager.library = {
   },
 
   // Look up the file name from our stack frame cache with our PC representation.
-  emscripten_pc_get_file__deps: ['emscripten_pc_get_source_js', '$withBuiltinMalloc',
+  emscripten_pc_get_file__deps: ['emscripten_pc_get_source_js', 'free',
 #if MINIMAL_RUNTIME
     '$allocateUTF8',
 #endif
   ],
+  // Don't treat allocation of _emscripten_pc_get_file.ret as a leak
+  emscripten_pc_get_file__noleakcheck: true,
   emscripten_pc_get_file: function (pc) {
     var result = _emscripten_pc_get_source_js(pc);
     if (!result) return 0;
 
-    withBuiltinMalloc(function () {
-      if (_emscripten_pc_get_file.ret) _free(_emscripten_pc_get_file.ret);
-      _emscripten_pc_get_file.ret = allocateUTF8(result.file);
-    });
+    if (_emscripten_pc_get_file.ret) _free(_emscripten_pc_get_file.ret);
+    _emscripten_pc_get_file.ret = allocateUTF8(result.file);
     return _emscripten_pc_get_file.ret;
   },
 
@@ -3232,23 +3243,18 @@ LibraryManager.library = {
 #endif
     }
   },
-#else
-  // Without lsan or asan withBuiltinMalloc is just a no-op.
-  $withBuiltinMalloc: function (func) { return func(); },
 #endif
 
-  emscripten_builtin_mmap2__deps: ['$withBuiltinMalloc', '$syscallMmap2'],
+  emscripten_builtin_mmap2__deps: ['$syscallMmap2'],
+  emscripten_builtin_mmap2__noleakcheck: true,
   emscripten_builtin_mmap2: function (addr, len, prot, flags, fd, off) {
-    return withBuiltinMalloc(function () {
-      return syscallMmap2(addr, len, prot, flags, fd, off);
-    });
+    return syscallMmap2(addr, len, prot, flags, fd, off);
   },
 
-  emscripten_builtin_munmap__deps: ['$withBuiltinMalloc', '$syscallMunmap'],
+  emscripten_builtin_munmap__deps: ['$syscallMunmap'],
+  emscripten_builtin_munmap__noleakcheck: true,
   emscripten_builtin_munmap: function (addr, len) {
-    return withBuiltinMalloc(function () {
-      return syscallMunmap(addr, len);
-    });
+    return syscallMunmap(addr, len);
   },
 
   $readAsmConstArgsArray: '=[]',
@@ -3271,9 +3277,9 @@ LibraryManager.library = {
 #endif
       // A double takes two 32-bit slots, and must also be aligned - the backend
       // will emit padding to avoid that.
-      var double = ch < 105;
-      if (double && (buf & 1)) buf++;
-      readAsmConstArgsArray.push(double ? HEAPF64[buf++ >> 1] : HEAP32[buf]);
+      var readAsmConstArgsDouble = ch < 105;
+      if (readAsmConstArgsDouble && (buf & 1)) buf++;
+      readAsmConstArgsArray.push(readAsmConstArgsDouble ? HEAPF64[buf++ >> 1] : HEAP32[buf]);
       ++buf;
     }
     return readAsmConstArgsArray;
@@ -3604,14 +3610,6 @@ LibraryManager.library = {
     if (e instanceof ExitStatus || e == 'unwind') {
       return EXITSTATUS;
     }
-    // Anything else is an unexpected exception and we treat it as hard error.
-    var toLog = e;
-#if ASSERTIONS
-    if (e && typeof e === 'object' && e.stack) {
-      toLog = [e, e.stack];
-    }
-#endif
-    err('exception thrown: ' + toLog);
 #if MINIMAL_RUNTIME
     throw e;
 #else

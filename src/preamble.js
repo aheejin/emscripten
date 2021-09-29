@@ -405,6 +405,9 @@ function preMain() {
 #endif
 
 function exitRuntime() {
+#if RUNTIME_DEBUG
+  err('exitRuntime');
+#endif
 #if ASYNCIFY && ASSERTIONS
   // ASYNCIFY cannot be used once the runtime starts shutting down.
   Asyncify.state = Asyncify.State.Disabled;
@@ -593,17 +596,16 @@ function abort(what) {
   }
 #endif
 
-  what += '';
+  what = 'Aborted(' + what + ')';
+  // TODO(sbc): Should we remove printing and leave it up to whoever
+  // catches the exception?
   err(what);
 
   ABORT = true;
   EXITSTATUS = 1;
 
 #if ASSERTIONS == 0
-  what = 'abort(' + what + '). Build with -s ASSERTIONS=1 for more info.';
-#else
-  var output = 'abort(' + what + ') at ' + stackTrace();
-  what = output;
+  what += '. Build with -s ASSERTIONS=1 for more info.';
 #endif // ASSERTIONS
 
   // Use a wasm runtime error, because a JS error might be seen as a foreign
@@ -624,7 +626,7 @@ function abort(what) {
 
 #include "memoryprofiler.js"
 
-#if ASSERTIONS && !('$FS' in addedLibraryItems) && !ASMFS
+#if ASSERTIONS && !('$FS' in addedLibraryItems) && !ASMFS && !WASMFS
 // show errors on likely calls to FS when it was not included
 var FS = {
   error: function() {

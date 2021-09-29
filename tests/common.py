@@ -541,6 +541,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     es_check_env = os.environ.copy()
     es_check_env['PATH'] = os.path.dirname(config.NODE_JS[0]) + os.pathsep + es_check_env['PATH']
     try:
+      # Comment out --quiet if more detailed error logging is needed
       shared.run_process(es_check + ['es5', os.path.abspath(filename), '--quiet'], stderr=PIPE, env=es_check_env)
     except subprocess.CalledProcessError as e:
       print(e.stderr)
@@ -550,11 +551,14 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   def build(self, filename, libraries=[], includes=[], force_c=False, js_outfile=True, emcc_args=[], output_basename=None):
     suffix = '.js' if js_outfile else '.wasm'
     compiler = [compiler_for(filename, force_c)]
-    if compiler[0] == EMCC:
+    if compiler[0] == EMCC and not self.get_setting('WASMFS'):
+      # TODO change test behaviour in the future when WASMFS becomes default file system
+      # WASMFS is excluded here since it currently requires stdlib++ functions
       # TODO(https://github.com/emscripten-core/emscripten/issues/11121)
-      # We link with C++ stdlibs, even when linking with emcc for historical reasons.  We can remove
-      # this if this issues is fixed.
-      compiler.append('-nostdlib++')
+      # For historical reasons emcc compiles and links as C++ by default.
+      # However we want to run our tests in a more strict manner.  We can
+      # remove this if the issue above is ever fixed.
+      compiler.append('-sNO_DEFAULT_TO_CXX')
 
     if force_c:
       compiler.append('-xc')
@@ -642,6 +646,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       stderr_file = self.in_dir('stderr')
       stderr = open(stderr_file, 'w')
     error = None
+    timeout_error = None
     if not engine:
       engine = self.js_engines[0]
     if engine == config.NODE_JS:
@@ -653,6 +658,8 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
                    stdout=open(stdout_file, 'w'),
                    stderr=stderr,
                    assert_returncode=assert_returncode)
+    except subprocess.TimeoutExpired as e:
+      timeout_error = e
     except subprocess.CalledProcessError as e:
       error = e
 
@@ -665,7 +672,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       ret += read_file(stderr_file)
     if output_nicerizer:
       ret = output_nicerizer(ret)
-    if error or EMTEST_VERBOSE:
+    if error or timeout_error or EMTEST_VERBOSE:
       ret = limit_size(ret)
       print('-- begin program output --')
       print(read_file(stdout_file), end='')
@@ -674,11 +681,13 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
         print('-- begin program stderr --')
         print(read_file(stderr_file), end='')
         print('-- end program stderr --')
-      if error:
-        if assert_returncode == NON_ZERO:
-          self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
-        else:
-          self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
+    if timeout_error:
+      raise timeout_error
+    if error:
+      if assert_returncode == NON_ZERO:
+        self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
+      else:
+        self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
 
     #  We should pass all strict mode checks
     self.assertNotContained('strict warning:', ret)
@@ -1004,7 +1013,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     self._build_and_run(filename, expected_output, **kwargs)
 
   def do_runf(self, filename, expected_output=None, **kwargs):
-    self._build_and_run(filename, expected_output, **kwargs)
+    return self._build_and_run(filename, expected_output, **kwargs)
 
   ## Just like `do_run` but with filename of expected output
   def do_run_from_file(self, filename, expected_output_filename, **kwargs):
@@ -1077,6 +1086,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
         except Exception:
           print('(test did not pass in JS engine: %s)' % engine)
           raise
+    return js_output
 
   def get_freetype_library(self):
     if '-Werror' in self.emcc_args:
