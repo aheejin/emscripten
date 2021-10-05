@@ -551,7 +551,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   def build(self, filename, libraries=[], includes=[], force_c=False, js_outfile=True, emcc_args=[], output_basename=None):
     suffix = '.js' if js_outfile else '.wasm'
     compiler = [compiler_for(filename, force_c)]
-    if compiler[0] == EMCC and not self.get_setting('WASMFS'):
+    if compiler[0] == EMCC:
       # TODO change test behaviour in the future when WASMFS becomes default file system
       # WASMFS is excluded here since it currently requires stdlib++ functions
       # TODO(https://github.com/emscripten-core/emscripten/issues/11121)
@@ -761,10 +761,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     if callable(string):
       string = string()
     if value in string:
-      self.fail("Expected to NOT find '%s' in '%s', diff:\n\n%s" % (
-        limit_size(value), limit_size(string),
-        limit_size(''.join([a.rstrip() + '\n' for a in difflib.unified_diff(value.split('\n'), string.split('\n'), fromfile='expected', tofile='actual')]))
-      ))
+      self.fail("Expected to NOT find '%s' in '%s'" % (limit_size(value), limit_size(string)))
 
   def assertContainedIf(self, value, string, condition):
     if condition:

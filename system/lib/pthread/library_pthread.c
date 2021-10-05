@@ -18,7 +18,6 @@
 #include <stdatomic.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -490,29 +489,6 @@ void* emscripten_sync_run_in_main_thread_2(
   return q.returnValue.vp;
 }
 
-void* emscripten_sync_run_in_main_thread_xprintf_varargs(
-  int function, int param0, const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  const int CAP = 128;
-  char str[CAP];
-  char* s = str;
-  int len = vsnprintf(s, CAP, format, args);
-  if (len >= CAP) {
-    s = (char*)malloc(len + 1);
-    va_start(args, format);
-    len = vsnprintf(s, len + 1, format, args);
-  }
-  em_queued_call q = {function};
-  q.args[0].vp = (void*)param0;
-  q.args[1].vp = s;
-  q.returnValue.vp = 0;
-  emscripten_sync_run_in_main_thread(&q);
-  if (s != str)
-    free(s);
-  return q.returnValue.vp;
-}
-
 void* emscripten_sync_run_in_main_thread_3(
   int function, void* arg1, void* arg2, void* arg3) {
   em_queued_call q = {function};
@@ -860,9 +836,8 @@ void __emscripten_init_main_thread(void) {
   __main_pthread.self = &__main_pthread;
   // pthread struct robust_list head should point to itself.
   __main_pthread.robust_list.head = &__main_pthread.robust_list.head;
-
-  // Main thread ID.
-  __main_pthread.tid = (long)&__main_pthread;
-
+  // Main thread ID is always 1.  It can't be 0 because musl assumes
+  // tid is always non-zero.
+  __main_pthread.tid = 1;
   __main_pthread.locale = &libc.global_locale;
 }

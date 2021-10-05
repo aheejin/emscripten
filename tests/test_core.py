@@ -3481,7 +3481,7 @@ ok
         return 0;
       }
       ''')
-    self.do_runf('main.c', 'a: loaded\nb: loaded\na: loaded\n')
+    self.do_runf('main.c', 'a: loaded\nb: loaded\n')
 
   @needs_dylink
   @needs_non_trapping_float_to_int
@@ -5466,6 +5466,7 @@ Module['onRuntimeInitialized'] = function() {
 
   @no_windows('https://github.com/emscripten-core/emscripten/issues/8882')
   def test_unistd_misc(self):
+    self.set_setting('LLD_REPORT_UNDEFINED')
     orig_compiler_opts = self.emcc_args.copy()
     for fs in ['MEMFS', 'NODEFS']:
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
@@ -8400,6 +8401,15 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-DEXIT_RUNTIME', '--pre-js', test_file('core/pthread/test_pthread_exit_runtime.pre.js')]
     self.do_run_in_out_file_test('core/pthread/test_pthread_exit_runtime.c', assert_returncode=42)
+
+  @node_pthreads
+  def test_pthread_exit_main(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test('core/pthread/test_pthread_exit_main.c')
+
+  def test_pthread_exit_main_stub(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test('core/pthread/test_pthread_exit_main.c')
 
   @node_pthreads
   @no_wasm2js('wasm2js does not support PROXY_TO_PTHREAD (custom section support)')
