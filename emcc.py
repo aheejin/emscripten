@@ -630,8 +630,6 @@ def get_binaryen_passes():
 def make_js_executable(script):
   src = read_file(script)
   cmd = config.JS_ENGINE
-  if settings.WASM_BIGINT:
-    cmd.append('--experimental-wasm-bigint')
   cmd = shared.shlex_join(cmd)
   if not os.path.isabs(config.JS_ENGINE[0]):
     # TODO: use whereis etc. And how about non-*NIX?

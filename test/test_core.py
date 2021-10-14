@@ -240,7 +240,6 @@ def also_with_standalone_wasm(wasm2c=False, impure=False):
         if impure:
           self.wasm_engines = []
         self.js_engines = [config.NODE_JS]
-        self.node_args.append('--experimental-wasm-bigint')
         func(self)
         if wasm2c:
           print('wasm2c')
@@ -576,7 +575,6 @@ class TestCoreBase(RunnerCore):
   def test_i64_invoke_bigint(self):
     self.set_setting('WASM_BIGINT')
     self.emcc_args += ['-fexceptions']
-    self.node_args += ['--experimental-wasm-bigint']
     self.do_core_test('test_i64_invoke_bigint.cpp')
 
   def test_vararg_copy(self):
@@ -2277,7 +2275,6 @@ int main(int argc, char **argv) {
     self.assertContained('emcc: error: using 64-bit arguments in EM_JS function without WASM_BIGINT is not yet fully supported: `foo`', err)
 
     self.set_setting('WASM_BIGINT')
-    self.node_args += ['--experimental-wasm-bigint']
     self.do_core_test('test_em_js_i64.c')
 
   def test_runtime_stacksave(self):
@@ -7001,12 +6998,6 @@ void* operator new(size_t size) {
     'none': ('none',),
   })
   def test_wasm2c_sandboxing(self, mode):
-    if self.get_setting('WASMFS'):
-      # wasm2c disables JS legalization since we are building in standalone
-      # mode. this happens to work without wasmfs, but with wasmfs we get the
-      # time when we create/update a file, which uses clock_time_get that has an
-      # i64 param. For such an import to work we need wasm-bigint support.
-      self.node_args.append('--experimental-wasm-bigint')
     if not can_do_standalone(self):
       return self.skipTest('standalone mode not supported')
     self.set_setting('STANDALONE_WASM')
@@ -7580,14 +7571,12 @@ void* operator new(size_t size) {
   def test_embind_i64_val(self):
     self.set_setting('WASM_BIGINT')
     self.emcc_args += ['-lembind']
-    self.node_args += ['--experimental-wasm-bigint']
     self.do_run_in_out_file_test('embind/test_i64_val.cpp', assert_identical=True)
 
   @no_wasm2js('wasm_bigint')
   def test_embind_i64_binding(self):
     self.set_setting('WASM_BIGINT')
     self.emcc_args += ['-lembind']
-    self.node_args += ['--experimental-wasm-bigint']
     self.do_run_in_out_file_test('embind/test_i64_binding.cpp', assert_identical=True)
 
   def test_embind_no_rtti(self):
@@ -9632,8 +9621,7 @@ wasm64 = make_run('wasm64', emcc_args=['-Wno-experimental', '--profiling-funcs']
                   require_v8=True, v8_args=['--experimental-wasm-memory64'])
 # MEMORY64=2, or "lowered"
 wasm64l = make_run('wasm64l', emcc_args=['-Wno-experimental', '--profiling-funcs'],
-                   settings={'MEMORY64': 2},
-                   node_args=['--experimental-wasm-bigint'])
+                   settings={'MEMORY64': 2})
 
 lto0 = make_run('lto0', emcc_args=['-flto', '-O0'])
 lto1 = make_run('lto1', emcc_args=['-flto', '-O1'])
@@ -9669,8 +9657,7 @@ core0s = make_run('core2s', emcc_args=['-g'], settings={'SAFE_HEAP': 1})
 core2s = make_run('core2s', emcc_args=['-O2'], settings={'SAFE_HEAP': 1})
 core2ss = make_run('core2ss', emcc_args=['-O2'], settings={'STACK_OVERFLOW_CHECK': 2})
 
-bigint = make_run('bigint', emcc_args=['--profiling-funcs'], settings={'WASM_BIGINT': 1},
-                  node_args=['--experimental-wasm-bigint'])
+bigint = make_run('bigint', emcc_args=['--profiling-funcs'], settings={'WASM_BIGINT': 1})
 
 # Add DEFAULT_TO_CXX=0
 strict = make_run('strict', emcc_args=[], settings={'STRICT': 1})

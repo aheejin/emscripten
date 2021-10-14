@@ -39,7 +39,7 @@ variables so that emcc etc. are used. Typical usage:
     # In order to allow cmake to run code built with pthreads we need to pass some extra flags to node.
     # Note that we also need --experimental-wasm-bulk-memory which is true by default and hence not added here
     # See https://github.com/emscripten-core/emscripten/issues/15522
-    args.append(f'-DCMAKE_CROSSCOMPILING_EMULATOR={node_js};--experimental-wasm-threads')
+    args.append(f'-DCMAKE_CROSSCOMPILING_EMULATOR={node_js}')
 
   # On Windows specify MinGW Makefiles or ninja if we have them and no other
   # toolchain was specified, to keep CMake from pulling in a native Visual
