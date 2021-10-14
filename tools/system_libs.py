@@ -1279,6 +1279,8 @@ class libasmfs(MTLibrary):
 class libwasmfs(MTLibrary):
   name = 'libwasmfs'
 
+  cflags = ['-fno-exceptions']
+
   def get_files(self):
     return files_in_path(
         path='system/lib/wasmfs',
