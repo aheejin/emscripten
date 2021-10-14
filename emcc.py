@@ -696,7 +696,7 @@ def process_dynamic_libs(dylibs, lib_dirs):
     settings.SIDE_MODULE_EXPORTS.extend(exports)
 
     imports = webassembly.get_imports(dylib)
-    imports = [i.field for i in imports if i.kind in (webassembly.ExternType.FUNC, webassembly.ExternType.GLOBAL)]
+    imports = [i.field for i in imports if i.kind in (webassembly.ExternType.FUNC, webassembly.ExternType.GLOBAL, webassembly.ExternType.TAG)]
     # For now we ignore `invoke_` functions imported by side modules and rely
     # on the dynamic linker to create them on the fly.
     # TODO(sbc): Integrate with metadata['invokeFuncs'] that comes from the
@@ -2354,6 +2354,9 @@ def phase_linker_setup(options, state, newargs, settings_map):
   # WASMFS itself is written in C++, and needs C++ standard libraries
   if settings.WASMFS:
     settings.LINK_AS_CXX = True
+
+  if settings.RELOCATABLE and settings.EXCEPTION_HANDLING:
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('__cpp_exception')
 
   return target, wasm_target
 
