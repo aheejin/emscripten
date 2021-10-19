@@ -699,6 +699,17 @@ f.close()
   def test_cmake_emscripten_version(self):
     self.run_process([EMCMAKE, 'cmake', test_file('cmake/emscripten_version')])
 
+  def test_cmake_emscripten_system_processor(self):
+    cmake_dir = test_file('cmake/emscripten_system_processor')
+    # The default CMAKE_SYSTEM_PROCESSOR is x86.
+    out = self.run_process([EMCMAKE, 'cmake', cmake_dir], stdout=PIPE).stdout
+    self.assertContained('CMAKE_SYSTEM_PROCESSOR is x86', out)
+
+    # It can be overridden by setting EMSCRIPTEN_SYSTEM_PROCESSOR.
+    out = self.run_process(
+      [EMCMAKE, 'cmake', cmake_dir, '-DEMSCRIPTEN_SYSTEM_PROCESSOR=arm'], stdout=PIPE).stdout
+    self.assertContained('CMAKE_SYSTEM_PROCESSOR is arm', out)
+
   def test_cmake_find_stuff(self):
     # Ensure that zlib exists in the sysroot
     self.run_process([EMCC, test_file('hello_world.c'), '-sUSE_ZLIB'])
@@ -8789,23 +8800,6 @@ int main () {
       self.assertNotContained('invoke_ii', output)
       self.assertNotContained('invoke_v', output)
 
-  def test_emscripten_metadata(self):
-    self.run_process([EMCC, test_file('hello_world.c')])
-    self.assertNotIn(b'emscripten_metadata', read_binary('a.out.wasm'))
-
-    self.run_process([EMCC, test_file('hello_world.c'),
-                      '-s', 'EMIT_EMSCRIPTEN_METADATA'])
-    self.assertIn(b'emscripten_metadata', read_binary('a.out.wasm'))
-
-    # Test is standalone mode too.
-    self.run_process([EMCC, test_file('hello_world.c'), '-o', 'out.wasm',
-                      '-s', 'EMIT_EMSCRIPTEN_METADATA'])
-    self.assertIn(b'emscripten_metadata', read_binary('out.wasm'))
-
-    # make sure wasm executes correctly
-    ret = self.run_process(config.NODE_JS + ['a.out.js'], stdout=PIPE).stdout
-    self.assertContained('hello, world!\n', ret)
-
   @parameterized({
     'O0': (False, ['-O0']), # noqa
     'O0_emit': (True, ['-O0', '-s', 'EMIT_EMSCRIPTEN_LICENSE']), # noqa
@@ -10839,7 +10833,11 @@ kill -9 $$
 
   def test_link_only_flag_warning(self):
     err = self.run_process([EMCC, '--embed-file', 'file', '-c', test_file('hello_world.c')], stderr=PIPE).stderr
-    self.assertContained("warning: linker setting ignored during compilation: '--embed-file' [-Wunused-command-line-argument]", err)
+    self.assertContained("warning: linker flag ignored during compilation: '--embed-file' [-Wunused-command-line-argument]", err)
+
+  def test_compile_only_flag_warning(self):
+    err = self.run_process([EMCC, '--default-obj-ext', 'foo', test_file('hello_world.c')], stderr=PIPE).stderr
+    self.assertContained("warning: compiler flag ignored during linking: '--default-obj-ext' [-Wunused-command-line-argument]", err)
 
   def test_no_deprecated(self):
     # Test that -Wno-deprecated is passed on to clang driver

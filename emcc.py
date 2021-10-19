@@ -150,6 +150,7 @@ UBSAN_SANITIZERS = {
 VALID_ENVIRONMENTS = ('web', 'webview', 'worker', 'node', 'shell')
 SIMD_INTEL_FEATURE_TOWER = ['-msse', '-msse2', '-msse3', '-mssse3', '-msse4.1', '-msse4.2', '-mavx']
 SIMD_NEON_FLAGS = ['-mfpu=neon']
+COMPILE_ONLY_FLAGS = set(['--default-obj-ext'])
 LINK_ONLY_FLAGS = set([
     '--bind', '--closure', '--cpuprofiler', '--embed-file',
     '--emit-symbol-map', '--emrun', '--exclude-file', '--extern-post-js',
@@ -1327,7 +1328,7 @@ def phase_setup(options, state, newargs, settings_map):
       if arg in LINK_ONLY_FLAGS:
         diagnostics.warning(
             'unused-command-line-argument',
-            "linker setting ignored during compilation: '%s'" % arg)
+            "linker flag ignored during compilation: '%s'" % arg)
     if state.has_dash_c:
       if '-emit-llvm' in newargs:
         options.default_object_extension = '.bc'
@@ -1341,6 +1342,12 @@ def phase_setup(options, state, newargs, settings_map):
 
     if options.output_file and len(input_files) > 1:
       exit_with_error('cannot specify -o with -c/-S/-E/-M and multiple source files')
+  else:
+    for arg in state.orig_args:
+      if any(arg.startswith(f) for f in COMPILE_ONLY_FLAGS):
+        diagnostics.warning(
+            'unused-command-line-argument',
+            "compiler flag ignored during linking: '%s'" % arg)
 
   if settings.MAIN_MODULE or settings.SIDE_MODULE:
     settings.RELOCATABLE = 1
@@ -3168,10 +3175,6 @@ def phase_binaryen(target, options, wasm_target):
     building.eval_ctors(final_js, wasm_target, debug_info=intermediate_debug_info)
 
   # after generating the wasm, do some final operations
-
-  if settings.EMIT_EMSCRIPTEN_METADATA:
-    diagnostics.warning('deprecated', 'We hope to remove support for EMIT_EMSCRIPTEN_METADATA. See https://github.com/emscripten-core/emscripten/issues/12231')
-    webassembly.add_emscripten_metadata(wasm_target)
 
   if final_js:
     if settings.SUPPORT_BIG_ENDIAN:

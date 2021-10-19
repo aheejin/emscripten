@@ -44,6 +44,12 @@ See docs/process.md for more on how version tagging works.
   EM_WORKAROUND_PYTHON_BUG_34780 and EM_WORKAROUND_WIN7_BAD_ERRORLEVEL_BUG that
   can be enabled to work around a Windows Python issue
   https://bugs.python.org/issue34780 , and a Windows 7 exit code issue (#15146)
+- Support a new CMake propert `EMSCRIPTEN_SYSTEM_PROCESSOR` which can be used
+  to override the default value of `CMAKE_SYSTEM_PROCESSOR` set by the
+  toolchain file.
+- Remove support for the `EMIT_EMSCRIPTEN_METADATA` setting.  This setting has
+  been deprecated for some time now and we don't know of any remaining reasons to
+  keep it around.
 
 2.0.31 - 10/01/2021
 -------------------
