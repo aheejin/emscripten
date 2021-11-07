@@ -3,7 +3,6 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
-import glob
 import hashlib
 import json
 import logging
@@ -118,6 +117,31 @@ def with_both_exception_handling(f):
 
   metafunc._parameterize = {'': (False,),
                             'wasm_eh': (True,)}
+  return metafunc
+
+
+# Tests setjmp/longjmp handling in Emscripten SjLJ mode, and if possible, new
+# Wasm SjLj mode
+def with_both_sjlj_handling(f):
+  assert callable(f)
+
+  def metafunc(self, native_sjlj):
+    if native_sjlj:
+      # Wasm SjLj is currently supported only in Wasm backend and V8
+      if not self.is_wasm():
+        self.skipTest('wasm2js does not support Wasm SjLj')
+      self.require_v8()
+      self.set_setting('SUPPORT_LONGJMP', 'wasm')
+      # These are for Emscripten EH/SjLj
+      self.set_setting('DISABLE_EXCEPTION_THROWING')
+      self.v8_args.append('--experimental-wasm-eh')
+      f(self)
+    else:
+      self.set_setting('SUPPORT_LONGJMP', 'emscripten')
+      f(self)
+
+  metafunc._parameterize = {'': (False,),
+                            'wasm_sjlj': (True,)}
   return metafunc
 
 
@@ -964,31 +988,39 @@ base align: 0, 0, 0, 0'''])
   def test_longjmp(self):
     self.do_core_test('test_longjmp.c')
 
+  @with_both_sjlj_handling
   def test_longjmp2(self):
     self.do_core_test('test_longjmp2.c')
 
   @needs_dylink
+  @with_both_sjlj_handling
   def test_longjmp2_main_module(self):
     # Test for binaryen regression:
     # https://github.com/WebAssembly/binaryen/issues/2180
     self.set_setting('MAIN_MODULE')
     self.do_core_test('test_longjmp2.c')
 
+  @with_both_sjlj_handling
   def test_longjmp3(self):
     self.do_core_test('test_longjmp3.c')
 
+  @with_both_sjlj_handling
   def test_longjmp4(self):
     self.do_core_test('test_longjmp4.c')
 
+  @with_both_sjlj_handling
   def test_longjmp_funcptr(self):
     self.do_core_test('test_longjmp_funcptr.c')
 
+  @with_both_sjlj_handling
   def test_longjmp_repeat(self):
     self.do_core_test('test_longjmp_repeat.c')
 
+  @with_both_sjlj_handling
   def test_longjmp_stacked(self):
     self.do_core_test('test_longjmp_stacked.c', assert_returncode=NON_ZERO)
 
+  @with_both_sjlj_handling
   def test_longjmp_exc(self):
     self.do_core_test('test_longjmp_exc.c', assert_returncode=NON_ZERO)
 
@@ -998,16 +1030,20 @@ base align: 0, 0, 0, 0'''])
       self.set_setting('DISABLE_EXCEPTION_CATCHING', disable_throw)
       self.do_core_test('test_longjmp_throw.cpp')
 
+  @with_both_sjlj_handling
   def test_longjmp_unwind(self):
     self.do_core_test('test_longjmp_unwind.c', assert_returncode=NON_ZERO)
 
+  @with_both_sjlj_handling
   def test_longjmp_i64(self):
     self.emcc_args += ['-g']
     self.do_core_test('test_longjmp_i64.c', assert_returncode=NON_ZERO)
 
+  @with_both_sjlj_handling
   def test_siglongjmp(self):
     self.do_core_test('test_siglongjmp.c')
 
+  @with_both_sjlj_handling
   def test_setjmp_many(self):
     src = r'''
       #include <stdio.h>
@@ -1024,6 +1060,7 @@ base align: 0, 0, 0, 0'''])
       print('NUM=%d' % num)
       self.do_run(src.replace('NUM', str(num)), '0\n' * num)
 
+  @with_both_sjlj_handling
   def test_setjmp_many_2(self):
     src = r'''
 #include <setjmp.h>
@@ -1052,6 +1089,7 @@ int main()
 
     self.do_run(src, r'''d is at 24''')
 
+  @with_both_sjlj_handling
   def test_setjmp_noleak(self):
     self.do_runf(test_file('core/test_setjmp_noleak.c'), 'ok.')
 
@@ -1710,17 +1748,16 @@ int main() {
 
     self.do_core_test('test_set_align.c')
 
+  @no_asan('EXPORT_ALL is not compatible with Asan')
   def test_emscripten_api(self):
     self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_save_me_aimee'])
     self.do_core_test('test_emscripten_api.cpp')
 
-    if '-fsanitize=address' not in self.emcc_args:
-      # test EXPORT_ALL (this is not compatible with asan, which doesn't
-      # support dynamic linking at all or the LINKING flag)
-      self.set_setting('EXPORTED_FUNCTIONS', [])
-      self.set_setting('EXPORT_ALL')
-      self.set_setting('LINKABLE')
-      self.do_core_test('test_emscripten_api.cpp')
+    # test EXPORT_ALL
+    self.set_setting('EXPORTED_FUNCTIONS', [])
+    self.set_setting('EXPORT_ALL')
+    self.set_setting('LINKABLE')
+    self.do_core_test('test_emscripten_api.cpp')
 
   def test_emscripten_run_script_string_int(self):
     src = r'''
@@ -3034,18 +3071,18 @@ Var: 42
     self.set_setting('MAIN_MODULE')
     self.set_setting('EXPORT_ALL')
 
-    def get_data_export_count(wasm):
+    def get_data_exports(wasm):
       wat = self.get_wasm_text(wasm)
       lines = wat.splitlines()
       exports = [l for l in lines if l.strip().startswith('(export ')]
       data_exports = [l for l in exports if '(global ' in l]
-      return len(data_exports)
+      data_exports = [d.split()[1].strip('"') for d in data_exports]
+      return data_exports
 
     self.do_core_test('test_dlfcn_self.c')
-    export_count = get_data_export_count('test_dlfcn_self.wasm')
-    # ensure there aren't too many globals; we don't want unnamed_addr
-    self.assertGreater(export_count, 20)
-    self.assertLess(export_count, 56)
+    data_exports = get_data_exports('test_dlfcn_self.wasm')
+    data_exports = '\n'.join(sorted(data_exports)) + '\n'
+    self.assertFileContents(test_file('core/test_dlfcn_self.exports'), data_exports)
 
   @needs_dylink
   def test_dlfcn_unique_sig(self):
@@ -6327,32 +6364,6 @@ void* operator new(size_t size) {
         do_test_openjpeg()
     else:
       do_test_openjpeg()
-
-  @no_asan('call stack exceeded on some versions of node')
-  @is_slow_test
-  def test_fuzz(self):
-    self.emcc_args += ['-I' + test_file('fuzz/include'), '-w']
-
-    def run_all(x):
-      print(x)
-      for name in sorted(glob.glob(test_file('fuzz/*.c')) + glob.glob(test_file('fuzz/*.cpp'))):
-        if 'newfail' in name:
-          continue
-        if os.path.basename(name).startswith('temp_fuzzcode'):
-          continue
-        print(name)
-        if name.endswith('.cpp'):
-          self.emcc_args.append('-std=c++03')
-        self.do_runf(test_file('fuzz', name),
-                     read_file(test_file('fuzz', name + '.txt')))
-        if name.endswith('.cpp'):
-          self.emcc_args.remove('-std=c++03')
-
-    run_all('normal')
-
-    self.emcc_args += ['-flto']
-
-    run_all('lto')
 
   @also_with_standalone_wasm(wasm2c=True, impure=True)
   @no_asan('autodebug logging interferes with asan')

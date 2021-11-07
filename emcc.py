@@ -852,8 +852,14 @@ def get_cflags(user_args):
   if settings.INLINING_LIMIT:
     cflags.append('-fno-inline-functions')
 
-  if settings.RELOCATABLE:
+  if settings.RELOCATABLE and '-fPIC' not in user_args:
     cflags.append('-fPIC')
+
+  # We use default visiibilty=default in emscripten even though the upstream
+  # backend defaults visibility=hidden.  This matched the expectations of C/C++
+  # code in the wild which expects undecorated symbols to be exported to other
+  # DSO's by default.
+  if not any(a.startswith('-fvisibility') for a in user_args):
     cflags.append('-fvisibility=default')
 
   if settings.LTO:
@@ -1370,6 +1376,20 @@ def phase_setup(options, state, newargs, settings_map):
   if settings.DISABLE_EXCEPTION_THROWING and not settings.DISABLE_EXCEPTION_CATCHING:
     exit_with_error("DISABLE_EXCEPTION_THROWING was set (probably from -fno-exceptions) but is not compatible with enabling exception catching (DISABLE_EXCEPTION_CATCHING=0). If you don't want exceptions, set DISABLE_EXCEPTION_CATCHING to 1; if you do want exceptions, don't link with -fno-exceptions")
 
+  # SUPPORT_LONGJMP=1 means the default SjLj handling mechanism, currently
+  # 'emscripten'
+  if settings.SUPPORT_LONGJMP == 1:
+    settings.SUPPORT_LONGJMP = 'emscripten'
+
+  # Wasm SjLj cannot be used with Emscripten EH
+  if settings.SUPPORT_LONGJMP == 'wasm':
+    if not settings.DISABLE_EXCEPTION_CATCHING:
+      exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_CATCHING=0')
+    if not settings.DISABLE_EXCEPTION_THROWING:
+      exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_THROWING=0')
+    if settings.EXCEPTION_HANDLING:
+      exit_with_error('Wasm SjLj is not supported with Wasm exceptions yet')
+
   return (newargs, input_files)
 
 
@@ -1811,7 +1831,7 @@ def phase_linker_setup(options, state, newargs, settings_map):
     state.forced_stdlibs.append('libwasmfs')
     settings.FILESYSTEM = 0
     settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
-    # settings.JS_LIBRARIES.append((0, 'library_wasmfs.js')) TODO: populate with library_wasmfs.js later
+    settings.JS_LIBRARIES.append((0, 'library_wasmfs.js'))
 
   # Explicitly drop linking in a malloc implementation if program is not using any dynamic allocation calls.
   if not settings.USES_DYNAMIC_ALLOC:
@@ -1849,9 +1869,9 @@ def phase_linker_setup(options, state, newargs, settings_map):
   if settings.SIDE_MODULE:
     default_setting('ERROR_ON_UNDEFINED_SYMBOLS', 0)
     default_setting('WARN_ON_UNDEFINED_SYMBOLS', 0)
-  else:
-    settings.EXPORT_IF_DEFINED.append('__start_em_asm')
-    settings.EXPORT_IF_DEFINED.append('__stop_em_asm')
+
+  settings.EXPORT_IF_DEFINED.append('__start_em_asm')
+  settings.EXPORT_IF_DEFINED.append('__stop_em_asm')
 
   if options.use_preload_plugins or len(options.preload_files) or len(options.embed_files):
     if settings.NODERAWFS:
@@ -2362,8 +2382,13 @@ def phase_linker_setup(options, state, newargs, settings_map):
   if settings.WASMFS:
     settings.LINK_AS_CXX = True
 
-  if settings.RELOCATABLE and settings.EXCEPTION_HANDLING:
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('__cpp_exception')
+  # Export tag objects which are likely needed by the native code, but which are
+  # currently not reported in the metadata of wasm-emscripten-finalize
+  if settings.RELOCATABLE:
+    if settings.EXCEPTION_HANDLING:
+      settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('__cpp_exception')
+    if settings.SUPPORT_LONGJMP == 'wasm':
+      settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('__c_longjmp')
 
   return target, wasm_target
 

@@ -2,12 +2,13 @@
 // Emscripten is available under two separate licenses, the MIT license and the
 // University of Illinois/NCSA Open Source License.  Both these licenses can be
 // found in the LICENSE file.
-// wasmfs.cpp will implement a new file system that replaces the existing JS
-// filesystem. Current Status: Work in Progress. See
+// syscalls.cpp will implement the syscalls of the new file system replacing the
+// old JS version. Current Status: Work in Progress. See
 // https://github.com/emscripten-core/emscripten/issues/15041.
 
 #include "file.h"
 #include "file_table.h"
+#include "wasmfs.h"
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 #include <errno.h>
@@ -17,12 +18,13 @@
 #include <utility>
 #include <vector>
 #include <wasi/api.h>
+
 extern "C" {
 
 using namespace wasmfs;
 
-long __syscall_dup2(long oldfd, long newfd) {
-  auto fileTable = FileTable::get();
+long __syscall_dup3(long oldfd, long newfd, long flags) {
+  auto fileTable = wasmFS.getLockedFileTable();
 
   auto oldOpenFile = fileTable[oldfd];
   // If oldfd is not a valid file descriptor, then the call fails,
@@ -36,7 +38,7 @@ long __syscall_dup2(long oldfd, long newfd) {
   }
 
   if (oldfd == newfd) {
-    return oldfd;
+    return -EINVAL;
   }
 
   // If the file descriptor newfd was previously open, it will just be
@@ -46,7 +48,7 @@ long __syscall_dup2(long oldfd, long newfd) {
 }
 
 long __syscall_dup(long fd) {
-  auto fileTable = FileTable::get();
+  auto fileTable = wasmFS.getLockedFileTable();
 
   // Check that an open file exists corresponding to the given fd.
   auto openFile = fileTable[fd];
@@ -74,7 +76,7 @@ static __wasi_errno_t writeAtOffset(OffsetHandling setOffset,
     return __WASI_ERRNO_INVAL;
   }
 
-  auto openFile = FileTable::get()[fd];
+  auto openFile = wasmFS.getLockedFileTable()[fd];
 
   if (!openFile) {
     return __WASI_ERRNO_BADF;
@@ -141,7 +143,7 @@ static __wasi_errno_t readAtOffset(OffsetHandling setOffset,
     return __WASI_ERRNO_INVAL;
   }
 
-  auto openFile = FileTable::get()[fd];
+  auto openFile = wasmFS.getLockedFileTable()[fd];
 
   if (!openFile) {
     return __WASI_ERRNO_BADF;
@@ -232,7 +234,7 @@ __wasi_errno_t __wasi_fd_pread(__wasi_fd_t fd,
 }
 
 __wasi_errno_t __wasi_fd_close(__wasi_fd_t fd) {
-  auto fileTable = FileTable::get();
+  auto fileTable = wasmFS.getLockedFileTable();
 
   // Remove openFileState entry from fileTable.
   fileTable[fd] = nullptr;
@@ -241,7 +243,7 @@ __wasi_errno_t __wasi_fd_close(__wasi_fd_t fd) {
 }
 
 long __syscall_fstat64(long fd, long buf) {
-  auto openFile = FileTable::get()[fd];
+  auto openFile = wasmFS.getLockedFileTable()[fd];
 
   if (!openFile) {
     return -EBADF;
@@ -252,6 +254,7 @@ long __syscall_fstat64(long fd, long buf) {
   struct stat* buffer = (struct stat*)buf;
 
   auto lockedFile = file->locked();
+
   buffer->st_size = lockedFile.getSize();
 
   // ATTN: hard-coded constant values are copied from the existing JS file
@@ -297,13 +300,13 @@ __wasi_fd_t __syscall_open(long pathname, long flags, long mode) {
     return -EINVAL;
   }
 
-  auto base = pathParts[pathParts.size() - 1];
+  auto base = pathParts.back();
 
   // Root directory
   if (pathParts.size() == 1 && pathParts[0] == "/") {
     auto openFile =
-      std::make_shared<OpenFileState>(0, flags, getRootDirectory());
-    return FileTable::get().add(openFile);
+      std::make_shared<OpenFileState>(0, flags, wasmFS.getRootDirectory());
+    return wasmFS.getLockedFileTable().add(openFile);
   }
 
   long err;
@@ -327,10 +330,13 @@ __wasi_fd_t __syscall_open(long pathname, long flags, long mode) {
       // Create an empty in-memory file.
       auto created = std::make_shared<MemoryFile>(mode);
 
+      // TODO: When rename is implemented make sure that one can atomically
+      // remove the file from the source directory and then set its parent to
+      // the dest directory.
       lockedParentDir.setEntry(base, created);
       auto openFile = std::make_shared<OpenFileState>(0, flags, created);
 
-      return FileTable::get().add(openFile);
+      return wasmFS.getLockedFileTable().add(openFile);
     } else {
       return -ENOENT;
     }
@@ -348,7 +354,7 @@ __wasi_fd_t __syscall_open(long pathname, long flags, long mode) {
 
   auto openFile = std::make_shared<OpenFileState>(0, flags, curr);
 
-  return FileTable::get().add(openFile);
+  return wasmFS.getLockedFileTable().add(openFile);
 }
 
 long __syscall_mkdir(long path, long mode) {
@@ -362,7 +368,7 @@ long __syscall_mkdir(long path, long mode) {
     return -EEXIST;
   }
 
-  auto base = pathParts[pathParts.size() - 1];
+  auto base = pathParts.back();
 
   long err;
   auto parentDir = getDir(pathParts.begin(), pathParts.end() - 1, err);
@@ -392,7 +398,7 @@ __wasi_errno_t __wasi_fd_seek(__wasi_fd_t fd,
                               __wasi_filedelta_t offset,
                               __wasi_whence_t whence,
                               __wasi_filesize_t* newoffset) {
-  auto openFile = FileTable::get()[fd];
+  auto openFile = wasmFS.getLockedFileTable()[fd];
   if (!openFile) {
     return __WASI_ERRNO_BADF;
   }
@@ -421,6 +427,90 @@ __wasi_errno_t __wasi_fd_seek(__wasi_fd_t fd,
     *newoffset = position;
   }
 
+  return __WASI_ERRNO_SUCCESS;
+}
+
+long __syscall_chdir(long path) {
+  auto pathParts = splitPath((char*)path);
+
+  if (pathParts.empty()) {
+    return -ENOENT;
+  }
+
+  long err;
+  auto dir = getDir(pathParts.begin(), pathParts.end(), err);
+
+  if (!dir) {
+    return err;
+  }
+
+  wasmFS.setCWD(dir);
+  return 0;
+}
+
+long __syscall_getcwd(long buf, long size) {
+  // Check if buf points to a bad address.
+  if (!buf && size > 0) {
+    return -EFAULT;
+  }
+
+  // Check if the size argument is zero and buf is not a null pointer.
+  if (buf && size == 0) {
+    return -EINVAL;
+  }
+
+  auto curr = wasmFS.getCWD();
+
+  std::string result = "";
+
+  while (curr != wasmFS.getRootDirectory()) {
+    auto parent = curr->locked().getParent();
+    // Check if the parent exists. The parent may not exist if the CWD or one of
+    // its ancestors has been unlinked.
+    if (!parent) {
+      return -ENOENT;
+    }
+
+    auto parentDir = parent->dynCast<Directory>();
+
+    auto name = parentDir->locked().getName(curr);
+    result = '/' + name + result;
+    curr = parentDir;
+  }
+
+  // Check if the cwd is the root directory.
+  if (result.empty()) {
+    result = "/";
+  }
+
+  auto res = result.c_str();
+
+  // Check if the size argument is less than the length of the absolute pathname
+  // of the working directory, including null terminator.
+  if (strlen(res) >= size - 1) {
+    return -ENAMETOOLONG;
+  }
+
+  // Return value is a null-terminated c string.
+  strcpy((char*)buf, res);
+
+  return 0;
+}
+__wasi_errno_t __wasi_fd_fdstat_get(__wasi_fd_t fd, __wasi_fdstat_t* stat) {
+  // TODO: This is only partial implementation of __wasi_fd_fdstat_get. Enough
+  // to get __wasi_fd_is_valid working.
+  // There are other fields in the stat structure that we should really
+  // be filling in here.
+  auto openFile = wasmFS.getLockedFileTable()[fd];
+  if (!openFile) {
+    return __WASI_ERRNO_BADF;
+  }
+
+  if (openFile.locked().getFile()->is<Directory>()) {
+    stat->fs_filetype = __WASI_FILETYPE_DIRECTORY;
+  } else {
+    stat->fs_filetype = __WASI_FILETYPE_REGULAR_FILE;
+  }
   return __WASI_ERRNO_SUCCESS;
 }
 }

@@ -7,8 +7,8 @@
 // See https://github.com/emscripten-core/emscripten/issues/15041.
 
 #include "file.h"
-// TODO remove this in the next PR.
-#include "file_table.h"
+#include "wasmfs.h"
+#include <emscripten/threading.h>
 
 namespace wasmfs {
 //
@@ -39,7 +39,18 @@ __wasi_errno_t MemoryFile::read(uint8_t* buf, size_t len, off_t offset) {
   std::memcpy(buf, &buffer[offset], len);
 
   return __WASI_ERRNO_SUCCESS;
-};
+}
+
+void MemoryFile::Handle::preloadFromJS(int index) {
+  getFile()->buffer.resize(
+    EM_ASM_INT({return wasmFS$preloadedFiles[$0].fileData.length}, index));
+  // Ensure that files are preloaded from the main thread.
+  assert(emscripten_is_main_browser_thread());
+  // TODO: Replace every EM_ASM with EM_JS.
+  EM_ASM({ HEAPU8.set(wasmFS$preloadedFiles[$1].fileData, $0); },
+         getFile()->buffer.data(),
+         index);
+}
 //
 // Path Parsing utilities
 //
@@ -50,8 +61,10 @@ std::shared_ptr<Directory> getDir(std::vector<std::string>::iterator begin,
   std::shared_ptr<File> curr;
   // Check if the first path element is '/', indicating an absolute path.
   if (*begin == "/") {
-    curr = getRootDirectory();
+    curr = wasmFS.getRootDirectory();
     begin++;
+  } else {
+    curr = wasmFS.getCWD();
   }
 
   for (auto it = begin; it != end; ++it) {
