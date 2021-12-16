@@ -119,9 +119,8 @@ var SyscallsLibrary = {
         // need a valid mode
         return -{{{ cDefine('EINVAL') }}};
       }
-      var node;
       var lookup = FS.lookupPath(path, { follow: true });
-      node = lookup.node;
+      var node = lookup.node;
       if (!node) {
         return -{{{ cDefine('ENOENT') }}};
       }
@@ -863,7 +862,8 @@ var SyscallsLibrary = {
         type = 4; // DT_DIR
       }
       else if (name === '..') {
-        id = FS.lookupPath(stream.path, { parent: true }).id;
+        var lookup = FS.lookupPath(stream.path, { parent: true });
+        id = lookup.node.id;
         type = 4; // DT_DIR
       }
       else {
@@ -874,6 +874,9 @@ var SyscallsLibrary = {
                FS.isLink(child.mode) ? 10 :   // DT_LNK, symbolic link.
                8;                             // DT_REG, regular file.
       }
+#if ASSERTIONS
+      assert(id);
+#endif
       {{{ makeSetValue('dirp + pos', C_STRUCTS.dirent.d_ino, 'id', 'i64') }}};
       {{{ makeSetValue('dirp + pos', C_STRUCTS.dirent.d_off, '(idx + 1) * struct_size', 'i64') }}};
       {{{ makeSetValue('dirp + pos', C_STRUCTS.dirent.d_reclen, C_STRUCTS.dirent.__size__, 'i16') }}};
@@ -1180,7 +1183,7 @@ function wrapSyscallFunction(x, library, isWasi) {
     pre += 'try {\n';
     handler +=
     "} catch (e) {\n" +
-    "  if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);\n";
+    "  if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) throw e;\n";
 #if SYSCALL_DEBUG
     handler +=
     "  err('error: syscall failed with ' + e.errno + ' (' + ERRNO_MESSAGES[e.errno] + ')');\n" +
