@@ -1626,6 +1626,8 @@ int main() {
 
   @also_with_wasmfs
   def test_rename(self):
+    if is_sanitizing(self.emcc_args) and self.get_setting('WASMFS'):
+      self.skipTest('https://github.com/emscripten-core/emscripten/issues/15820')
     self.do_run_in_out_file_test('stdio/test_rename.c')
 
   def test_remove(self):
@@ -5361,10 +5363,11 @@ main( int argv, char ** argc ) {
     self.emcc_args += ['-lnodefs.js']
     self.do_runf(test_file('fs/test_nodefs_nofollow.c'), 'success', js_engines=[config.NODE_JS])
 
-  @no_windows('https://github.com/emscripten-core/emscripten/issues/15786')
-  @no_mac('https://github.com/emscripten-core/emscripten/issues/15786')
+  @no_windows('no symlink support on windows')
   def test_fs_noderawfs_nofollow(self):
     self.set_setting('NODERAWFS')
+    create_file('filename', 'foo')
+    os.symlink('filename', 'linkname')
     self.emcc_args += ['-lnodefs.js']
     self.do_runf(test_file('fs/test_noderawfs_nofollow.c'), 'success', js_engines=[config.NODE_JS])
 
@@ -8195,6 +8198,8 @@ NODEFS is no longer included by default; build with -lnodefs.js
   })
   @no_wasm2js('TODO: sanitizers in wasm2js')
   def test_ubsan_full_null_ref(self, args):
+    if is_sanitizing(self.emcc_args):
+      self.skipTest('test is specific to null sanitizer')
     self.emcc_args += args
     self.do_runf(test_file('core/test_ubsan_full_null_ref.cpp'),
                  assert_all=True, expected_output=[
