@@ -8408,6 +8408,12 @@ test_module().then((test_module_instance) => {
     ret = self.run_process(config.NODE_JS + ['a.js'], stdout=PIPE).stdout
     self.assertContained('OK', ret)
 
+  def test_node_eval(self):
+    self.run_process([EMCC, '-sENVIRONMENT=node', test_file('hello_world.c'), '-o', 'a.js', '-O3'])
+    js = open('a.js').read()
+    ret = self.run_process(config.NODE_JS + ['-e', js], stdout=PIPE).stdout
+    self.assertContained('hello, world!', ret)
+
   def test_is_bitcode(self):
     fname = 'tmp.o'
 
@@ -10533,9 +10539,9 @@ exec "$@"
 
   def test_post_link(self):
     err = self.run_process([EMCC, test_file('hello_world.c'), '--oformat=bare', '-o', 'bare.wasm'], stderr=PIPE).stderr
-    self.assertContained('--oformat=base/--post-link are experimental and subject to change', err)
+    self.assertContained('--oformat=bare/--post-link are experimental and subject to change', err)
     err = self.run_process([EMCC, '--post-link', 'bare.wasm'], stderr=PIPE).stderr
-    self.assertContained('--oformat=base/--post-link are experimental and subject to change', err)
+    self.assertContained('--oformat=bare/--post-link are experimental and subject to change', err)
     err = self.assertContained('hello, world!', self.run_js('a.out.js'))
 
   def compile_with_wasi_sdk(self, filename, output):
@@ -11365,6 +11371,7 @@ void foo() {}
         self.assertContained('const ', js)
         self.assertContained('let ', js)
       else:
+        self.verify_es5(filename)
         self.assertNotContained('() => 2', js)
         self.assertNotContained('()=>2', js)
         self.assertNotContained('const ', js)
