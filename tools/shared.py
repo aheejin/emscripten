@@ -174,6 +174,7 @@ def run_multiple_processes(commands, env=os.environ.copy(), route_stdout_to_temp
         std_out = temp_files.get(route_stdout_to_temp_files_suffix) if route_stdout_to_temp_files_suffix else (subprocess.PIPE if pipe_stdout else None)
         if DEBUG:
           logger.debug('Running subprocess %d/%d: %s' % (i + 1, len(commands), ' '.join(commands[i])))
+        print_compiler_stage(commands[i])
         processes += [(i, subprocess.Popen(commands[i], stdout=std_out, stderr=subprocess.PIPE if pipe_stdout else None, env=env, cwd=cwd))]
         if route_stdout_to_temp_files_suffix:
           std_outs += [(i, std_out.name)]
@@ -363,7 +364,7 @@ def perform_sanity_checks():
         exit_with_error('Cannot find %s, check the paths in %s', cmd, config.EM_CONFIG)
 
 
-@ToolchainProfiler.profile_block('sanity')
+@ToolchainProfiler.profile()
 def check_sanity(force=False):
   """Check that basic stuff we need (a JS engine to compile, Node.js, and Clang
   and LLVM) exists.
