@@ -1442,10 +1442,17 @@ def phase_setup(options, state, newargs, settings_map):
 
   # Wasm SjLj cannot be used with Emscripten EH
   if settings.SUPPORT_LONGJMP == 'wasm':
+    # DISABLE_EXCEPTION_THROWING is 0 by default for Emscripten EH throwing, but
+    # Wasm SjLj cannot be used with Emscripten EH. We error out if
+    # DISABLE_EXCEPTION_THROWING=0 is explicitly requested by the user;
+    # otherwise we disable it here.
+    default_setting('DISABLE_EXCEPTION_THROWING', 1)
+    if not settings.DISABLE_EXCEPTION_THROWING:
+      exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_CATCHING=0')
+    # We error out for DISABLE_EXCEPTION_CATCHING=0, because it is 1 by default
+    # and this can be 0 only if the user specifies so.
     if not settings.DISABLE_EXCEPTION_CATCHING:
       exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_CATCHING=0')
-    if not settings.DISABLE_EXCEPTION_THROWING:
-      exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_THROWING=0')
 
   return (newargs, input_files)
 
@@ -1936,9 +1943,6 @@ def phase_linker_setup(options, state, newargs, settings_map):
     settings.FULL_ES2 = 1
     settings.MAX_WEBGL_VERSION = max(2, settings.MAX_WEBGL_VERSION)
 
-  if settings.EMBIND:
-    state.forced_stdlibs.append('libembind')
-
   settings.REQUIRED_EXPORTS += ['stackSave', 'stackRestore', 'stackAlloc']
   if not settings.STANDALONE_WASM:
     # in standalone mode, crt1 will call the constructors from inside the wasm
@@ -2153,6 +2157,9 @@ def phase_linker_setup(options, state, newargs, settings_map):
   # Also, if using library_exports.js API, disable minification so that the feature can work.
   if not settings.DECLARE_ASM_MODULE_EXPORTS or '-lexports.js' in [x for _, x in state.link_flags]:
     settings.MINIFY_ASMJS_EXPORT_NAMES = 0
+
+  if '-lembind' in [x for _, x in state.link_flags]:
+    settings.EMBIND = 1
 
   # Enable minification of wasm imports and exports when appropriate, if we
   # are emitting an optimized JS+wasm combo (then the JS knows how to load the minified names).
@@ -2919,9 +2926,11 @@ def parse_args(newargs):
       skip = False
       continue
 
-    # On Windows Vista (and possibly others), excessive spaces in the command line
-    # leak into the items in this array, so trim e.g. 'foo.cpp ' -> 'foo.cpp'
-    newargs[i] = newargs[i].strip()
+    # Support legacy '--bind' flag, by mapping to `-lembind` which now
+    # has the same effect
+    if newargs[i] == '--bind':
+      newargs[i] = '-lembind'
+
     arg = newargs[i]
     arg_value = None
 
@@ -3068,10 +3077,6 @@ def parse_args(newargs):
     elif check_flag('--emit-symbol-map'):
       options.emit_symbol_map = True
       settings.EMIT_SYMBOL_MAP = 1
-    elif check_flag('--bind'):
-      settings.EMBIND = 1
-      settings.JS_LIBRARIES.append((0, os.path.join('embind', 'emval.js')))
-      settings.JS_LIBRARIES.append((0, os.path.join('embind', 'embind.js')))
     elif check_arg('--embed-file'):
       options.embed_files.append(consume_arg())
     elif check_arg('--preload-file'):
