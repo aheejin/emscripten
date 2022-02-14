@@ -65,7 +65,7 @@ var LibrarySDL = {
       volume: 1.0
     },
     mixerFrequency: 22050,
-    mixerFormat: {{{ cDefine('AUDIO_S16LSB') }}}, //0x8010, // AUDIO_S16LSB
+    mixerFormat: {{{ cDefine('AUDIO_S16LSB') }}},
     mixerNumChannels: 2,
     mixerChunkSize: 1024,
     channelMinimumNumber: 0,
@@ -1195,16 +1195,16 @@ var LibrarySDL = {
         if (channelData.length != sizeSamplesPerChannel) {
           throw 'Web Audio output buffer length mismatch! Destination size: ' + channelData.length + ' samples vs expected ' + sizeSamplesPerChannel + ' samples!';
         }
-        if (audio.format == 0x8010 /*AUDIO_S16LSB*/) {
+        if (audio.format == {{{ cDefine('AUDIO_S16LSB') }}}) {
           for (var j = 0; j < sizeSamplesPerChannel; ++j) {
             channelData[j] = ({{{ makeGetValue('heapPtr', '(j*numChannels + c)*2', 'i16', 0, 0) }}}) / 0x8000;
           }
-        } else if (audio.format == 0x0008 /*AUDIO_U8*/) {
+        } else if (audio.format == {{{ cDefine('AUDIO_U8') }}}) {
           for (var j = 0; j < sizeSamplesPerChannel; ++j) {
             var v = ({{{ makeGetValue('heapPtr', 'j*numChannels + c', 'i8', 0, 0) }}});
             channelData[j] = ((v >= 0) ? v-128 : v+128) /128;
           }
-        } else if (audio.format == 0x8120 /*AUDIO_F32*/) {
+        } else if (audio.format == {{{ cDefine('AUDIO_F32') }}}) {
           for (var j = 0; j < sizeSamplesPerChannel; ++j) {
             channelData[j] = ({{{ makeGetValue('heapPtr', '(j*numChannels + c)*4', 'float', 0, 0) }}});
           }
@@ -1775,7 +1775,7 @@ var LibrarySDL = {
   SDL_GetKeyName__sig: 'ii',
   SDL_GetKeyName: function(key) {
     if (!SDL.keyName) {
-      SDL.keyName = allocate(intArrayFromString('unknown key'), ALLOC_NORMAL);
+      SDL.keyName = allocateUTF8('unknown key');
     }
     return SDL.keyName;
   },
@@ -1837,7 +1837,7 @@ var LibrarySDL = {
   SDL_GetError__sig: 'i',
   SDL_GetError: function() {
     if (!SDL.errorMessage) {
-      SDL.errorMessage = allocate(intArrayFromString("unknown SDL-emscripten error"), ALLOC_NORMAL);
+      SDL.errorMessage = allocateUTF8("unknown SDL-emscripten error");
     }
     return SDL.errorMessage;
   },
@@ -2429,11 +2429,11 @@ var LibrarySDL = {
         timer: null
       };
       // The .silence field tells the constant sample value that corresponds to the safe un-skewed silence value for the wave data.
-      if (SDL.audio.format == 0x0008 /*AUDIO_U8*/) {
+      if (SDL.audio.format == {{{ cDefine('AUDIO_U8') }}}) {
         SDL.audio.silence = 128; // Audio ranges in [0, 255], so silence is half-way in between.
-      } else if (SDL.audio.format == 0x8010 /*AUDIO_S16LSB*/) {
+      } else if (SDL.audio.format == {{{ cDefine('AUDIO_S16LSB') }}}) {
         SDL.audio.silence = 0; // Signed data in range [-32768, 32767], silence is 0.
-      } else if (SDL.audio.format == 0x8120 /*AUDIO_F32*/) {
+      } else if (SDL.audio.format == {{{ cDefine('AUDIO_F32') }}}) {
         SDL.audio.silence = 0.0; // Float data in range [-1.0, 1.0], silence is 0.0
       } else {
         throw 'Invalid SDL audio format ' + SDL.audio.format + '!';
@@ -2469,11 +2469,11 @@ var LibrarySDL = {
       }
 
       var totalSamples = SDL.audio.samples*SDL.audio.channels;
-      if (SDL.audio.format == 0x0008 /*AUDIO_U8*/) {
+      if (SDL.audio.format == {{{ cDefine('AUDIO_U8') }}}) {
         SDL.audio.bytesPerSample = 1;
-      } else if (SDL.audio.format == 0x8010 /*AUDIO_S16LSB*/) {
+      } else if (SDL.audio.format == {{{ cDefine('AUDIO_S16LSB') }}}) {
         SDL.audio.bytesPerSample = 2;
-      } else if (SDL.audio.format == 0x8120 /*AUDIO_F32*/) {
+      } else if (SDL.audio.format == {{{ cDefine('AUDIO_F32') }}}) {
         SDL.audio.bytesPerSample = 4;
       } else {
         throw 'Invalid SDL audio format ' + SDL.audio.format + '!';
@@ -3191,11 +3191,23 @@ var LibrarySDL = {
     try {
       var offscreenCanvas = new OffscreenCanvas(0, 0);
       SDL.ttfContext = offscreenCanvas.getContext('2d');
+      // Firefox support for OffscreenCanvas is still experimental, and it seems
+      // like CI might be creating a context here but one that is not entirely
+      // valid. Check that explicitly and fall back to a plain Canvas if we need
+      // to. See https://github.com/emscripten-core/emscripten/issues/16242
+      if (typeof SDL.ttfContext.measureText !== 'function') {
+        throw 'bad context';
+      }
     } catch (ex) {
       var canvas = document.createElement('canvas');
       SDL.ttfContext = canvas.getContext('2d');
     }
-
+#if ASSERTIONS
+    // Check the final context looks valid. See
+    // https://github.com/emscripten-core/emscripten/issues/16242
+    assert(typeof SDL.ttfContext.measureText === 'function',
+           'context ' + SDL.ttfContext + 'must provide valid methods');
+#endif
     return 0;
   },
 
@@ -3561,7 +3573,7 @@ var LibrarySDL = {
       if (SDL.joystickNamePool.hasOwnProperty(name)) {
         return SDL.joystickNamePool[name];
       }
-      return SDL.joystickNamePool[name] = allocate(intArrayFromString(name), ALLOC_NORMAL);
+      return SDL.joystickNamePool[name] = allocateUTF8(name);
     }
     return 0;
   },
@@ -3694,7 +3706,7 @@ var LibrarySDL = {
 
   SDL_GetNumAudioDrivers: function() { return 1 },
   SDL_GetCurrentAudioDriver: function() {
-    return allocate(intArrayFromString('Emscripten Audio'), ALLOC_NORMAL);
+    return allocateUTF8('Emscripten Audio');
   },
 
   SDL_GetAudioDriver__deps: ['SDL_GetCurrentAudioDriver'],

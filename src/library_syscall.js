@@ -447,6 +447,7 @@ var SyscallsLibrary = {
   },
   /** @param {boolean=} allowNull */
   $getSocketAddress__deps: ['$readSockaddr', '$FS', '$DNS'],
+  $getSocketAddress__docs: '/** @param {boolean=} allowNull */',
   $getSocketAddress: function(addrp, addrlen, allowNull) {
     if (allowNull && addrp === 0) return null;
     var info = readSockaddr(addrp, addrlen);
@@ -858,7 +859,7 @@ var SyscallsLibrary = {
       var type;
       var name = stream.getdents[idx];
       if (name === '.') {
-        id = stream.id;
+        id = stream.node.id;
         type = 4; // DT_DIR
       }
       else if (name === '..') {
@@ -867,7 +868,7 @@ var SyscallsLibrary = {
         type = 4; // DT_DIR
       }
       else {
-        var child = FS.lookupNode(stream, name);
+        var child = FS.lookupNode(stream.node, name);
         id = child.id;
         type = FS.isChrdev(child.mode) ? 2 :  // DT_CHR, character device.
                FS.isDir(child.mode) ? 4 :     // DT_DIR, directory.
@@ -1200,13 +1201,10 @@ function wrapSyscallFunction(x, library, isWasi) {
   }
   post = handler + post;
 
-  if (pre) {
-    var bodyStart = t.indexOf('{') + 1;
-    t = t.substring(0, bodyStart) + pre + t.substring(bodyStart);
-  }
-  if (post) {
-    var bodyEnd = t.lastIndexOf('}');
-    t = t.substring(0, bodyEnd) + post + t.substring(bodyEnd);
+  if (pre || post) {
+    t = modifyFunction(t, function(name, args, body) {
+      return `function ${name}(${args}) {\n${pre}${body}${post}}\n`;
+    });
   }
 
   if (MEMORY64 && !isWasi) {

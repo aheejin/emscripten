@@ -252,7 +252,7 @@ var LibraryBrowser = {
           // loadWebAssemblyModule can not load modules out-of-order, so rather
           // than just running the promises in parallel, this makes a chain of
           // promises to run in series.
-          this['asyncWasmLoadPromise'] = this['asyncWasmLoadPromise'].then(
+          wasmPlugin['asyncWasmLoadPromise'] = wasmPlugin['asyncWasmLoadPromise'].then(
             function() {
               return loadWebAssemblyModule(byteArray, {loadAsync: true, nodelete: true});
             }).then(
@@ -339,12 +339,10 @@ var LibraryBrowser = {
           alpha: false,
 #if MIN_WEBGL_VERSION >= 2
           majorVersion: 2,
-#else
-#if MAX_WEBGL_VERSION >= 2 // library_browser.js defaults: use the WebGL version chosen at compile time (unless overridden below)
+#elif MAX_WEBGL_VERSION >= 2 // library_browser.js defaults: use the WebGL version chosen at compile time (unless overridden below)
           majorVersion: (typeof WebGL2RenderingContext !== 'undefined') ? 2 : 1,
 #else
           majorVersion: 1,
-#endif
 #endif
         };
 
@@ -992,6 +990,11 @@ var LibraryBrowser = {
     '$maybeExit',
 #endif
   ],
+  $setMainLoop__docs: `
+  /**
+   * @param {number=} arg
+   * @param {boolean=} noSetTiming
+   */`,
   $setMainLoop: function(browserIterationFunc, fps, simulateInfiniteLoop, arg, noSetTiming) {
     assert(!Browser.mainLoop.func, 'emscripten_set_main_loop: there can only be one main loop function at once: call emscripten_cancel_main_loop to cancel the previous one before setting a new one with different parameters.');
 

@@ -304,6 +304,21 @@ def no_memory64(note):
   return decorator
 
 
+def no_wasmfs(note):
+  assert not callable(note)
+
+  def decorator(f):
+    assert callable(f)
+
+    @wraps(f)
+    def decorated(self, *args, **kwargs):
+      if self.get_setting('WASMFS'):
+        self.skipTest(note)
+      f(self, *args, **kwargs)
+    return decorated
+  return decorator
+
+
 def make_no_decorator_for_setting(name):
   def outer_decorator(note):
     assert not callable(note)
@@ -2490,6 +2505,15 @@ The current type of b is: 9
     self.do_run_in_out_file_test('pthread/test_pthread_equal.cpp')
 
   @node_pthreads
+  def test_pthread_proxying(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('INITIAL_MEMORY=32mb')
+    args = [f'-I{path_from_root("system/lib/pthread")}']
+    self.do_run_in_out_file_test('pthread/test_pthread_proxying.c',
+                                 emcc_args=args, interleaved_output=False)
+
+  @node_pthreads
   def test_pthread_dispatch_after_exit(self):
     self.do_run_in_out_file_test('pthread/test_pthread_dispatch_after_exit.c', interleaved_output=False)
 
@@ -2544,6 +2568,13 @@ The current type of b is: 9
     # was passed in by pre-populating the module object on prior to loading).
     self.add_pre_run("Module.onAbort = function() { console.log('onAbort called'); }")
     self.do_run_in_out_file_test('pthread/test_pthread_abort.c', assert_returncode=NON_ZERO)
+
+  @node_pthreads
+  def test_pthread_abort_interrupt(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PTHREAD_POOL_SIZE', 1)
+    expected = ['Aborted(). Build with -s ASSERTIONS=1 for more info', 'Aborted(native code called abort())']
+    self.do_runf(test_file('pthread/test_pthread_abort_interrupt.c'), expected, assert_returncode=NON_ZERO)
 
   @no_asan('ASan does not support custom memory allocators')
   @no_lsan('LSan does not support custom memory allocators')
@@ -4634,8 +4665,8 @@ res64 - external 64\n''', header='''
     create_file('third.c', 'int sidef() { return 36; }')
     create_file('fourth.c', 'int sideg() { return 17; }')
 
-    self.run_process([EMCC, '-fPIC', '-c', 'third.c', '-o', 'third.o'] + self.get_emcc_args())
-    self.run_process([EMCC, '-fPIC', '-c', 'fourth.c', '-o', 'fourth.o'] + self.get_emcc_args())
+    self.run_process([EMCC, '-fPIC', '-c', 'third.c', '-o', 'third.o'] + self.get_emcc_args(ldflags=False))
+    self.run_process([EMCC, '-fPIC', '-c', 'fourth.c', '-o', 'fourth.o'] + self.get_emcc_args(ldflags=False))
     self.run_process([EMAR, 'rc', 'libfourth.a', 'fourth.o'])
 
     self.dylink_test(main=r'''
@@ -5433,6 +5464,12 @@ main( int argv, char ** argc ) {
     self.emcc_args += ['-lnodefs.js']
     self.do_runf(test_file('fs/test_nodefs_nofollow.c'), 'success', js_engines=[config.NODE_JS])
 
+  def test_fs_nodefs_readdir(self):
+    # externally setup an existing folder structure: existing/a
+    os.makedirs(os.path.join(self.working_dir, 'existing', 'a'))
+    self.emcc_args += ['-lnodefs.js']
+    self.do_runf(test_file('fs/test_nodefs_readdir.c'), 'success')
+
   @no_windows('no symlink support on windows')
   def test_fs_noderawfs_nofollow(self):
     self.set_setting('NODERAWFS')
@@ -5935,6 +5972,7 @@ int main(void) {
   @require_v8
   @no_asan('depends on the specifics of memory size, which for asan we are forced to increase')
   @no_lsan('depends on the specifics of memory size, which for lsan we are forced to increase')
+  @no_wasmfs('wasmfs does some malloc/free during startup, fragmenting the heap, leading to differences later')
   def test_dlmalloc(self):
     # needed with typed arrays
     self.set_setting('INITIAL_MEMORY', '128mb')
@@ -5976,14 +6014,15 @@ int main(void) {
   def test_dlmalloc_partial(self):
     # present part of the symbols of dlmalloc, not all
     src = read_file(test_file('new.cpp')).replace('{{{ NEW }}}', 'new int').replace('{{{ DELETE }}}', 'delete') + '''
+#include <emscripten/console.h>
 #include <new>
 
 void* operator new(size_t size) {
-  printf("new %zu!\\n", size);
+  emscripten_console_log("new!");
   return malloc(size);
 }
 '''
-    self.do_run(src, 'new 4!\n*1,0*')
+    self.do_run(src, 'new!\n*1,0*')
 
   @no_asan('asan also changes malloc, and that ends up linking in new twice')
   @no_lsan('lsan also changes malloc, and that ends up linking in new twice')
@@ -6671,7 +6710,7 @@ void* operator new(size_t size) {
 
   def test_linker_response_file(self):
     objfile = 'response_file.o'
-    self.run_process([EMCC, '-c', test_file('hello_world.cpp'), '-o', objfile] + self.get_emcc_args())
+    self.run_process([EMCC, '-c', test_file('hello_world.cpp'), '-o', objfile] + self.get_emcc_args(ldflags=False))
     # This should expand into -Wl,--start-group <objfile> -Wl,--end-group
     response_data = '--start-group ' + objfile + ' --end-group'
     create_file('rsp_file', response_data.replace('\\', '\\\\'))
@@ -7146,6 +7185,8 @@ void* operator new(size_t size) {
   })
   def test_webidl(self, mode, allow_memory_growth):
     self.uses_es6 = True
+    # TODO(): Remove once we make webidl output closure-warning free.
+    self.ldflags.remove('-sCLOSURE_WARNINGS=error')
     self.set_setting('WASM_ASYNC_COMPILATION', 0)
     if self.maybe_closure():
       # avoid closure minified names competing with our test code in the global name space
@@ -7409,6 +7450,10 @@ void* operator new(size_t size) {
     # test that the combination of modularize + closure + pre-js works. in that mode,
     # closure should not minify the Module object in a way that the pre-js cannot use it.
     create_file('post.js', 'var TheModule = Module();\n')
+    if not self.is_wasm():
+      # TODO(sbc): Fix closure warnings with MODULARIZE + WASM=0
+      self.ldflags.remove('-sCLOSURE_WARNINGS=error')
+
     self.emcc_args += [
       '--pre-js', test_file('core/modularize_closure_pre.js'),
       '--extern-post-js=post.js',
@@ -8420,14 +8465,17 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   def test_safe_stack(self):
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
-    self.set_setting('TOTAL_STACK', 65536)
+    self.set_setting('TOTAL_STACK', 1024)
     if self.is_optimizing():
-      expected = ['Aborted(stack overflow)']
+      expected = [r'Aborted\(stack overflow \(Attempt to set SP to 0x[0-9a-fA-F]+, with stack limits \[0x[0-9a-fA-F]+ - 0x[0-9a-fA-F]+\]\)']
     else:
-      expected = ['Aborted(stack overflow)', '__handle_stack_overflow']
+      expected = [r'Aborted\(stack overflow \(Attempt to set SP to 0x[0-9a-fA-F]+, with stack limits \[0x[0-9a-fA-F]+ - 0x[0-9a-fA-F]+\]\)',
+                  '__handle_stack_overflow']
     self.do_runf(test_file('core/test_safe_stack.c'),
                  expected_output=expected,
-                 assert_returncode=NON_ZERO, assert_all=True)
+                 regex=True,
+                 assert_all=True,
+                 assert_returncode=NON_ZERO)
 
   @node_pthreads
   def test_safe_stack_pthread(self):
@@ -8436,9 +8484,9 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('USE_PTHREADS')
     if self.is_optimizing():
-      expected = ['Aborted(stack overflow)']
+      expected = ['Aborted(stack overflow']
     else:
-      expected = ['Aborted(stack overflow)', '__handle_stack_overflow']
+      expected = ['Aborted(stack overflow', '__handle_stack_overflow']
     self.do_runf(test_file('core/test_safe_stack.c'),
                  expected_output=expected,
                  assert_returncode=NON_ZERO, assert_all=True)
@@ -8447,9 +8495,9 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('TOTAL_STACK', 65536)
     if self.is_optimizing():
-      expected = ['Aborted(stack overflow)']
+      expected = ['Aborted(stack overflow']
     else:
-      expected = ['Aborted(stack overflow)', '__handle_stack_overflow']
+      expected = ['Aborted(stack overflow', '__handle_stack_overflow']
     self.do_runf(test_file('core/test_safe_stack_alloca.c'),
                  expected_output=expected,
                  assert_returncode=NON_ZERO, assert_all=True)
@@ -8480,7 +8528,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
       void sidey() {
         f(NULL);
       }
-    ''', ['Aborted(stack overflow)', '__handle_stack_overflow'], assert_returncode=NON_ZERO, force_c=True)
+    ''', ['Aborted(stack overflow', '__handle_stack_overflow'], assert_returncode=NON_ZERO, force_c=True)
 
   def test_fpic_static(self):
     self.emcc_args.append('-fPIC')
@@ -8638,6 +8686,20 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
     self.dylink_testf(main, so_name=very_long_name,
                       need_reverse=False)
+
+  @parameterized({
+    '': (['-sNO_AUTOLOAD_DYLIBS'],),
+    'autoload': ([],)
+  })
+  @needs_dylink
+  @node_pthreads
+  def test_pthread_dylink_entry_point(self, args):
+    self.emcc_args.append('-Wno-experimental')
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('USE_PTHREADS')
+    self.set_setting('PTHREAD_POOL_SIZE', 1)
+    main = test_file('core/pthread/test_pthread_dylink_entry_point.c')
+    self.dylink_testf(main, need_reverse=False, emcc_args=args)
 
   @needs_dylink
   @node_pthreads

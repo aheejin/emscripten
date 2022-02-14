@@ -96,23 +96,6 @@ LibraryManager.library = {
   },
 #endif
 
-  utime__deps: ['$setFileTime'],
-  utime__proxy: 'sync',
-  utime__sig: 'iii',
-  utime: function(path, times) {
-    {{{ from64('times') }}};
-    // int utime(const char *path, const struct utimbuf *times);
-    // http://pubs.opengroup.org/onlinepubs/009695399/basedefs/utime.h.html
-    var time;
-    if (times) {
-      // NOTE: We don't keep track of access timestamps.
-      time = {{{ makeGetValue('times', C_STRUCTS.utimbuf.modtime, 'i32') }}} * 1000;
-    } else {
-      time = Date.now();
-    }
-    return setFileTime(path, time);
-  },
-
   utimes__deps: ['$setFileTime'],
   utimes__proxy: 'sync',
   utimes__sig: 'iii',
@@ -147,8 +130,10 @@ LibraryManager.library = {
 
   emscripten_get_heap_max: function() {
 #if ALLOW_MEMORY_GROWTH
-    // Handle the case of 4GB (which would wrap to 0 in the return value) by
-    // returning up to 4GB - one wasm page.
+    // Stay one Wasm page short of 4GB: while e.g. Chrome is able to allocate
+    // full 4GB Wasm memories, the size will wrap back to 0 bytes in Wasm side
+    // for any code that deals with heap sizes, which would require special
+    // casing all heap size related code to treat 0 specially.
     return {{{ Math.min(MAXIMUM_MEMORY, FOUR_GB - WASM_PAGE_SIZE) }}};
 #else // no growth
     return HEAPU8.length;
@@ -201,15 +186,16 @@ LibraryManager.library = {
   },
 #endif // ~TEST_MEMORY_GROWTH_FAILS
 
-  emscripten_resize_heap__deps: ['emscripten_resize_heap' // Dummy depend on itself to allow following ','s to match up.
+  emscripten_resize_heap__deps: [
+    'emscripten_get_heap_max',
 #if ASSERTIONS == 2
-  , 'emscripten_get_now'
+    'emscripten_get_now',
 #endif
 #if ABORTING_MALLOC
-  , '$abortOnCannotGrowMemory'
+    '$abortOnCannotGrowMemory',
 #endif
 #if ALLOW_MEMORY_GROWTH
-  , '$emscripten_realloc_buffer'
+    '$emscripten_realloc_buffer',
 #endif
   ],
   emscripten_resize_heap: function(requestedSize) {
@@ -222,13 +208,13 @@ LibraryManager.library = {
     return false; // malloc will report failure
 #endif // ABORTING_MALLOC
 #else // ALLOW_MEMORY_GROWTH == 0
-    // With pthreads, races can happen (another thread might increase the size in between), so return a failure, and let the caller retry.
+    // With pthreads, races can happen (another thread might increase the size
+    // in between), so return a failure, and let the caller retry.
 #if USE_PTHREADS
     if (requestedSize <= oldSize) {
       return false;
     }
-#endif // USE_PTHREADS
-#if ASSERTIONS && !USE_PTHREADS
+#elif ASSERTIONS
     assert(requestedSize > oldSize);
 #endif
 
@@ -238,21 +224,25 @@ LibraryManager.library = {
 #endif
 
     // Memory resize rules:
-    // 1. Always increase heap size to at least the requested size, rounded up to next page multiple.
-    // 2a. If MEMORY_GROWTH_LINEAR_STEP == -1, excessively resize the heap geometrically: increase the heap size according to
-    //                                         MEMORY_GROWTH_GEOMETRIC_STEP factor (default +20%),
-    //                                         At most overreserve by MEMORY_GROWTH_GEOMETRIC_CAP bytes (default 96MB).
-    // 2b. If MEMORY_GROWTH_LINEAR_STEP != -1, excessively resize the heap linearly: increase the heap size by at least MEMORY_GROWTH_LINEAR_STEP bytes.
-    // 3. Max size for the heap is capped at 2048MB-WASM_PAGE_SIZE, or by MAXIMUM_MEMORY, or by ASAN limit, depending on which is smallest
-    // 4. If we were unable to allocate as much memory, it may be due to over-eager decision to excessively reserve due to (3) above.
-    //    Hence if an allocation fails, cut down on the amount of excess growth, in an attempt to succeed to perform a smaller allocation.
+    // 1.  Always increase heap size to at least the requested size, rounded up
+    //     to next page multiple.
+    // 2a. If MEMORY_GROWTH_LINEAR_STEP == -1, excessively resize the heap
+    //     geometrically: increase the heap size according to
+    //     MEMORY_GROWTH_GEOMETRIC_STEP factor (default +20%), At most
+    //     overreserve by MEMORY_GROWTH_GEOMETRIC_CAP bytes (default 96MB).
+    // 2b. If MEMORY_GROWTH_LINEAR_STEP != -1, excessively resize the heap
+    //     linearly: increase the heap size by at least
+    //     MEMORY_GROWTH_LINEAR_STEP bytes.
+    // 3.  Max size for the heap is capped at 2048MB-WASM_PAGE_SIZE, or by
+    //     MAXIMUM_MEMORY, or by ASAN limit, depending on which is smallest
+    // 4.  If we were unable to allocate as much memory, it may be due to
+    //     over-eager decision to excessively reserve due to (3) above.
+    //     Hence if an allocation fails, cut down on the amount of excess
+    //     growth, in an attempt to succeed to perform a smaller allocation.
 
     // A limit is set for how much we can grow. We should not exceed that
     // (the wasm binary specifies it, so if we tried, we'd fail anyhow).
-    // In CAN_ADDRESS_2GB mode, stay one Wasm page short of 4GB: while e.g. Chrome is able to allocate full 4GB Wasm memories, the size will wrap
-    // back to 0 bytes in Wasm side for any code that deals with heap sizes, which would require special casing all heap size related code to treat
-    // 0 specially.
-    var maxHeapSize = {{{ Math.min(MAXIMUM_MEMORY, FOUR_GB - WASM_PAGE_SIZE) }}};
+    var maxHeapSize = _emscripten_get_heap_max();
     if (requestedSize > maxHeapSize) {
 #if ASSERTIONS
       err('Cannot enlarge memory, asked to go up to ' + requestedSize + ' bytes, but the limit is ' + maxHeapSize + ' bytes!');
@@ -264,8 +254,9 @@ LibraryManager.library = {
 #endif
     }
 
-    // Loop through potential heap size increases. If we attempt a too eager reservation that fails, cut down on the
-    // attempted size and reserve a smaller bump instead. (max 3 times, chosen somewhat arbitrarily)
+    // Loop through potential heap size increases. If we attempt a too eager
+    // reservation that fails, cut down on the attempted size and reserve a
+    // smaller bump instead. (max 3 times, chosen somewhat arbitrarily)
     for (var cutDown = 1; cutDown <= 4; cutDown *= 2) {
 #if MEMORY_GROWTH_LINEAR_STEP == -1
       var overGrownHeapSize = oldSize * (1 + {{{ MEMORY_GROWTH_GEOMETRIC_STEP }}} / cutDown); // ensure geometric growth
@@ -464,10 +455,8 @@ LibraryManager.library = {
     return time1 - time0;
   },
 
-  mktime__deps: ['tzset'],
-  mktime__sig: 'ii',
-  mktime: function(tmPtr) {
-    _tzset();
+  _mktime_js__sig: 'ii',
+  _mktime_js: function(tmPtr) {
     var date = new Date({{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_year, 'i32') }}} + 1900,
                         {{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_mon, 'i32') }}},
                         {{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_mday, 'i32') }}},
@@ -507,7 +496,6 @@ LibraryManager.library = {
 
     return (date.getTime() / 1000)|0;
   },
-  timelocal: 'mktime',
 
   _gmtime_js__sig: 'iii',
   _gmtime_js: function(time, tmPtr) {
@@ -524,10 +512,8 @@ LibraryManager.library = {
     {{{ makeSetValue('tmPtr', C_STRUCTS.tm.tm_yday, 'yday', 'i32') }}};
   },
 
-  timegm__deps: ['tzset'],
-  timegm__sig: 'ii',
-  timegm: function(tmPtr) {
-    _tzset();
+  _timegm_js__sig: 'ii',
+  _timegm_js: function(tmPtr) {
     var time = Date.UTC({{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_year, 'i32') }}} + 1900,
                         {{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_mon, 'i32') }}},
                         {{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_mday, 'i32') }}},
@@ -545,10 +531,8 @@ LibraryManager.library = {
     return (date.getTime() / 1000)|0;
   },
 
-  localtime_r__deps: ['tzset'],
-  localtime_r__sig: 'iii',
-  localtime_r: function(time, tmPtr) {
-    _tzset();
+  _localtime_js__sig: 'iii',
+  _localtime_js: function(time, tmPtr) {
     var date = new Date({{{ makeGetValue('time', 0, 'i32') }}}*1000);
     {{{ makeSetValue('tmPtr', C_STRUCTS.tm.tm_sec, 'date.getSeconds()', 'i32') }}};
     {{{ makeSetValue('tmPtr', C_STRUCTS.tm.tm_min, 'date.getMinutes()', 'i32') }}};
@@ -568,16 +552,9 @@ LibraryManager.library = {
     var winterOffset = start.getTimezoneOffset();
     var dst = (summerOffset != winterOffset && date.getTimezoneOffset() == Math.min(winterOffset, summerOffset))|0;
     {{{ makeSetValue('tmPtr', C_STRUCTS.tm.tm_isdst, 'dst', 'i32') }}};
-
-    var zonePtr = {{{ makeGetValue('__get_tzname()', 'dst ? ' + Runtime.POINTER_SIZE + ' : 0', 'i32') }}};
-    {{{ makeSetValue('tmPtr', C_STRUCTS.tm.tm_zone, 'zonePtr', 'i32') }}};
-
-    return tmPtr;
   },
-  __localtime_r: 'localtime_r',
 
   // musl-internal function used to implement both `asctime` and `asctime_r`
-  __asctime_r__deps: ['mktime'],
   __asctime_r__sig: 'iii',
   __asctime_r: function(tmPtr, buf) {
     var date = {
@@ -622,23 +599,24 @@ LibraryManager.library = {
 
   // TODO: Initialize these to defaults on startup from system settings.
   // Note: glibc has one fewer underscore for all of these. Also used in other related functions (timegm)
-  tzset__deps: ['tzset_impl'],
-  tzset__sig: 'v',
-  tzset: function() {
+  _tzset_js__deps: ['tzset_impl'],
+  _tzset_js__sig: 'viii',
+  _tzset_js: function(timezone, daylight, tzname) {
     // TODO: Use (malleable) environment variables instead of system settings.
-    if (_tzset.called) return;
-    _tzset.called = true;
-    _tzset_impl();
+    if (__tzset_js.called) return;
+    __tzset_js.called = true;
+    _tzset_impl(timezone, daylight, tzname);
   },
 
+  tzset_impl__internal: true,
   tzset_impl__proxy: 'sync',
-  tzset_impl__sig: 'v',
-  tzset_impl__deps: ['_get_daylight', '_get_timezone', '_get_tzname',
+  tzset_impl__sig: 'viii',
+  tzset_impl__deps: [
 #if MINIMAL_RUNTIME
     '$allocateUTF8'
 #endif
   ],
-  tzset_impl: function() {
+  tzset_impl: function(timezone, daylight, tzname) {
     var currentYear = new Date().getFullYear();
     var winter = new Date(currentYear, 0, 1);
     var summer = new Date(currentYear, 6, 1);
@@ -655,9 +633,9 @@ LibraryManager.library = {
     // Coordinated Universal Time (UTC) and local standard time."), the same
     // as returned by stdTimezoneOffset.
     // See http://pubs.opengroup.org/onlinepubs/009695399/functions/tzset.html
-    {{{ makeSetValue('__get_timezone()', '0', 'stdTimezoneOffset * 60', 'i32') }}};
+    {{{ makeSetValue('timezone', '0', 'stdTimezoneOffset * 60', 'i32') }}};
 
-    {{{ makeSetValue('__get_daylight()', '0', 'Number(winterOffset != summerOffset)', 'i32') }}};
+    {{{ makeSetValue('daylight', '0', 'Number(winterOffset != summerOffset)', 'i32') }}};
 
     function extractZone(date) {
       var match = date.toTimeString().match(/\(([A-Za-z ]+)\)$/);
@@ -669,11 +647,11 @@ LibraryManager.library = {
     var summerNamePtr = allocateUTF8(summerName);
     if (summerOffset < winterOffset) {
       // Northern hemisphere
-      {{{ makeSetValue('__get_tzname()', '0', 'winterNamePtr', 'i32') }}};
-      {{{ makeSetValue('__get_tzname()', Runtime.POINTER_SIZE, 'summerNamePtr', 'i32') }}};
+      {{{ makeSetValue('tzname', '0', 'winterNamePtr', POINTER_TYPE) }}};
+      {{{ makeSetValue('tzname', Runtime.POINTER_SIZE, 'summerNamePtr', POINTER_TYPE) }}};
     } else {
-      {{{ makeSetValue('__get_tzname()', '0', 'summerNamePtr', 'i32') }}};
-      {{{ makeSetValue('__get_tzname()', Runtime.POINTER_SIZE, 'winterNamePtr', 'i32') }}};
+      {{{ makeSetValue('tzname', '0', 'summerNamePtr', POINTER_TYPE) }}};
+      {{{ makeSetValue('tzname', Runtime.POINTER_SIZE, 'winterNamePtr', POINTER_TYPE) }}};
     }
   },
 
@@ -1037,11 +1015,16 @@ LibraryManager.library = {
         return '%';
       }
     };
+
+    // Replace %% with a pair of NULLs (which cannot occur in a C string), then
+    // re-inject them after processing.
+    pattern = pattern.replace(/%%/g, '\0\0')
     for (var rule in EXPANSION_RULES_2) {
       if (pattern.includes(rule)) {
         pattern = pattern.replace(new RegExp(rule, 'g'), EXPANSION_RULES_2[rule](date));
       }
     }
+    pattern = pattern.replace(/\0\0/g, '%')
 
     var bytes = intArrayFromString(pattern, false);
     if (bytes.length > maxsize) {
@@ -1883,6 +1866,7 @@ LibraryManager.library = {
 
     return { family: family, addr: addr, port: port };
   },
+  $writeSockaddr__docs: '/** @param {number=} addrlen */',
   $writeSockaddr__deps: ['$Sockets', '$inetPton4', '$inetPton6', '$zeroMemory'],
   $writeSockaddr: function (sa, family, addr, port, addrlen) {
     switch (family) {
@@ -2238,48 +2222,6 @@ LibraryManager.library = {
     }
 
     return 0;
-  },
-  // Can't use a literal for $GAI_ERRNO_MESSAGES as was done for $ERRNO_MESSAGES as the keys (e.g. EAI_BADFLAGS)
-  // are actually negative numbers and you can't have expressions as keys in JavaScript literals.
-  $GAI_ERRNO_MESSAGES: {},
-
-  gai_strerror__deps: ['$GAI_ERRNO_MESSAGES'
-#if MINIMAL_RUNTIME
-    , '$writeAsciiToMemory'
-#endif
-  ],
-  gai_strerror: function(val) {
-    var buflen = 256;
-
-    // On first call to gai_strerror we initialise the buffer and populate the error messages.
-    if (!_gai_strerror.buffer) {
-        _gai_strerror.buffer = _malloc(buflen);
-
-        GAI_ERRNO_MESSAGES['0'] = 'Success';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_BADFLAGS') }}}] = 'Invalid value for \'ai_flags\' field';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_NONAME') }}}] = 'NAME or SERVICE is unknown';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_AGAIN') }}}] = 'Temporary failure in name resolution';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_FAIL') }}}] = 'Non-recoverable failure in name res';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_FAMILY') }}}] = '\'ai_family\' not supported';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_SOCKTYPE') }}}] = '\'ai_socktype\' not supported';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_SERVICE') }}}] = 'SERVICE not supported for \'ai_socktype\'';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_MEMORY') }}}] = 'Memory allocation failure';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_SYSTEM') }}}] = 'System error returned in \'errno\'';
-        GAI_ERRNO_MESSAGES['' + {{{ cDefine('EAI_OVERFLOW') }}}] = 'Argument buffer overflow';
-    }
-
-    var msg = 'Unknown error';
-
-    if (val in GAI_ERRNO_MESSAGES) {
-      if (GAI_ERRNO_MESSAGES[val].length > buflen - 1) {
-        msg = 'Message too long'; // EMSGSIZE message. This should never occur given the GAI_ERRNO_MESSAGES above.
-      } else {
-        msg = GAI_ERRNO_MESSAGES[val];
-      }
-    }
-
-    writeAsciiToMemory(msg, _gai_strerror.buffer);
-    return _gai_strerror.buffer;
   },
 
   // Implement netdb.h protocol entry (getprotoent, getprotobyname, getprotobynumber, setprotoent, endprotoent)
@@ -2803,6 +2745,7 @@ LibraryManager.library = {
   // Generates a representation of the program counter from a line of stack trace.
   // The exact return value depends in whether we are running WASM or JS, and whether
   // the engine supports offsets into WASM. See the function body for details.
+  $convertFrameToPC__docs: '/** @returns {number} */',
   $convertFrameToPC__internal: true,
   $convertFrameToPC: function(frame) {
 #if !USE_OFFSET_CONVERTER
@@ -2826,11 +2769,10 @@ LibraryManager.library = {
       // This should work for wasm2js.  We tag the high bit to distinguish this
       // from wasm addresses.
       return 0x80000000 | +match[1];
-    } else {
-      // return 0 if we can't find any
-      return 0;
     }
 #endif
+    // return 0 if we can't find any
+    return 0;
   },
 
   // Returns a representation of a call site of the caller of this function, in a manner
@@ -3253,13 +3195,16 @@ LibraryManager.library = {
 
   // special runtime support
 
+#if STACK_OVERFLOW_CHECK
   // Used by wasm-emscripten-finalize to implement STACK_OVERFLOW_CHECK
-  __handle_stack_overflow: function() {
-    // TODO(sbc): Improve this error message.   The old abortStackOverflow used
-    // by asm.js used to do a better job:
-    // abort('Stack overflow! Attempted to allocate ' + allocSize + ' bytes on the stack, but stack has only ' + (_emscripten_stack_get_free() + allocSize) + ' bytes available!');
-    abort('stack overflow');
+  __handle_stack_overflow__deps: ['emscripten_stack_get_base'],
+  __handle_stack_overflow: function(requested) {
+    requested = requested >>> 0;
+    abort('stack overflow (Attempt to set SP to 0x' + requested.toString(16) +
+          ', with stack limits [0x' + _emscripten_stack_get_end().toString(16) +
+          ' - 0x' + _emscripten_stack_get_base().toString(16) + '])');
   },
+#endif
 
   $getExecutableName: function() {
 #if MINIMAL_RUNTIME // MINIMAL_RUNTIME does not have a global runtime variable thisProgram
@@ -3291,6 +3236,8 @@ LibraryManager.library = {
   // without user interaction.
   // If @elements is not provided, we default to the document and canvas
   // elements, which handle common use cases.
+  // TODO(sbc): Remove seemingly unused elements argument
+  $autoResumeAudioContext__docs: '/** @param {Object=} elements */',
   $autoResumeAudioContext__deps: ['$listenOnce'],
   $autoResumeAudioContext: function(ctx, elements) {
     if (!elements) {
@@ -3342,15 +3289,14 @@ LibraryManager.library = {
 #endif
     var argCache = [];
     return function() {
-      argCache.length = arguments.length;
-      for (var i = 0; i < arguments.length; i++) {
-        argCache[i] = arguments[i];
-      }
+      argCache.length = 0;
+      Object.assign(argCache, arguments);
       return dynCall(sig, ptr, argCache);
     };
   },
 #endif
 
+  $dynCall__docs: '/** @param {Object=} args */',
   $dynCall: function(sig, ptr, args) {
 #if DYNCALLS
     return dynCallLegacy(sig, ptr, args);
@@ -3574,6 +3520,7 @@ LibraryManager.library = {
     '$maybeExit',
 #endif
   ],
+  $callUserCallback__docs: '/** @param {boolean=} synchronous */',
   $callUserCallback: function(func, synchronous) {
     if (runtimeExited || ABORT) {
 #if ASSERTIONS
@@ -3636,6 +3583,7 @@ LibraryManager.library = {
    '$runtimeKeepalivePop',
 #endif
   ],
+  $safeSetTimeout__docs: '/** @param {number=} timeout */',
   $safeSetTimeout: function(func, timeout) {
     {{{ runtimeKeepalivePush() }}}
     return setTimeout(function() {
@@ -3649,6 +3597,7 @@ LibraryManager.library = {
     return x.indexOf('dynCall_') == 0 || unmangledSymbols.includes(x) ? x : '_' + x;
   },
 
+  $asyncLoad__docs: '/** @param {boolean=} noRunDep */',
   $asyncLoad: function(url, onload, onerror, noRunDep) {
     var dep = !noRunDep ? getUniqueRunDependency('al ' + url) : '';
     readAsync(url, function(arrayBuffer) {
