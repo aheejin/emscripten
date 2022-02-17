@@ -917,7 +917,7 @@ class libc(MuslInternalLibrary,
 
     libc_files += files_in_path(
         path='system/lib/libc/musl/src/linux',
-        filenames=['getdents.c', 'gettid.c'])
+        filenames=['getdents.c', 'gettid.c', 'utimes.c'])
     libc_files += files_in_path(
         path='system/lib/libc/musl/src/env',
         filenames=['__environ.c', 'getenv.c', 'putenv.c', 'setenv.c', 'unsetenv.c'])
@@ -978,9 +978,12 @@ class libc(MuslInternalLibrary,
 
     libc_files += files_in_path(
       path='system/lib/libc',
-      filenames=['emscripten_memcpy.c', 'emscripten_memset.c',
+      filenames=['emscripten_memcpy.c',
+                 'emscripten_memset.c',
                  'emscripten_scan_stack.c',
-                 'emscripten_memmove.c'])
+                 'emscripten_memmove.c',
+                 'emscripten_mmap.c'
+                 ])
 
     libc_files += glob_in_path('system/lib/libc/compat', '*.c')
 
@@ -1420,14 +1423,24 @@ class libwasmfs(MTLibrary, DebugLibrary, AsanInstrumentedLibrary):
 
   cflags = ['-fno-exceptions', '-std=c++17']
 
+  includes = ['system/lib/wasmfs']
+
   def get_files(self):
-    return files_in_path(
+    backends = files_in_path(
+        path='system/lib/wasmfs/backends',
+        filenames=['fetch_backend.cpp',
+                   'js_file_backend.cpp',
+                   'memory_backend.cpp',
+                   'proxied_file_backend.cpp'])
+    return backends + files_in_path(
         path='system/lib/wasmfs',
-        filenames=['syscalls.cpp', 'file_table.cpp', 'file.cpp', 'wasmfs.cpp',
-                   'streams.cpp', 'memory_file.cpp', 'memory_file_backend.cpp',
-                   'js_file_backend.cpp', 'proxied_file_backend.cpp',
-                   'fetch_backend.cpp',
-                   'js_api.cpp'])
+        filenames=['file.cpp',
+                   'file_table.cpp',
+                   'js_api.cpp',
+                   'paths.cpp',
+                   'streams.cpp',
+                   'syscalls.cpp',
+                   'wasmfs.cpp'])
 
   def can_use(self):
     return settings.WASMFS

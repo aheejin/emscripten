@@ -4539,6 +4539,48 @@ res64 - external 64\n''', header='''
       }
       ''', expected=['side: caught 5.3\nmain: caught 3\n'])
 
+  @with_both_eh_sjlj
+  @needs_dylink
+  def test_dylink_exceptions_try_catch_3(self):
+    main = r'''
+      #include <dlfcn.h>
+      int main() {
+        void* handle = dlopen("liblib.so", RTLD_LAZY);
+        void (*side)(void) = (void (*)(void))dlsym(handle, "side");
+        (side)();
+        return 0;
+      }
+    '''
+    side = r'''
+      #include <stdio.h>
+      extern "C" void side() {
+        try {
+          throw 3;
+        } catch (int x){
+          printf("side: caught int %d\n", x);
+        } catch (float x){
+          printf("side: caught float %f\n", x);
+        }
+      }
+      '''
+
+    create_file('liblib.cpp', side)
+    create_file('main.cpp', main)
+    self.maybe_closure()
+    # Same as dylink_test but takes source code as filenames on disc.
+    # side settings
+    self.clear_setting('MAIN_MODULE')
+    self.set_setting('SIDE_MODULE')
+    out_file = self.build('liblib.cpp', js_outfile=False)
+    shutil.move(out_file, "liblib.so")
+
+    # main settings
+    self.set_setting('MAIN_MODULE', 1)
+    self.clear_setting('SIDE_MODULE')
+
+    expected = "side: caught int 3\n"
+    self.do_runf("main.cpp", expected)
+
   @needs_dylink
   @disabled('https://github.com/emscripten-core/emscripten/issues/12815')
   def test_dylink_hyper_dupe(self):
@@ -5578,11 +5620,17 @@ Module['onRuntimeInitialized'] = function() {
     orig_compiler_opts = self.emcc_args.copy()
     for fs in ['MEMFS', 'NODEFS']:
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
+      if self.get_setting('WASMFS'):
+        if fs == 'NODEFS':
+          # TODO: NODEFS in WasmFS
+          continue
+        self.emcc_args += ['-sFORCE_FILESYSTEM']
       if fs == 'NODEFS':
         self.emcc_args += ['-lnodefs.js']
       self.do_run_in_out_file_test('unistd/access.c', js_engines=[config.NODE_JS])
     # Node.js fs.chmod is nearly no-op on Windows
-    if not WINDOWS:
+    # TODO: NODERAWFS in WasmFS
+    if not WINDOWS and not self.get_setting('WASMFS'):
       self.emcc_args = orig_compiler_opts
       self.set_setting('NODERAWFS')
       self.do_run_in_out_file_test('unistd/access.c', js_engines=[config.NODE_JS])
@@ -5608,6 +5656,11 @@ Module['onRuntimeInitialized'] = function() {
     orig_compiler_opts = self.emcc_args.copy()
     for fs in ['MEMFS', 'NODEFS']:
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
+      if self.get_setting('WASMFS'):
+        if fs == 'NODEFS':
+          # TODO: NODEFS in WasmFS
+          continue
+        self.emcc_args += ['-sFORCE_FILESYSTEM']
       if fs == 'NODEFS':
         self.emcc_args += ['-lnodefs.js']
       self.do_run_in_out_file_test('unistd/truncate.c', js_engines=[config.NODE_JS])
@@ -5637,7 +5690,10 @@ Module['onRuntimeInitialized'] = function() {
   def test_unistd_unlink(self):
     self.clear()
     orig_compiler_opts = self.emcc_args.copy()
-    for fs in ['MEMFS', 'NODEFS', 'WASMFS']:
+    for fs in ['MEMFS', 'NODEFS']:
+      if fs == 'NODEFS' and self.get_setting('WASMFS'):
+        # TODO: NODEFS in WasmFS
+        continue
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
       # symlinks on node.js on non-linux behave differently (e.g. on Windows they require administrative privileges)
       # so skip testing those bits on that combination.
@@ -5647,11 +5703,11 @@ Module['onRuntimeInitialized'] = function() {
           self.emcc_args += ['-DNO_SYMLINK=1']
         if MACOS:
           continue
-      if fs == 'WASMFS':
-        self.emcc_args += ['-DNO_SYMLINK=1', '-sWASMFS']
       self.do_runf(test_file('unistd/unlink.c'), 'success', js_engines=[config.NODE_JS])
+
     # Several differences/bugs on non-linux including https://github.com/nodejs/node/issues/18014
-    if not WINDOWS and not MACOS:
+    # TODO: NODERAWFS in WasmFS
+    if not WINDOWS and not MACOS and not self.get_setting('WASMFS'):
       self.emcc_args = orig_compiler_opts + ['-DNODERAWFS']
       # 0 if root user
       if os.geteuid() == 0:
@@ -6058,13 +6114,12 @@ void* operator new(size_t size) {
   def test_fakestat(self):
     self.do_core_test('test_fakestat.c')
 
+  @also_with_standalone_wasm()
   def test_mmap(self):
     # ASan needs more memory, but that is set up separately
     if '-fsanitize=address' not in self.emcc_args:
       self.set_setting('INITIAL_MEMORY', '128mb')
 
-    # needs to flush stdio streams
-    self.set_setting('EXIT_RUNTIME')
     self.do_core_test('test_mmap.c')
 
   def test_mmap_file(self):
@@ -9010,6 +9065,13 @@ lto2 = make_run('lto2', emcc_args=['-flto', '-O2'])
 lto3 = make_run('lto3', emcc_args=['-flto', '-O3'])
 ltos = make_run('ltos', emcc_args=['-flto', '-Os'])
 ltoz = make_run('ltoz', emcc_args=['-flto', '-Oz'])
+
+thinlto0 = make_run('thinlto0', emcc_args=['-flto=thin', '-O0'])
+thinlto1 = make_run('thinlto1', emcc_args=['-flto=thin', '-O1'])
+thinlto2 = make_run('thinlto2', emcc_args=['-flto=thin', '-O2'])
+thinlto3 = make_run('thinlto3', emcc_args=['-flto=thin', '-O3'])
+thinltos = make_run('thinltos', emcc_args=['-flto=thin', '-Os'])
+thinltoz = make_run('thinltoz', emcc_args=['-flto=thin', '-Oz'])
 
 wasm2js0 = make_run('wasm2js0', emcc_args=['-O0'], settings={'WASM': 0})
 wasm2js1 = make_run('wasm2js1', emcc_args=['-O1'], settings={'WASM': 0})

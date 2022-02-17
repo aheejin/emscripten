@@ -6,10 +6,6 @@
 // old JS version. Current Status: Work in Progress. See
 // https://github.com/emscripten-core/emscripten/issues/15041.
 
-#include "backend.h"
-#include "file.h"
-#include "file_table.h"
-#include "wasmfs.h"
 #include <dirent.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
@@ -23,9 +19,19 @@
 #include <vector>
 #include <wasi/api.h>
 
+#include "backend.h"
+#include "file.h"
+#include "file_table.h"
+#include "paths.h"
+#include "wasmfs.h"
+
 // File permission macros for wasmfs.
 // Used to improve readability compared to those in stat.h
+#define WASMFS_PERM_READ 0444
+
 #define WASMFS_PERM_WRITE 0222
+
+#define WASMFS_PERM_EXECUTE 0111
 
 // In Linux, the maximum length for a filename is 255 bytes.
 #define WASMFS_NAME_MAX 255
@@ -340,7 +346,6 @@ long __syscall_lstat64(long path, long buf) {
 
 long __syscall_fstat64(long fd, long buf) {
   auto openFile = wasmFS.getLockedFileTable()[fd];
-
   if (!openFile) {
     return -EBADF;
   }
@@ -386,20 +391,14 @@ static __wasi_fd_t doOpen(char* pathname,
     if (flags & O_CREAT) {
       // Mask all permissions sent via mode.
       mode &= S_IALLUGO;
-      // Create an empty in-memory file.
 
-      // By default, the backend that the file is created in is the same as the
-      // parent directory. However, if a backend is passed as a parameter, then
-      // that backend is used.
+      // If there is no explicitly provided backend, use the parent's backend.
       if (!backend) {
         backend = parsedPath.parent->unlocked()->getBackend();
       }
       auto created = backend->createFile(mode);
 
-      // TODO: When rename is implemented make sure that one can atomically
-      // remove the file from the source directory and then set its parent to
-      // the dest directory.
-      parsedPath.parent->setEntry(pathParts.back(), created);
+      parsedPath.parent->insertEntry(pathParts.back(), created);
       auto openFile = std::make_shared<OpenFileState>(0, flags, created);
 
       return wasmFS.getLockedFileTable().add(openFile);
@@ -425,7 +424,9 @@ static __wasi_fd_t doOpen(char* pathname,
 
 // This function is exposed to users and allows users to create a file in a
 // specific backend. An fd to an open file is returned.
-__wasi_fd_t wasmfs_create_file(char* pathname, mode_t mode, backend_t backend) {
+int wasmfs_create_file(char* pathname, mode_t mode, backend_t backend) {
+  static_assert(std::is_same_v<decltype(doOpen(0, 0, 0, 0)), unsigned int>,
+                "unexpected conversion from result of doOpen to int");
   return doOpen(pathname, O_CREAT, mode, backend);
 }
 
@@ -473,7 +474,7 @@ static long doMkdir(char* path, long mode, backend_t backend = NullBackend) {
   }
   // Create an empty in-memory directory.
   auto created = backend->createDirectory(mode);
-  parsedPath.parent->setEntry(pathParts.back(), created);
+  parsedPath.parent->insertEntry(pathParts.back(), created);
 
   // Update the times.
   auto lockedFile = created->locked();
@@ -487,7 +488,9 @@ static long doMkdir(char* path, long mode, backend_t backend = NullBackend) {
 
 // This function is exposed to users and allows users to specify a particular
 // backend that a directory should be created within.
-long wasmfs_create_directory(char* path, long mode, backend_t backend) {
+int wasmfs_create_directory(char* path, long mode, backend_t backend) {
+  static_assert(std::is_same_v<decltype(doMkdir(0, 0, 0)), long>,
+                "unexpected conversion from result of doMkdir to int");
   return doMkdir(path, mode, backend);
 }
 
@@ -673,7 +676,9 @@ static long doUnlink(char* path, UnlinkMode unlinkMode) {
   }
 
   // Input is valid, perform the unlink.
-  parsedPath.parent->unlinkEntry(pathParts.back());
+  if (!parsedPath.parent->removeEntry(pathParts.back())) {
+    return -EPERM;
+  }
   return 0;
 }
 
@@ -726,12 +731,6 @@ long __syscall_getdents64(long fd, long dirp, long count) {
   std::vector<Directory::Entry> entries = {{".", file}, {"..", dotdot}};
   auto dirEntries = lockedDir.getEntries();
   entries.insert(entries.end(), dirEntries.begin(), dirEntries.end());
-
-#ifdef WASMFS_DEBUG
-  for (auto pair : entries) {
-    emscripten_console_log(pair.name.c_str());
-  }
-#endif
 
   for (; index < entries.size() && bytesRead + sizeof(dirent) <= count;
        index++) {
@@ -862,6 +861,8 @@ long __syscall_rename(long old_path, long new_path) {
     return -EACCES;
   }
 
+  // TODO: Check that the source and parent directories have the same backends.
+
   // new path must be removed if it exists.
   if (newPath) {
     if (oldParsedPath.child->is<DataFile>()) {
@@ -886,12 +887,20 @@ long __syscall_rename(long old_path, long new_path) {
     } else {
       assert(false && "Unhandled file kind in rename");
     }
-    lockedNewParentDir.unlinkEntry(newBase);
+    if (!lockedNewParentDir.removeEntry(newBase)) {
+      return -EPERM;
+    }
   }
 
   // Unlink the oldpath and add the oldpath to the new parent dir.
-  oldParsedPath.parent->unlinkEntry(oldPathParts.back());
-  lockedNewParentDir.setEntry(newBase, oldParsedPath.child);
+  if (!oldParsedPath.parent->removeEntry(oldPathParts.back())) {
+    // TODO: Put the file that was going to be overwritten back!
+    return -EPERM;
+  }
+  if (!lockedNewParentDir.insertEntry(newBase, oldParsedPath.child)) {
+    // TODO: Put all the removed files back!
+    return -EPERM;
+  }
 
   return 0;
 }
@@ -916,7 +925,9 @@ long __syscall_symlink(char* old_path, char* new_path) {
 
   auto backend = parsedPath.parent->unlocked()->getBackend();
   auto created = backend->createSymlink(old_path);
-  parsedPath.parent->setEntry(pathParts.back(), created);
+  if (!parsedPath.parent->insertEntry(pathParts.back(), created)) {
+    return -EPERM;
+  }
 
   return 0;
 }
@@ -952,7 +963,6 @@ long __syscall_utimensat(int dirFD,
   assert(flags == 0);
 
   auto pathParts = splitPath(path);
-
   long err;
   auto parsedPath = getParsedPath(pathParts, err, nullptr, dirFD);
   if (!parsedPath.parent) {
@@ -966,6 +976,52 @@ long __syscall_utimensat(int dirFD,
   auto locked = parsedPath.child->locked();
   locked.atime() = aSeconds;
   locked.mtime() = mSeconds;
+
+  return 0;
+}
+
+long __syscall_chmod(char* path, long mode) {
+  auto pathParts = splitPath(path);
+  long err;
+  auto parsedPath = getParsedPath(pathParts, err);
+  if (!parsedPath.parent) {
+    return err;
+  }
+
+  parsedPath.child->locked().mode() = mode;
+
+  return 0;
+}
+
+long __syscall_faccessat(long dirfd, long path, long amode, long flags) {
+  // The input must be F_OK (check for existence) or a combination of [RWX]_OK
+  // flags.
+  if (amode != F_OK && (amode & ~(R_OK | W_OK | X_OK))) {
+    return -EINVAL;
+  }
+
+  auto pathParts = splitPath((char*)path);
+  long err;
+  auto parsedPath = getParsedPath(pathParts, err, nullptr, dirfd);
+  if (!parsedPath.parent) {
+    return err;
+  }
+  if (!parsedPath.child) {
+    return -ENOENT;
+  }
+
+  if (amode != F_OK) {
+    auto mode = parsedPath.child->locked().mode();
+    if ((amode & R_OK) && !(mode & WASMFS_PERM_READ)) {
+      return -EACCES;
+    }
+    if ((amode & W_OK) && !(mode & WASMFS_PERM_WRITE)) {
+      return -EACCES;
+    }
+    if ((amode & X_OK) && !(mode & WASMFS_PERM_EXECUTE)) {
+      return -EACCES;
+    }
+  }
 
   return 0;
 }
