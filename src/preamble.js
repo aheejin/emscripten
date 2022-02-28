@@ -137,6 +137,10 @@ function ccall(ident, returnType, argTypes, args, opts) {
       }
     }
   }
+#if ASYNCIFY
+  // Data for a previous async operation that was in flight before us.
+  var previousAsync = Asyncify.currData;
+#endif
   var ret = func.apply(null, cArgs);
   function onDone(ret) {
 #if ASYNCIFY
@@ -146,11 +150,22 @@ function ccall(ident, returnType, argTypes, args, opts) {
     return convertReturnValue(ret);
   }
 #if ASYNCIFY
+  // Keep the runtime alive through all calls. Note that this call might not be
+  // async, but for simplicity we push and pop in all calls.
   runtimeKeepalivePush();
   var asyncMode = opts && opts.async;
-  // Check if we started an async operation just now.
-  if (Asyncify.currData) {
-    // If so, the WASM function ran asynchronous and unwound its stack.
+  if (Asyncify.currData != previousAsync) {
+#if ASSERTIONS
+    // A change in async operation happened. If there was already an async
+    // operation in flight before us, that is an error: we should not start
+    // another async operation while one is active, and we should not stop one
+    // either. The only valid combination is to have no change in the async
+    // data (so we either had one in flight and left it alone, or we didn't have
+    // one), or to have nothing in flight and to start one.
+    assert(!(previousAsync && Asyncify.currData), 'We cannot start an async operation when one is already flight');
+    assert(!(previousAsync && !Asyncify.currData), 'We cannot stop an async operation in flight');
+#endif
+    // This is a new async operation. The wasm is paused and has unwound its stack.
     // We need to return a Promise that resolves the return value
     // once the stack is rewound and execution finishes.
 #if ASSERTIONS
@@ -210,13 +225,6 @@ function _free() {
 #include "runtime_strings_extra.js"
 
 // Memory management
-
-function alignUp(x, multiple) {
-  if (x % multiple > 0) {
-    x += multiple - (x % multiple);
-  }
-  return x;
-}
 
 var HEAP,
 /** @type {!ArrayBuffer} */
@@ -690,7 +698,7 @@ function makeAbortWrapper(original) {
         ABORT // rethrow exception if abort() was called in the original function call above
         || abortWrapperDepth > 1 // rethrow exceptions not caught at the top level if exception catching is enabled; rethrow from exceptions from within callMain
 #if SUPPORT_LONGJMP == 'emscripten'
-        || e === 'longjmp' // rethrow longjmp if enabled
+        || e === Infinity // rethrow longjmp if enabled (In Emscripten EH format longjmp will throw Infinity)
 #endif
       ) {
         throw e;
@@ -843,7 +851,7 @@ function getBinaryPromise() {
       && !isFileURI(wasmBinaryFile)
 #endif
     ) {
-      return fetch(wasmBinaryFile, { credentials: 'same-origin' }).then(function(response) {
+      return fetch(wasmBinaryFile, {{{ makeModuleReceiveExpr('fetchSettings', "{ credentials: 'same-origin' }") }}}).then(function(response) {
         if (!response['ok']) {
           throw "failed to load wasm binary file at '" + wasmBinaryFile + "'";
         }
@@ -1188,7 +1196,7 @@ function createWasm() {
         !isFileURI(wasmBinaryFile) &&
 #endif
         typeof fetch == 'function') {
-      return fetch(wasmBinaryFile, { credentials: 'same-origin' }).then(function (response) {
+      return fetch(wasmBinaryFile, {{{ makeModuleReceiveExpr('fetchSettings', "{ credentials: 'same-origin' }") }}}).then(function(response) {
         // Suppress closure warning here since the upstream definition for
         // instantiateStreaming only allows Promise<Repsponse> rather than
         // an actual Response.

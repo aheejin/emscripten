@@ -56,12 +56,12 @@ def get_base_cflags(force_object_files=False):
 
 def clean_env():
   # building system libraries and ports should be hermetic in that it is not
-  # affected by things like EMMAKEN_CFLAGS which the user may have set.
+  # affected by things like EMCC_CFLAGS which the user may have set.
   # At least one port also uses autoconf (harfbuzz) so we also need to clear
   # CFLAGS/LDFLAGS which we don't want to effect the inner call to configure.
   safe_env = os.environ.copy()
   for opt in ['CFLAGS', 'CXXFLAGS', 'LDFLAGS',
-              'EMCC_CFLAGS', 'EMMAKEN_CFLAGS', 'EMMAKEN_JUST_CONFIGURE',
+              'EMCC_CFLAGS',
               'EMCC_FORCE_STDLIBS',
               'EMCC_ONLY_FORCED_STDLIBS']:
     if opt in safe_env:
@@ -1128,7 +1128,8 @@ class libcxxabi(NoExceptLibrary, MTLibrary):
       'stdlib_exception.cpp',
       'stdlib_stdexcept.cpp',
       'stdlib_typeinfo.cpp',
-      'private_typeinfo.cpp'
+      'private_typeinfo.cpp',
+      'format_exception.cpp',
     ]
     if self.eh_mode == Exceptions.NONE:
       filenames += ['cxa_noexception.cpp']
@@ -1147,8 +1148,16 @@ class libcxxabi(NoExceptLibrary, MTLibrary):
 class libcxx(NoExceptLibrary, MTLibrary):
   name = 'libc++'
 
-  cflags = ['-DLIBCXX_BUILDING_LIBCXXABI=1', '-D_LIBCPP_BUILDING_LIBRARY', '-Oz',
-            '-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS']
+  cflags = [
+    '-Oz',
+    '-DLIBCXX_BUILDING_LIBCXXABI=1',
+    '-D_LIBCPP_BUILDING_LIBRARY',
+    '-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS',
+    # TODO(sbc): clang recently introduced this new warning which is triggered
+    # by `filesystem/directory_iterator.cpp`: https://reviews.llvm.org/D119670
+    '-Wno-unqualified-std-cast-call',
+    '-Wno-unknown-warning-option',
+  ]
 
   src_dir = 'system/lib/libcxx/src'
   src_glob = '**/*.cpp'
@@ -1434,6 +1443,7 @@ class libwasmfs(MTLibrary, DebugLibrary, AsanInstrumentedLibrary):
         filenames=['fetch_backend.cpp',
                    'js_file_backend.cpp',
                    'memory_backend.cpp',
+                   'node_backend.cpp',
                    'proxied_file_backend.cpp'])
     return backends + files_in_path(
         path='system/lib/wasmfs',
@@ -1442,6 +1452,7 @@ class libwasmfs(MTLibrary, DebugLibrary, AsanInstrumentedLibrary):
                    'js_api.cpp',
                    'paths.cpp',
                    'streams.cpp',
+                   'support.cpp',
                    'syscalls.cpp',
                    'wasmfs.cpp'])
 

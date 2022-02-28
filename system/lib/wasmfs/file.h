@@ -30,7 +30,9 @@ const backend_t NullBackend = nullptr;
 
 class File : public std::enable_shared_from_this<File> {
 public:
-  enum FileKind { DataFileKind = 0, DirectoryKind, SymlinkKind };
+  enum FileKind { UnknownKind, DataFileKind, DirectoryKind, SymlinkKind };
+
+  const FileKind kind;
 
   template<class T> bool is() const {
     static_assert(std::is_base_of<File, T>::value,
@@ -83,8 +85,6 @@ protected:
   time_t mtime = 0; // Time when the file content was last modified.
   time_t atime = 0; // Time when the content was last accessed.
 
-  FileKind kind;
-
   // Reference to parent of current file node. This can be used to
   // traverse up the directory tree. A weak_ptr ensures that the ref
   // count is not incremented. This also ensures that there are no cyclic
@@ -102,6 +102,11 @@ class DataFile : public File {
   virtual __wasi_errno_t read(uint8_t* buf, size_t len, off_t offset) = 0;
   virtual __wasi_errno_t
   write(const uint8_t* buf, size_t len, off_t offset) = 0;
+
+  // Sets the size of the file to a specific size. If new space is allocated, it
+  // should be zero-initialized (often backends have an efficient way to do this
+  // while doing the resizing).
+  virtual void setSize(size_t size) = 0;
 
   // TODO: Design a proper API for flushing files.
   virtual void flush() = 0;
@@ -122,7 +127,8 @@ class Directory : public File {
 public:
   struct Entry {
     std::string name;
-    std::shared_ptr<File> file;
+    FileKind kind;
+    ino_t ino;
   };
 
 private:
@@ -197,10 +203,14 @@ public:
     : file(file), lock(file->mutex, std::defer_lock) {}
   bool trylock() { return lock.try_lock(); }
   size_t getSize() { return file->getSize(); }
-  mode_t& mode() { return file->mode; }
-  time_t& ctime() { return file->ctime; }
-  time_t& mtime() { return file->mtime; }
-  time_t& atime() { return file->atime; }
+  mode_t getMode() { return file->mode; }
+  void setMode(mode_t mode) { file->mode = mode; }
+  time_t getCTime() { return file->ctime; }
+  void setCTime(time_t time) { file->ctime = time; }
+  time_t getMTime() { return file->mtime; }
+  void setMTime(time_t time) { file->mtime = time; }
+  time_t getATime() { return file->atime; }
+  void setATime(time_t time) { file->atime = time; }
 
   // Note: parent.lock() creates a new shared_ptr to the same Directory
   // specified by the parent weak_ptr.
@@ -223,6 +233,8 @@ public:
   __wasi_errno_t write(const uint8_t* buf, size_t len, off_t offset) {
     return getFile()->write(buf, len, offset);
   }
+
+  void setSize(size_t size) { return getFile()->setSize(size); }
 
   // TODO: Design a proper API for flushing files.
   void flush() { getFile()->flush(); }
