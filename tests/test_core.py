@@ -2579,7 +2579,16 @@ The current type of b is: 9
                                  emcc_args=args, interleaved_output=False)
 
   @node_pthreads
+  def test_pthread_proxying_dropped_work(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PTHREAD_POOL_SIZE=2')
+    args = [f'-I{path_from_root("system/lib/pthread")}']
+    self.do_run_in_out_file_test('pthread/test_pthread_proxying_dropped_work.c',
+                                 emcc_args=args)
+
+  @node_pthreads
   def test_pthread_dispatch_after_exit(self):
+    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('pthread/test_pthread_dispatch_after_exit.c', interleaved_output=False)
 
   @node_pthreads
@@ -5494,7 +5503,7 @@ main( int argv, char ** argc ) {
     self.set_setting('EXPORTED_RUNTIME_METHODS', ['UTF8ToString', 'stringToUTF8'])
     self.set_setting('MINIMAL_RUNTIME')
     self.emcc_args += ['--pre-js', test_file('minimal_runtime_exit_handling.js')]
-    for decoder_mode in [False, True]:
+    for decoder_mode in [0, 1]:
       self.set_setting('TEXTDECODER', decoder_mode)
       print(str(decoder_mode))
       self.do_runf(test_file('utf8_invalid.cpp'), 'OK.')
@@ -5814,6 +5823,11 @@ Module['onRuntimeInitialized'] = function() {
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
       if fs == 'NODEFS':
         self.emcc_args += ['-lnodefs.js']
+      if self.get_setting('WASMFS'):
+        if fs == 'NODEFS':
+          # TODO: NODEFS in WasmFS
+          continue
+        self.emcc_args += ['-sFORCE_FILESYSTEM']
       self.do_run_in_out_file_test('unistd/io.c')
 
   @no_windows('https://github.com/emscripten-core/emscripten/issues/8882')
@@ -6182,6 +6196,15 @@ void* operator new(size_t size) {
     if '-fsanitize=address' not in self.emcc_args:
       self.set_setting('INITIAL_MEMORY', '128mb')
 
+    self.do_core_test('test_mmap.c')
+
+  @node_pthreads
+  def test_mmap_pthreads(self):
+    # Same test with threading enabled so give is some basic sanity
+    # checks of the locking on the internal data structures.
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('INITIAL_MEMORY', '64mb')
     self.do_core_test('test_mmap.c')
 
   def test_mmap_file(self):
@@ -7933,7 +7956,7 @@ Module['onRuntimeInitialized'] = function() {
 
     # attempts to "break" the wasm by adding an unreachable in $foo_end. returns whether we found it.
     def break_wasm(name):
-      wat = self.run_process([Path(building.get_binaryen_bin(), 'wasm-dis'), name], stdout=PIPE).stdout
+      wat = self.get_wasm_text(name)
       lines = wat.splitlines()
       wat = None
       for i in range(len(lines)):
@@ -9073,7 +9096,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
 
 # Generate tests for everything
-def make_run(name, emcc_args, settings=None, env=None, node_args=None):
+def make_run(name, emcc_args, settings=None, env=None, node_args=None, require_v8=False, v8_args=None):
   if env is None:
     env = {}
   if settings is None:
@@ -9092,9 +9115,6 @@ def make_run(name, emcc_args, settings=None, env=None, node_args=None):
       for k, v in self.env.items():
         del os.environ[k]
 
-    if node_args:
-      self.node_args = TT.original
-
   TT.tearDown = tearDown
 
   def setUp(self):
@@ -9111,8 +9131,13 @@ def make_run(name, emcc_args, settings=None, env=None, node_args=None):
     self.emcc_args += emcc_args
 
     if node_args:
-      TT.original = self.node_args
-      self.node_args.append(node_args)
+      self.node_args += node_args
+
+    if v8_args:
+      self.v8_args += v8_args
+
+    if require_v8:
+      self.require_v8()
 
   TT.setUp = setUp
 
@@ -9128,8 +9153,13 @@ core2g = make_run('core2g', emcc_args=['-O2', '-g'])
 core3 = make_run('core3', emcc_args=['-O3'])
 cores = make_run('cores', emcc_args=['-Os'])
 corez = make_run('corez', emcc_args=['-Oz'])
-core64 = make_run('core64', emcc_args=['-O0', '-g3'],
-                  settings={'MEMORY64': 2}, env=None, node_args='--experimental-wasm-bigint')
+
+# MEMORY64=1
+wasm64 = make_run('wasm64', emcc_args=[], settings={'MEMORY64': 1},
+                  require_v8=True, v8_args=['--experimental-wasm-memory64'])
+# MEMORY64=2, or "lowered"
+wasm64l = make_run('wasm64', emcc_args=[], settings={'MEMORY64': 2},
+                   node_args=['--experimental-wasm-bigint'])
 
 lto0 = make_run('lto0', emcc_args=['-flto', '-O0'])
 lto1 = make_run('lto1', emcc_args=['-flto', '-O1'])

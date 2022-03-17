@@ -269,7 +269,6 @@ def inspect_headers(headers, cflags):
                                '-Wno-format',
                                '-nostdlib',
                                compiler_rt,
-                               '-sMEMORY64=' + str(settings.MEMORY64),
                                '-sBOOTSTRAPPING_STRUCT_INFO=1',
                                '-sLLD_REPORT_UNDEFINED=1',
                                '-sSTRICT',
@@ -286,6 +285,11 @@ def inspect_headers(headers, cflags):
 
   if settings.LTO:
     cmd += ['-flto=' + settings.LTO]
+
+  if settings.MEMORY64:
+    # Always use =2 here so that we don't generate binar that actually requires
+    # memeory64 to run.  All we care about is that the output is correct.
+    cmd += ['-sMEMORY64=2']
 
   show(shared.shlex_join(cmd))
   try:
