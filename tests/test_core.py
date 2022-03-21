@@ -2579,11 +2579,31 @@ The current type of b is: 9
                                  emcc_args=args, interleaved_output=False)
 
   @node_pthreads
+  def test_pthread_proxying_cpp(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('INITIAL_MEMORY=32mb')
+    args = [f'-I{path_from_root("system/lib/pthread")}']
+    self.do_run_in_out_file_test('pthread/test_pthread_proxying_cpp.cpp',
+                                 emcc_args=args, interleaved_output=False)
+
+  @node_pthreads
   def test_pthread_proxying_dropped_work(self):
     self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE=2')
     args = [f'-I{path_from_root("system/lib/pthread")}']
     self.do_run_in_out_file_test('pthread/test_pthread_proxying_dropped_work.c',
+                                 emcc_args=args)
+
+  @node_pthreads
+  def test_pthread_proxying_refcount(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('PTHREAD_POOL_SIZE=1')
+    self.set_setting('ASSERTIONS=0')
+    args = [f'-I{path_from_root("system/lib/pthread")}']
+    if '-fsanitize=address' in self.emcc_args or '-fsanitize=leak' in self.emcc_args:
+      args += ['-DSANITIZER']
+    self.do_run_in_out_file_test('pthread/test_pthread_proxying_refcount.c',
                                  emcc_args=args)
 
   @node_pthreads
@@ -8860,7 +8880,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
     self.prep_dlfcn_main()
     self.set_setting('EXIT_RUNTIME')
-    self.set_setting('PTHREAD_POOL_SIZE', 2)
     self.set_setting('PROXY_TO_PTHREAD')
     self.do_runf(test_file('core/pthread/test_pthread_dlopen.c'))
 
@@ -8873,7 +8892,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
     self.prep_dlfcn_main()
     self.set_setting('EXIT_RUNTIME')
-    self.set_setting('PTHREAD_POOL_SIZE', 2)
     self.set_setting('PROXY_TO_PTHREAD')
     self.do_runf(test_file('core/pthread/test_pthread_dlsym.c'))
 
