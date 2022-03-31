@@ -18,8 +18,16 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.8
+3.1.9
 -----
+- The `-sSHELL_FILE` setting, which (unlike the --shell-file command line
+  options) we believe was never tested or externally used, has been removed.
+  (#16589)
+- A warning is now issued when passing C++-only settings such
+  `-sEXCEPTION_CATCHING_ALLOWED` when not linking as C++. (#16609)
+
+3.1.8 - 03/24/2022
+------------------
 - Command line settings (`-s`) are now type checked.  For example, passing a
   string to a boolean setting will now generate an error (e.g.
   `-sEXIT_RUNTIME=foo`).  Previously, the value of `foo` would have have been
@@ -30,6 +38,9 @@ See docs/process.md for more on how version tagging works.
   information. (#16428)
 - Use normalized mouse wheel delta for GLFW 3 in `library_glfw.js`. This changes 
   the vertical scroll amount for GLFW 3. (#16480)
+- The emsdk binaries for macOS now require macOS 10.14 Mojave (or above).
+  Prior versions of emsdk could run on 10.11 (or above), but supporting those
+  older versions recently became harder.
 
 3.1.7 - 03/07/2022
 -------------------

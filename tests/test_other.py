@@ -1860,6 +1860,10 @@ int f() {
                      '   ****     ****'
     self.assertContained(expectedOutput, self.run_process(config.JS_ENGINES[0] + ['a.out.js'], stdout=PIPE, stderr=PIPE).stdout)
 
+  def test_freetype_with_pthreads(self):
+    # Verify that freetype supports compilation requiring pthreads
+    self.emcc(test_file('freetype_test.c'), ['-sUSE_PTHREADS', '-sUSE_FREETYPE'], output_filename='a.out.js')
+
   def test_icu(self):
     self.set_setting('USE_ICU')
     self.do_runf(test_file('other/test_icu.cpp'))
@@ -7204,7 +7208,7 @@ int main() {
     print('  seen %s size: %d (expected: %d) (delta: %d), ratio to expected: %f' % (desc, size, expected_size, delta, ratio))
     self.assertLess(ratio, size_slack)
 
-  def run_metadce_test(self, filename, args, expected_exists, expected_not_exists, check_size=True,
+  def run_metadce_test(self, filename, args=[], expected_exists=[], expected_not_exists=[], check_size=True,
                        check_sent=True, check_imports=True, check_exports=True, check_funcs=True):
 
     # in -Os, -Oz, we remove imports wasm doesn't need
@@ -7231,17 +7235,24 @@ int main() {
     expected_basename = os.path.splitext(filename)[0]
     expected_basename += args_to_filename(args)
 
-    self.run_process([compiler_for(filename), filename, '-g2'] + args + self.get_emcc_args())
+    # Run once without closure and parse output to find asmLibraryArg
+    build_cmd = [compiler_for(filename), filename] + args + self.get_emcc_args()
+    self.run_process(build_cmd + ['-g2'])
     # find the imports we send from JS
     js = read_file('a.out.js')
     start = js.find('asmLibraryArg = ')
-    end = js.find('}', start) + 1
+    assert(start != -1)
+    end = js.find('}', start)
+    assert(end != -1)
     start = js.find('{', start)
-    relevant = js[start + 2:end - 2]
+    assert(start != -1)
+    relevant = js[start + 2:end - 1]
     relevant = relevant.replace(' ', '').replace('"', '').replace("'", '').split(',')
     sent = [x.split(':')[0].strip() for x in relevant]
     sent = [x for x in sent if x]
     sent.sort()
+
+    self.run_process(build_cmd + ['--profiling-funcs', '--closure=1'])
 
     for exists in expected_exists:
       self.assertIn(exists, sent)
@@ -7314,7 +7325,7 @@ int main() {
 
   @node_pthreads
   def test_metadce_minimal_pthreads(self):
-    self.run_metadce_test('minimal_main.c', ['-Oz', '-sUSE_PTHREADS', '-sPROXY_TO_PTHREAD'], [], [])
+    self.run_metadce_test('minimal_main.c', ['-Oz', '-sUSE_PTHREADS', '-sPROXY_TO_PTHREAD'])
 
   @parameterized({
     'noexcept': (['-O2'],                    [], ['waka']), # noqa
@@ -9606,6 +9617,14 @@ int main(void) {
       'AddressSanitizer: null-pointer-dereference on address',
     ])
 
+  def test_asan_sync_compilation(self):
+    self.set_setting('WASM_ASYNC_COMPILATION', 0)
+    self.do_runf(test_file('other/test_asan_null_deref.c'),
+                 emcc_args=['-fsanitize=address', '-gsource-map'],
+                 assert_returncode=NON_ZERO, expected_output=[
+      'AddressSanitizer: null-pointer-dereference on address',
+    ])
+
   def test_asan_memory_growth(self):
     self.do_runf(test_file('other/test_asan_null_deref.c'),
                  emcc_args=['-fsanitize=address', '-sALLOW_MEMORY_GROWTH'],
@@ -9642,12 +9661,12 @@ int main(void) {
                             '--profiling-funcs'])
 
   @parameterized({
-    'async': ['-sWASM_ASYNC_COMPILATION'],
+    '': [],
     'sync': ['-sWASM_ASYNC_COMPILATION=0'],
   })
   def test_offset_converter(self, *args):
     self.do_runf(test_file('other/test_offset_converter.c'), 'ok',
-                 emcc_args=['-sUSE_OFFSET_CONVERTER', '-gsource-map'] + list(args))
+                 emcc_args=['-sUSE_OFFSET_CONVERTER', '--profiling-funcs'] + list(args))
 
   @no_windows('ptys and select are not available on windows')
   def test_build_error_color(self):
@@ -11347,6 +11366,18 @@ void foo() {}
       err = self.run_js('a.out.js')
       self.assertNotContained('warning: unsupported syscall', err)
 
+  def test_unimplemented_syscalls_dlopen(self):
+    cmd = [EMCC, test_file('other/test_dlopen_blocking.c'), '-sASSERTIONS']
+    self.run_process(cmd)
+    err = self.run_js('a.out.js', assert_returncode=NON_ZERO)
+    self.assertContained('Aborted(To use dlopen, you need enable dynamic linking, see https://github.com/emscripten-core/emscripten/wiki/Linking)', err)
+
+    # If we build the same thing with ALLOW_UNIMPLEMENTED_SYSCALLS=0 we
+    # expect a link-time failure rather than a runtime one.
+    cmd += ['-sALLOW_UNIMPLEMENTED_SYSCALLS=0']
+    err = self.expect_fail(cmd)
+    self.assertContained('To use dlopen, you need enable dynamic linking, see https://github.com/emscripten-core/emscripten/wiki/Linking', err)
+
   @require_v8
   def test_missing_shell_support(self):
     # By default shell support is not included
@@ -11830,3 +11861,8 @@ void foo() {}
     self.v8_args += ['--experimental-wasm-memory64']
     for opt in ['-O0', '-O1', '-O2', '-O3']:
       self.do_runf(test_file('hello_world.c'), 'hello, world', emcc_args=['-sMEMORY64', opt])
+
+  # Verfy that MAIN_MODULE=1 (which includes all symbols from all libraries)
+  # works with -sPROXY_POSIX_SOCKETS.
+  def test_dylink_proxy_posix_sockets(self):
+    self.do_runf(test_file('hello_world.cpp'), emcc_args=['-lwebsocket.js', '-sMAIN_MODULE=1', '-sPROXY_POSIX_SOCKETS'])

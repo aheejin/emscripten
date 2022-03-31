@@ -21,7 +21,7 @@ var SyscallsLibrary = {
 
     // shared utilities
     calculateAt: function(dirfd, path, allowEmpty) {
-      if (path[0] === '/') {
+      if (PATH.isAbs(path)) {
         return path;
       }
       // relative path
@@ -134,8 +134,9 @@ var SyscallsLibrary = {
     doReadv: function(stream, iov, iovcnt, offset) {
       var ret = 0;
       for (var i = 0; i < iovcnt; i++) {
-        var ptr = {{{ makeGetValue('iov', 'i*8', 'i32') }}};
-        var len = {{{ makeGetValue('iov', 'i*8 + 4', 'i32') }}};
+        var ptr = {{{ makeGetValue('iov', C_STRUCTS.iovec.iov_base, '*') }}};
+        var len = {{{ makeGetValue('iov', C_STRUCTS.iovec.iov_len, '*') }}};
+        iov += {{{ C_STRUCTS.iovec.__size__ }}};
         var curr = FS.read(stream, {{{ heapAndOffset('HEAP8', 'ptr') }}}, len, offset);
         if (curr < 0) return -1;
         ret += curr;
@@ -146,8 +147,9 @@ var SyscallsLibrary = {
     doWritev: function(stream, iov, iovcnt, offset) {
       var ret = 0;
       for (var i = 0; i < iovcnt; i++) {
-        var ptr = {{{ makeGetValue('iov', 'i*8', 'i32') }}};
-        var len = {{{ makeGetValue('iov', 'i*8 + 4', 'i32') }}};
+        var ptr = {{{ makeGetValue('iov', C_STRUCTS.iovec.iov_base, '*') }}};
+        var len = {{{ makeGetValue('iov', C_STRUCTS.iovec.iov_len, '*') }}};
+        iov += {{{ C_STRUCTS.iovec.__size__ }}};
         var curr = FS.write(stream, {{{ heapAndOffset('HEAP8', 'ptr') }}}, len, offset);
         if (curr < 0) return -1;
         ret += curr;
@@ -203,16 +205,6 @@ var SyscallsLibrary = {
       return stream;
     },
 #endif // SYSCALLS_REQUIRE_FILESYSTEM
-    get64: function(low, high) {
-#if ASSERTIONS
-      if (low >= 0) assert(high === 0);
-      else assert(high === -1);
-#endif
-#if SYSCALL_DEBUG
-      err('    (i64: "' + low + '")');
-#endif
-      return low;
-    }
   },
 
   _mmap_js__deps: ['$SYSCALLS',
@@ -711,19 +703,19 @@ var SyscallsLibrary = {
   __syscall_getcwd: function(buf, size) {
     if (size === 0) return -{{{ cDefine('EINVAL') }}};
     var cwd = FS.cwd();
-    var cwdLengthInBytes = lengthBytesUTF8(cwd);
-    if (size < cwdLengthInBytes + 1) return -{{{ cDefine('ERANGE') }}};
+    var cwdLengthInBytes = lengthBytesUTF8(cwd) + 1;
+    if (size < cwdLengthInBytes) return -{{{ cDefine('ERANGE') }}};
     stringToUTF8(cwd, buf, size);
-    return buf;
+    return cwdLengthInBytes;
   },
-  __syscall_truncate64: function(path, low, high) {
+  __syscall_truncate64: function(path, {{{ defineI64Param('length') }}}) {
+    {{{ receiveI64ParamAsDouble('length') }}}
     path = SYSCALLS.getStr(path);
-    var length = SYSCALLS.get64(low, high);
     FS.truncate(path, length);
     return 0;
   },
-  __syscall_ftruncate64: function(fd, low, high) {
-    var length = SYSCALLS.get64(low, high);
+  __syscall_ftruncate64: function(fd, {{{ defineI64Param('length') }}}) {
+    {{{ receiveI64ParamAsDouble('length') }}}
     FS.ftruncate(fd, length);
     return 0;
   },
@@ -876,9 +868,9 @@ var SyscallsLibrary = {
     var stream = SYSCALLS.getStreamFromFD(fd);
     return ___syscall_statfs64(0, size, buf);
   },
-  __syscall_fadvise64_64__nothrow: true,
-  __syscall_fadvise64_64__proxy: false,
-  __syscall_fadvise64_64: function(fd, offset, len, advice) {
+  __syscall_fadvise64__nothrow: true,
+  __syscall_fadvise64__proxy: false,
+  __syscall_fadvise64: function(fd, offset, len, advice) {
     return 0; // your advice is important to us (but we can't use it)
   },
   __syscall_openat: function(dirfd, path, flags, varargs) {
@@ -1007,10 +999,10 @@ var SyscallsLibrary = {
     FS.utime(path, atime, mtime);
     return 0;
   },
-  __syscall_fallocate: function(fd, mode, off_low, off_high, len_low, len_high) {
+  __syscall_fallocate: function(fd, mode, {{{ defineI64Param('offset') }}}, {{{ defineI64Param('len') }}}) {
+    {{{ receiveI64ParamAsDouble('offset') }}}
+    {{{ receiveI64ParamAsDouble('len') }}}
     var stream = SYSCALLS.getStreamFromFD(fd)
-    var offset = SYSCALLS.get64(off_low, off_high);
-    var len = SYSCALLS.get64(len_low, len_high);
 #if ASSERTIONS
     assert(mode === 0);
 #endif
@@ -1112,9 +1104,9 @@ function wrapSyscallFunction(x, library, isWasi) {
     t = modifyFunction(t, function(name, args, body) {
       var argnums = args.split(",").map((a) => 'Number(' + a + ')').join();
       return 'function ' + name + '(' + args + ') {\n' +
-             '  return BigInt((function ' + name + '_inner(' + args + ') {\n' +
+             '  return (function ' + name + '_inner(' + args + ') {\n' +
              body +
-             '  })(' + argnums + '));' +
+             '  })(' + argnums + ');' +
              '}';
     });
   }
