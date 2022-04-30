@@ -283,6 +283,9 @@
         "MAP_PRIVATE": 2,
         "NI_NAMEREQD": 8,
         "NI_NUMERICHOST": 1,
+        "NOTIFICATION_NONE": 0,
+        "NOTIFICATION_PENDING": 2,
+        "NOTIFICATION_RECEIVED": 1,
         "O_ACCMODE": 2097155,
         "O_APPEND": 1024,
         "O_CLOEXEC": 524288,
@@ -1201,7 +1204,7 @@
             "nextInChain": 0
         },
         "__cxa_exception": {
-            "__size__": 20,
+            "__size__": 24,
             "adjustedPtr": 16,
             "caught": 12,
             "exceptionDestructor": 8,
