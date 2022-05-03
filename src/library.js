@@ -1818,16 +1818,16 @@ LibraryManager.library = {
     var ret = _malloc({{{ C_STRUCTS.hostent.__size__ }}}); // XXX possibly leaked, as are others here
     var nameBuf = {{{ makeMalloc('getHostByName', 'name.length+1') }}};
     stringToUTF8(name, nameBuf, name.length+1);
-    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_name, 'nameBuf', 'i8*') }}};
+    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_name, 'nameBuf', POINTER_TYPE) }}};
     var aliasesBuf = _malloc(4);
-    {{{ makeSetValue('aliasesBuf', '0', '0', 'i8*') }}};
+    {{{ makeSetValue('aliasesBuf', '0', '0', POINTER_TYPE) }}};
     {{{ makeSetValue('ret', C_STRUCTS.hostent.h_aliases, 'aliasesBuf', 'i8**') }}};
     var afinet = {{{ cDefine('AF_INET') }}};
     {{{ makeSetValue('ret', C_STRUCTS.hostent.h_addrtype, 'afinet', 'i32') }}};
     {{{ makeSetValue('ret', C_STRUCTS.hostent.h_length, '4', 'i32') }}};
     var addrListBuf = _malloc(12);
-    {{{ makeSetValue('addrListBuf', '0', 'addrListBuf+8', 'i32*') }}};
-    {{{ makeSetValue('addrListBuf', '4', '0', 'i32*') }}};
+    {{{ makeSetValue('addrListBuf', '0', 'addrListBuf+8', POINTER_TYPE) }}};
+    {{{ makeSetValue('addrListBuf', '4', '0', POINTER_TYPE) }}};
     {{{ makeSetValue('addrListBuf', '8', 'inetPton4(DNS.lookup_name(name))', 'i32') }}};
     {{{ makeSetValue('ret', C_STRUCTS.hostent.h_addr_list, 'addrListBuf', 'i8**') }}};
     return ret;
@@ -2091,14 +2091,14 @@ LibraryManager.library = {
         var alias = aliases[i];
         var aliasBuf = _malloc(alias.length + 1);
         writeAsciiToMemory(alias, aliasBuf);
-        {{{ makeSetValue('aliasListBuf', 'j', 'aliasBuf', 'i8*') }}};
+        {{{ makeSetValue('aliasListBuf', 'j', 'aliasBuf', POINTER_TYPE) }}};
       }
-      {{{ makeSetValue('aliasListBuf', 'j', '0', 'i8*') }}}; // Terminating NULL pointer.
+      {{{ makeSetValue('aliasListBuf', 'j', '0', POINTER_TYPE) }}}; // Terminating NULL pointer.
 
       // generate protoent
       var pe = _malloc({{{ C_STRUCTS.protoent.__size__ }}});
-      {{{ makeSetValue('pe', C_STRUCTS.protoent.p_name, 'nameBuf', 'i8*') }}};
-      {{{ makeSetValue('pe', C_STRUCTS.protoent.p_aliases, 'aliasListBuf', 'i8**') }}};
+      {{{ makeSetValue('pe', C_STRUCTS.protoent.p_name, 'nameBuf', POINTER_TYPE) }}};
+      {{{ makeSetValue('pe', C_STRUCTS.protoent.p_aliases, 'aliasListBuf', POINTER_TYPE) }}};
       {{{ makeSetValue('pe', C_STRUCTS.protoent.p_proto, 'proto', 'i32') }}};
       return pe;
     };
@@ -2886,13 +2886,22 @@ LibraryManager.library = {
     buf >>= 2;
     while (ch = HEAPU8[sigPtr++]) {
 #if ASSERTIONS
-      assert(ch === 100/*'d'*/ || ch === 102/*'f'*/ || ch === 105 /*'i'*/, 'Invalid character ' + ch + '("' + String.fromCharCode(ch) + '") in readAsmConstArgs! Use only "d", "f" or "i", and do not specify "v" for void return argument.');
+      assert(ch === 100/*'d'*/ || ch === 102/*'f'*/ || ch === 105 /*'i'*/ || ch === 106 /*'j'*/, 'Invalid character ' + ch + '("' + String.fromCharCode(ch) + '") in readAsmConstArgs! Use only "d", "f" or "i", and do not specify "v" for void return argument.');
+#if !WASM_BIGINT
+      assert(ch !== 106/*'j'*/, "i64 arguments to ASM_JS function are not available without WASM_BIGINT");
 #endif
-      // A double takes two 32-bit slots, and must also be aligned - the backend
-      // will emit padding to avoid that.
-      var readAsmConstArgsDouble = ch < 105;
-      if (readAsmConstArgsDouble && (buf & 1)) buf++;
-      readAsmConstArgsArray.push(readAsmConstArgsDouble ? HEAPF64[buf++ >> 1] : HEAP32[buf]);
+#endif
+      // Floats are always passed as doubles, and doubles and int64s take up 8
+      // bytes (two 32-bit slots) in memory, align reads to these:
+      buf += (ch != 105) & buf;
+      readAsmConstArgsArray.push(
+        ch == 105/*i*/ ? HEAP32[buf] :
+#if WASM_BIGINT
+       (ch == 106/*j*/ ? HEAP64 : HEAPF64)[buf++ >> 1]
+#else
+       HEAPF64[buf++ >> 1]
+#endif
+      );
       ++buf;
     }
     return readAsmConstArgsArray;
