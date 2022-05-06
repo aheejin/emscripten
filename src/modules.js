@@ -37,6 +37,7 @@ global.LibraryManager = {
     let libraries = [
       'library.js',
       'library_formatString.js',
+      'library_getvalue.js',
       'library_math.js',
       'library_path.js',
       'library_syscall.js',
@@ -93,6 +94,7 @@ global.LibraryManager = {
       libraries.push('library_wasmfs_js_file.js');
       libraries.push('library_wasmfs_fetch.js');
       libraries.push('library_wasmfs_node.js');
+      libraries.push('library_wasmfs_opfs.js');
     }
 
     // Additional JS libraries (without AUTO_JS_LIBRARIES, link to these explicitly via -lxxx.js)
@@ -387,8 +389,6 @@ function exportRuntime() {
   let runtimeElements = [
     'ccall',
     'cwrap',
-    'setValue',
-    'getValue',
     'allocate',
     'UTF8ArrayToString',
     'UTF8ToString',
