@@ -1100,7 +1100,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     banned = [b[0] for b in self.banned_js_engines if b]
     return [engine for engine in js_engines if engine and engine[0] not in banned]
 
-  def do_run(self, src, expected_output, force_c=False, **kwargs):
+  def do_run(self, src, expected_output=None, force_c=False, **kwargs):
     if 'no_build' in kwargs:
       filename = src
     else:
@@ -1109,21 +1109,21 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       else:
         filename = 'src.cpp'
       write_file(filename, src)
-    self._build_and_run(filename, expected_output, **kwargs)
+    return self._build_and_run(filename, expected_output, **kwargs)
 
   def do_runf(self, filename, expected_output=None, **kwargs):
     return self._build_and_run(filename, expected_output, **kwargs)
 
   ## Just like `do_run` but with filename of expected output
   def do_run_from_file(self, filename, expected_output_filename, **kwargs):
-    self._build_and_run(filename, read_file(expected_output_filename), **kwargs)
+    return self._build_and_run(filename, read_file(expected_output_filename), **kwargs)
 
   def do_run_in_out_file_test(self, *path, **kwargs):
     srcfile = test_file(*path)
     out_suffix = kwargs.pop('out_suffix', '')
     outfile = shared.unsuffixed(srcfile) + out_suffix + '.out'
     expected = read_file(outfile)
-    self._build_and_run(srcfile, expected, **kwargs)
+    return self._build_and_run(srcfile, expected, **kwargs)
 
   ## Does a complete test - builds, runs, checks output, etc.
   def _build_and_run(self, filename, expected_output, args=[], output_nicerizer=None,
@@ -1243,6 +1243,9 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     self.emcc_args.append('-Wno-shift-negative-value')
     # adler32.c uses K&R sytyle function declarations
     self.emcc_args.append('-Wno-deprecated-non-prototype')
+    # Work around configure-script error. TODO: remove when
+    # https://github.com/emscripten-core/emscripten/issues/16908 is fixed
+    self.emcc_args.append('-Wno-pointer-sign')
     if cmake:
       rtn = self.get_library(os.path.join('third_party', 'zlib'), os.path.join('libz.a'),
                              configure=['cmake', '.'],
