@@ -21,8 +21,9 @@ if __name__ == '__main__':
 
 from tools.shared import try_delete, PIPE
 from tools.shared import PYTHON, EMCC, EMAR
-from tools.utils import WINDOWS, MACOS
+from tools.utils import WINDOWS, MACOS, write_file
 from tools import shared, building, config, webassembly
+import common
 from common import RunnerCore, path_from_root, requires_native_clang, test_file, create_file
 from common import skip_if, needs_dylink, no_windows, no_mac, is_slow_test, parameterized
 from common import env_modify, with_env_modify, disabled, node_pthreads, also_with_wasm_bigint
@@ -442,7 +443,22 @@ class TestCoreBase(RunnerCore):
 
   def test_int53(self):
     self.emcc_args += ['-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$convertI32PairToI53,$convertU32PairToI53,$readI53FromU64,$readI53FromI64,$writeI53ToI64,$writeI53ToI64Clamped,$writeI53ToU64Clamped,$writeI53ToI64Signaling,$writeI53ToU64Signaling]']
-    self.do_core_test('test_int53.c', interleaved_output=False)
+
+    if common.EMTEST_REBASELINE:
+      self.run_process([EMCC, test_file('core/test_int53.c'), '-o', 'a.js', '-DGENERATE_ANSWERS'] + self.emcc_args)
+      ret = self.run_process(config.NODE_JS + ['a.js'], stdout=PIPE).stdout
+      write_file(test_file('core/test_int53.out'), ret)
+    else:
+      self.do_core_test('test_int53.c', interleaved_output=False)
+
+  def test_int53_convertI32PairToI53Checked(self):
+    self.emcc_args += ['-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$convertI32PairToI53Checked]']
+    if common.EMTEST_REBASELINE:
+      self.run_process([EMCC, test_file('core/test_convertI32PairToI53Checked.cpp'), '-o', 'a.js', '-DGENERATE_ANSWERS'] + self.emcc_args)
+      ret = self.run_process(config.NODE_JS + ['a.js'], stdout=PIPE).stdout
+      write_file(test_file('core/test_convertI32PairToI53Checked.out'), ret)
+    else:
+      self.do_core_test('test_convertI32PairToI53Checked.cpp', interleaved_output=False)
 
   def test_i64(self):
     self.do_core_test('test_i64.c')
@@ -1638,6 +1654,24 @@ int main () {
   return 0;
 }
 ''', 'exception caught: std::bad_typeid')
+
+  @with_both_eh_sjlj
+  def test_abort_no_dtors(self):
+    # abort() should not run destructors
+    out = self.do_run(r'''
+#include <stdlib.h>
+#include <iostream>
+
+struct Foo {
+  ~Foo() { std::cout << "Destructing Foo" << std::endl; }
+};
+
+int main() {
+  Foo f;
+  abort();
+}
+''', assert_returncode=NON_ZERO)
+    self.assertNotContained('Destructing Foo', out)
 
   def test_iostream_ctors(self):
     # iostream stuff must be globally constructed before user global
@@ -9194,7 +9228,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   @also_with_wasm_bigint
   def test_js_library_i64_params(self):
-    # Tests the defineI64Param and receiveI64ParamAsDouble helpers that are
+    # Tests the defineI64Param and receiveI64ParamAsI53 helpers that are
     # used to recieve i64 argument in syscalls.
     self.emcc_args += ['--js-library=' + test_file('core/js_library_i64_params.js')]
     self.do_core_test('js_library_i64_params.c')

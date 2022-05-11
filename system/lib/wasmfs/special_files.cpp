@@ -7,6 +7,7 @@
 // See https://github.com/emscripten-core/emscripten/issues/15041.
 
 #include <emscripten/html5.h>
+#include <unistd.h>
 #include <vector>
 #include <wasi/api.h>
 
@@ -20,11 +21,11 @@ class StdinFile : public DataFile {
   void open(oflags_t) override {}
   void close() override {}
 
-  __wasi_errno_t write(const uint8_t* buf, size_t len, off_t offset) override {
-    return __WASI_ERRNO_INVAL;
+  ssize_t write(const uint8_t* buf, size_t len, off_t offset) override {
+    return -__WASI_ERRNO_INVAL;
   }
 
-  __wasi_errno_t read(uint8_t* buf, size_t len, off_t offset) override {
+  ssize_t read(uint8_t* buf, size_t len, off_t offset) override {
     // TODO: Implement reading from stdin.
     abort();
   };
@@ -45,8 +46,8 @@ protected:
   void open(oflags_t) override {}
   void close() override {}
 
-  __wasi_errno_t read(uint8_t* buf, size_t len, off_t offset) override {
-    return __WASI_ERRNO_INVAL;
+  ssize_t read(uint8_t* buf, size_t len, off_t offset) override {
+    return -__WASI_ERRNO_INVAL;
   };
 
   void flush() override {
@@ -60,10 +61,10 @@ protected:
   size_t getSize() override { return 0; }
   void setSize(size_t size) override {}
 
-  __wasi_errno_t writeToJS(const uint8_t* buf,
-                           size_t len,
-                           void (*console_write)(const char*),
-                           std::vector<char>& fd_write_buffer) {
+  ssize_t writeToJS(const uint8_t* buf,
+                    size_t len,
+                    void (*console_write)(const char*),
+                    std::vector<char>& fd_write_buffer) {
     for (size_t j = 0; j < len; j++) {
       uint8_t current = buf[j];
       // Flush on either a null or a newline.
@@ -75,7 +76,7 @@ protected:
         fd_write_buffer.push_back(current);
       }
     }
-    return __WASI_ERRNO_SUCCESS;
+    return len;
   }
 
 public:
@@ -85,7 +86,7 @@ public:
 };
 
 class StdoutFile : public WritingStdFile {
-  __wasi_errno_t write(const uint8_t* buf, size_t len, off_t offset) override {
+  ssize_t write(const uint8_t* buf, size_t len, off_t offset) override {
     // Node and worker threads issue in Emscripten:
     // https://github.com/emscripten-core/emscripten/issues/14804.
     // Issue filed in Node: https://github.com/nodejs/node/issues/40961
@@ -100,7 +101,7 @@ public:
 };
 
 class StderrFile : public WritingStdFile {
-  __wasi_errno_t write(const uint8_t* buf, size_t len, off_t offset) override {
+  ssize_t write(const uint8_t* buf, size_t len, off_t offset) override {
     // Similar issue with Node and worker threads as emscripten_out.
     // TODO: May not want to proxy stderr (fd == 2) to the main thread, as
     //       emscripten_err does.
@@ -111,6 +112,31 @@ class StderrFile : public WritingStdFile {
 
 public:
   StderrFile() {}
+};
+
+class RandomFile : public DataFile {
+  void open(oflags_t) override {}
+  void close() override {}
+
+  ssize_t write(const uint8_t* buf, size_t len, off_t offset) override {
+    return -__WASI_ERRNO_INVAL;
+  }
+
+  ssize_t read(uint8_t* buf, size_t len, off_t offset) override {
+    uint8_t* end = buf + len;
+    for (; buf < end; buf += 256) {
+      int err = getentropy(buf, std::min(end - buf, 256l));
+      assert(err == 0);
+    }
+    return len;
+  };
+
+  void flush() override {}
+  size_t getSize() override { return 0; }
+  void setSize(size_t size) override {}
+
+public:
+  RandomFile() : DataFile(S_IRUGO, NullBackend, S_IFCHR) { seekable = false; }
 };
 
 } // anonymous namespace
@@ -128,6 +154,16 @@ std::shared_ptr<DataFile> getStdout() {
 std::shared_ptr<DataFile> getStderr() {
   static auto stderr = std::make_shared<StderrFile>();
   return stderr;
+}
+
+std::shared_ptr<DataFile> getRandom() {
+  static auto random = std::make_shared<RandomFile>();
+  return random;
+}
+
+std::shared_ptr<DataFile> getURandom() {
+  static auto urandom = std::make_shared<RandomFile>();
+  return urandom;
 }
 
 } // namespace wasmfs::SpecialFiles

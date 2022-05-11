@@ -1532,6 +1532,10 @@ def setup_pthreads(target):
   if settings.PROXY_TO_PTHREAD:
     settings.REQUIRED_EXPORTS += ['emscripten_proxy_main']
 
+  # All proxying async backends will need this.
+  if settings.WASMFS:
+    settings.REQUIRED_EXPORTS += ['emscripten_proxy_finish']
+
   # pthread stack setup and other necessary utilities
   def include_and_export(name):
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$' + name]
@@ -2566,6 +2570,9 @@ def phase_linker_setup(options, state, newargs, user_settings):
       settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('__cpp_exception')
     if settings.SUPPORT_LONGJMP == 'wasm':
       settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('__c_longjmp')
+
+  if settings.EXCEPTION_HANDLING:
+    settings.REQUIRED_EXPORTS += ['__trap']
 
   return target, wasm_target
 
