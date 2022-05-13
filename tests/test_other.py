@@ -6761,7 +6761,7 @@ int main() {
     assert 'use asm' not in src
 
   def test_EM_ASM_i64(self):
-    expected = 'i64 arguments to ASM_JS function are not available without WASM_BIGINT'
+    expected = 'Invalid character 106("j") in readAsmConstArgs!'
     self.do_runf(test_file('other/test_em_asm_i64.cpp'),
                  expected_output=expected,
                  assert_returncode=NON_ZERO)
@@ -9445,7 +9445,7 @@ int main () {
     #include <emscripten.h>
 
     int main() {
-      printf("%d %d\n",
+      printf("%ld %ld\n",
         emscripten_get_compiler_setting("BINARYEN_ASYNC_COMPILATION"),
         emscripten_get_compiler_setting("WASM_ASYNC_COMPILATION"));
       return 0;
@@ -11649,7 +11649,7 @@ Module['postRun'] = function() {
 }
 ''')
     self.emcc_args += ['--pre-js', 'pre.js']
-    self.do_run_in_out_file_test('unistd/close.c', js_engines=[config.NODE_JS])
+    self.do_run_in_out_file_test('unistd/close.c')
 
   # WASMFS tests
 
