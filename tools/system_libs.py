@@ -63,7 +63,8 @@ def clean_env():
   for opt in ['CFLAGS', 'CXXFLAGS', 'LDFLAGS',
               'EMCC_CFLAGS',
               'EMCC_FORCE_STDLIBS',
-              'EMCC_ONLY_FORCED_STDLIBS']:
+              'EMCC_ONLY_FORCED_STDLIBS',
+              'EMMAKEN_JUST_CONFIGURE']:
     if opt in safe_env:
       del safe_env[opt]
   return safe_env
@@ -630,8 +631,6 @@ class SjLjLibrary(Library):
       cflags += ['-sSUPPORT_LONGJMP=wasm',
                  '-sDISABLE_EXCEPTION_THROWING=1',
                  '-D__USING_WASM_SJLJ__']
-    else:
-      cflags += ['-sSUPPORT_LONGJMP=emscripten']
     return cflags
 
   def get_base_name(self):
@@ -650,6 +649,10 @@ class SjLjLibrary(Library):
   def get_default_variation(cls, **kwargs):
     is_wasm = settings.SUPPORT_LONGJMP == 'wasm'
     return super().get_default_variation(is_wasm=is_wasm, **kwargs)
+
+  def can_build(self):
+    # wasm-sjlj is not yet supported with MEMORY64
+    return not (settings.MEMORY64 and self.is_wasm)
 
 
 class MuslInternalLibrary(Library):
