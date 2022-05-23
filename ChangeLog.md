@@ -18,8 +18,11 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.11
+3.1.12
 ------
+
+3.1.11 - 05/21/2022
+-------------------
 - The return value of `emscripten_get_compiler_setting` was changed from `int`
   to `long` so that it is compatible with `MEMORY64`.  The return value of this
   function sometimes contains a pointer value so `int` is not sufficiently
@@ -28,6 +31,7 @@ See docs/process.md for more on how version tagging works.
   and therefore was renamed to `EMTEST_BUILD_VERBOSE`. (#16904)
 - compiler-rt updated to LLVM 14. (#16991)
 - libc++ updated to LLVM 14. (#17000)
+- libc++abi updated to LLVM 14. (#16993)
 
 3.1.10 - 05/02/2022
 -------------------
