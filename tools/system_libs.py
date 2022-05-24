@@ -941,6 +941,7 @@ class libc(MuslInternalLibrary,
           'ctime_r.c',
           'timespec_get.c',
           'utime.c',
+          '__map_file.c',
         ])
     libc_files += files_in_path(
         path='system/lib/libc/musl/src/legacy',
@@ -1147,7 +1148,7 @@ class crt1_reactor(MuslInternalLibrary):
     return super().can_use() and settings.STANDALONE_WASM
 
 
-class crtbegin(Library):
+class crtbegin(MuslInternalLibrary):
   name = 'crtbegin'
   cflags = ['-sUSE_PTHREADS']
   src_dir = 'system/lib/pthread'

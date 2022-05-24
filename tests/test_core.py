@@ -1811,7 +1811,7 @@ int main() {
 
         EM_JS(Classey*, get_null, (), {
         #if __wasm64__
-          return BigInt(0);
+          return 0n;
         #else
           return 0;
         #endif
@@ -6062,7 +6062,7 @@ Module['onRuntimeInitialized'] = function() {
     self.do_core_test('test_posixtime.c')
 
   def test_uname(self):
-    self.do_core_test('test_uname.c')
+    self.do_core_test('test_uname.c', regex=True)
 
   def test_unary_literal(self):
     self.do_core_test('test_unary_literal.cpp')
@@ -7006,8 +7006,8 @@ void* operator new(size_t size) {
   def test_getValue_setValue(self):
     # these used to be exported, but no longer are by default
     def test(output_prefix='', args=[], assert_returncode=0):
-      src = test_file('core/getValue_setValue.cpp')
-      expected = test_file('core/getValue_setValue' + output_prefix + '.out')
+      src = test_file('core/test_getValue_setValue.cpp')
+      expected = test_file('core/test_getValue_setValue' + output_prefix + '.out')
       self.do_run_from_file(src, expected, assert_returncode=assert_returncode, emcc_args=args)
 
     # see that direct usage (not on module) works. we don't export, but the use
