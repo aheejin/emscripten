@@ -608,7 +608,7 @@ class NoExceptLibrary(Library):
 
   @classmethod
   def get_default_variation(cls, **kwargs):
-    if settings.EXCEPTION_HANDLING:
+    if settings.WASM_EXCEPTIONS:
       eh_mode = Exceptions.WASM
     elif settings.DISABLE_EXCEPTION_CATCHING == 1:
       eh_mode = Exceptions.NONE
@@ -1854,7 +1854,7 @@ def get_libs_to_link(args, forced, only_forced):
     add_library('libc++')
   if settings.LINK_AS_CXX or sanitize:
     add_library('libc++abi')
-    if settings.EXCEPTION_HANDLING:
+    if settings.WASM_EXCEPTIONS:
       add_library('libunwind')
 
   if settings.USE_ASAN:
