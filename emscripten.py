@@ -147,7 +147,7 @@ def update_settings_glue(wasm_file, metadata):
   if settings.MEMORY64:
     assert '--enable-memory64' in settings.BINARYEN_FEATURES
 
-  settings.HAS_MAIN = bool(settings.MAIN_MODULE) or settings.STANDALONE_WASM or 'main' in settings.WASM_EXPORTS or '__main_argc_argv' in settings.WASM_EXPORTS
+  settings.HAS_MAIN = bool(settings.MAIN_MODULE) or settings.PROXY_TO_PTHREAD or settings.STANDALONE_WASM or 'main' in settings.WASM_EXPORTS or '__main_argc_argv' in settings.WASM_EXPORTS
 
   # When using dynamic linking the main function might be in a side module.
   # To be safe assume they do take input parametes.
@@ -219,12 +219,6 @@ def report_missing_symbols(js_library_funcs):
     # standalone mode doesn't use main, and it always reports missing entry point at link time.
     # In this mode we never expect _main in the export list.
     return
-
-  # PROXY_TO_PTHREAD only makes sense with a main(), so error if one is
-  # missing. note that when main() might arrive from another module we cannot
-  # error here.
-  if settings.PROXY_TO_PTHREAD and not settings.HAS_MAIN:
-    exit_with_error('PROXY_TO_PTHREAD proxies main() for you, but no main exists')
 
   if settings.IGNORE_MISSING_MAIN:
     # The default mode for emscripten is to ignore the missing main function allowing
@@ -753,29 +747,24 @@ def add_standard_wasm_imports(send_items_map):
 
 
 def create_sending(invoke_funcs, metadata):
-  em_js_funcs = set(metadata['emJsFuncs'].keys())
-  declares = [asmjs_mangle(d) for d in metadata['declares']]
-  externs = [asmjs_mangle(e) for e in metadata['globalImports']]
-  send_items = set(invoke_funcs + declares + externs)
-  send_items.update(em_js_funcs)
-
-  def fix_import_name(g):
-    # Unlike fastcomp the wasm backend doesn't use the '_' prefix for native
-    # symbols.  Emscripten currently expects symbols to start with '_' so we
-    # artificially add them to the output of emscripten-wasm-finalize and them
-    # strip them again here.
-    # note that we don't do this for EM_JS functions (which, rarely, may have
-    # a '_' prefix)
-    if g.startswith('_') and g not in em_js_funcs:
-      return g[1:]
-    return g
-
+  # Map of wasm imports to mangled/external/JS names
   send_items_map = OrderedDict()
-  for name in send_items:
-    internal_name = fix_import_name(name)
-    if internal_name in send_items_map:
-      exit_with_error('duplicate symbol in exports to wasm: %s', name)
-    send_items_map[internal_name] = name
+
+  def add_send_items(name, mangled_name, ignore_dups=False):
+    # Sanity check that the names of emJsFuncs, declares, and globalImports don't overlap
+    if not ignore_dups and name in send_items_map:
+      assert name not in send_items_map, 'duplicate symbol in exports: %s' % name
+    send_items_map[name] = mangled_name
+
+  for name in metadata['emJsFuncs']:
+    add_send_items(name, name)
+  for name in invoke_funcs:
+    add_send_items(name, name)
+  for name in metadata['declares']:
+    add_send_items(name, asmjs_mangle(name))
+  for name in metadata['globalImports']:
+    # globalImports can currently overlap with declares, in the case of dynamic linking
+    add_send_items(name, asmjs_mangle(name), ignore_dups=settings.RELOCATABLE)
 
   add_standard_wasm_imports(send_items_map)
 

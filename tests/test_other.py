@@ -829,7 +829,7 @@ f.close()
     self.run_process(['cmake', '--build', '.'])
     output = self.run_js('test_prog.js')
     self.assertContained('AL_VERSION: 1.1', output)
-    self.assertContained('SDL version: 2.0.', output)
+    self.assertContained('SDL version: 2.', output)
 
   @requires_pkg_config
   def test_cmake_find_pkg_config(self):
@@ -1249,7 +1249,9 @@ int f() {
       };
     ''')
 
-    self.emcc('lib.c', ['-sEXPORT_ALL', '-sLINKABLE', '--pre-js', 'main.js'], output_filename='a.out.js')
+    # Explicitly test with -Oz to ensure libc_optz is included alongside
+    # libc when `--whole-archive` is used.
+    self.emcc('lib.c', ['-Oz', '-sEXPORT_ALL', '-sLINKABLE', '--pre-js', 'main.js'], output_filename='a.out.js')
     self.assertContained('libf1\nlibf2\n', self.run_js('a.out.js'))
 
   def test_export_all_and_exported_functions(self):
@@ -2499,6 +2501,8 @@ int f() {
   def test_embind(self, extra_args):
     test_cases = [
       (['-lembind']),
+      # Ensure embind compiles under C++17 where "noexcept" became part of the function signature.
+      (['-lembind', '-std=c++17']),
       (['-lembind', '-O1']),
       (['-lembind', '-O2']),
       (['-lembind', '-O2', '-sALLOW_MEMORY_GROWTH', test_file('embind/isMemoryGrowthEnabled=true.cpp')]),
@@ -11419,7 +11423,7 @@ EMSCRIPTEN_KEEPALIVE
 void foo() {}
 ''')
     err = self.expect_fail([EMCC, 'lib.cpp', '-pthread', '-sPROXY_TO_PTHREAD'])
-    self.assertContained('emcc: error: PROXY_TO_PTHREAD proxies main() for you, but no main exists', err)
+    self.assertContained('error: PROXY_TO_PTHREAD proxies main() for you, but no main exists', err)
 
   def test_archive_bad_extension(self):
     # Regression test for https://github.com/emscripten-core/emscripten/issues/14012
@@ -12028,9 +12032,10 @@ Module['postRun'] = function() {{
       self.do_runf(test_file('hello_world.c'), 'hello, world', emcc_args=['-sMEMORY64', opt])
 
   # Verfy that MAIN_MODULE=1 (which includes all symbols from all libraries)
-  # works with -sPROXY_POSIX_SOCKETS.
-  def test_dylink_proxy_posix_sockets(self):
-    self.do_runf(test_file('hello_world.cpp'), emcc_args=['-lwebsocket.js', '-sMAIN_MODULE=1', '-sPROXY_POSIX_SOCKETS'])
+  # works with -sPROXY_POSIX_SOCKETS and -Oz, both of which affect linking of
+  # system libraries in different ways.
+  def test_dylink_proxy_posix_sockets_oz(self):
+    self.do_runf(test_file('hello_world.cpp'), emcc_args=['-lwebsocket.js', '-sMAIN_MODULE=1', '-sPROXY_POSIX_SOCKETS', '-Oz'])
 
   def test_in_tree_header_usage(self):
     # Using headers directly from where they live in the source tree does not work.

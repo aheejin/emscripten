@@ -6777,6 +6777,8 @@ void* operator new(size_t size) {
                  includes=[test_file('third_party/bullet/src')])
 
   @no_asan('issues with freetype itself')
+  @no_ubsan('local count too large')
+  @no_lsan('output differs')
   @needs_make('depends on freetype')
   @no_wasm64('MEMORY64 does not yet support SJLJ')
   @is_slow_test
@@ -7481,6 +7483,11 @@ void* operator new(size_t size) {
   def test_embind_val_assignment(self):
     err = self.expect_fail([EMCC, test_file('embind/test_val_assignment.cpp'), '-lembind', '-c'])
     self.assertContained('candidate function not viable: expects an lvalue for object argument', err)
+
+  @no_wasm64('embind does not yet support MEMORY64')
+  def test_embind_dynamic_initialization(self):
+    self.emcc_args += ['-lembind']
+    self.do_run_in_out_file_test('embind/test_dynamic_initialization.cpp')
 
   @no_wasm2js('wasm_bigint')
   @no_wasm64('embind does not yet support MEMORY64')
@@ -9180,6 +9187,15 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   @needs_dylink
   @node_pthreads
+  def test_pthread_dylink_main_module_1(self):
+    self.emcc_args.append('-Wno-experimental')
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('USE_PTHREADS')
+    self.set_setting('MAIN_MODULE')
+    self.do_runf(test_file('hello_world.c'))
+
+  @needs_dylink
+  @node_pthreads
   def test_Module_dynamicLibraries_pthreads(self):
     # test that Module.dynamicLibraries works with pthreads
     self.emcc_args += ['-pthread', '-Wno-experimental']
@@ -9242,7 +9258,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
       # In standalone we don't support implicitly building without main.  The user has to explicitly
       # opt out (see below).
       err = self.expect_fail([EMCC, test_file('core/test_ctors_no_main.cpp')] + self.get_emcc_args())
-      self.assertContained('error: undefined symbol: main (referenced by top-level compiled C/C++ code)', err)
+      self.assertContained('error: undefined symbol: main/__main_argc_argv (referenced by top-level compiled C/C++ code)', err)
       self.assertContained('warning: To build in STANDALONE_WASM mode without a main(), use emcc --no-entry', err)
     elif not self.get_setting('LLD_REPORT_UNDEFINED') and not self.get_setting('STRICT'):
       # Traditionally in emscripten we allow main to be implicitly undefined.  This allows programs
