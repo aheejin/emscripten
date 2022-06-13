@@ -29,13 +29,13 @@ if __name__ == '__main__':
   raise Exception('do not run this file directly; do something like: tests/runner other')
 
 from tools.shared import try_delete, config
-from tools.shared import EMCC, EMXX, EMAR, EMRANLIB, PYTHON, FILE_PACKAGER, WINDOWS
+from tools.shared import EMCC, EMXX, EMAR, EMRANLIB, FILE_PACKAGER, WINDOWS
 from tools.shared import CLANG_CC, CLANG_CXX, LLVM_AR, LLVM_DWARFDUMP, LLVM_DWP, EMCMAKE, EMCONFIGURE
 from common import RunnerCore, path_from_root, is_slow_test, ensure_dir, disabled, make_executable
 from common import env_modify, no_mac, no_windows, requires_native_clang, with_env_modify
 from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
 from common import compiler_for, read_file, read_binary, EMBUILDER, requires_v8, requires_node
-from common import also_with_minimal_runtime, also_with_wasm_bigint, EMTEST_BUILD_VERBOSE
+from common import also_with_minimal_runtime, also_with_wasm_bigint, EMTEST_BUILD_VERBOSE, PYTHON
 from tools import shared, building, utils, deps_info, response_file
 import common
 import jsrun
@@ -2464,6 +2464,33 @@ int f() {
     ''')
     self.run_process([EMXX, 'main.cpp', '-lembind', '-sASYNCIFY', '--post-js', 'post.js'])
     self.assertContained('done', self.run_js('a.out.js'))
+
+  def test_embind_no_function(self):
+    create_file('post.js', '''
+      Module['onRuntimeInitialized'] = function() {
+        out((new Module['MyClass'](42)).x);
+      };
+    ''')
+    create_file('main.cpp', r'''
+      #include <emscripten.h>
+      #include <emscripten/bind.h>
+      using namespace emscripten;
+      class MyClass {
+      public:
+          MyClass(int x) : x(x) {}
+
+          int getX() const {return x;}
+          void setX(int newX) {x = newX;}
+      private:
+          int x;
+      };
+      EMSCRIPTEN_BINDINGS(my_module) {
+          class_<MyClass>("MyClass")
+              .constructor<int>()
+              .property("x", &MyClass::getX, &MyClass::setX);
+      }
+    ''')
+    self.do_runf('main.cpp', '42', emcc_args=['-lembind', '--post-js', 'post.js'])
 
   def test_embind_closure_no_dynamic_execution(self):
     create_file('post.js', '''
@@ -7435,7 +7462,8 @@ int main() {
     # we don't metadce with linkable code! other modules may want stuff
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    'main_module_2': (['-O3', '-sMAIN_MODULE=2'], [], []), # noqa
+    # Disabled while llvm change rolls in
+    #'main_module_2': (['-O3', '-sMAIN_MODULE=2'], [], []), # noqa
   })
   def test_metadce_hello(self, *args):
     self.run_metadce_test('hello_world.cpp', *args)
@@ -11738,6 +11766,10 @@ Module['postRun'] = function() {{
   @also_with_wasmfs
   def test_unistd_open(self):
     self.do_run_in_out_file_test('wasmfs/wasmfs_open.c')
+
+  @also_with_wasmfs
+  def test_unistd_open_append(self):
+    self.do_run_in_out_file_test('wasmfs/wasmfs_open_append.c')
 
   @also_with_wasmfs
   def test_unistd_stat(self):
