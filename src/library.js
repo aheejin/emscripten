@@ -364,11 +364,11 @@ mergeInto(LibraryManager.library, {
 
   // In -Oz builds, we replace memcpy() altogether with a non-unrolled wasm
   // variant, so we should never emit emscripten_memcpy_big() in the build.
-  // (However, in MAIN_MODULE=1 mode we link in all system libraries, which does
-  // end up adding code that refers to this.)
   // In STANDALONE_WASM we avoid the emscripten_memcpy_big dependency so keep
   // the wasm file standalone.
-#if (SHRINK_LEVEL < 2 || LINKABLE) && !STANDALONE_WASM
+  // In MAIN_MODULE=1 or EMCC_FORCE_STDLIBS mode all of libc is force included
+  // so we cannot override parts of it, and therefore cannot use libc_optz.
+#if (SHRINK_LEVEL < 2 || LINKABLE || process.env.EMCC_FORCE_STDLIBS) && !STANDALONE_WASM
 
   emscripten_memcpy_big__sig: 'vppp',
 #if MIN_CHROME_VERSION < 45 || MIN_EDGE_VERSION < 14 || MIN_FIREFOX_VERSION < 34 || MIN_IE_VERSION != TARGET_NOT_SUPPORTED || MIN_SAFARI_VERSION < 100101
@@ -3247,26 +3247,8 @@ mergeInto(LibraryManager.library, {
   $callRuntimeCallbacks__internal: true,
   $callRuntimeCallbacks: function(callbacks) {
     while (callbacks.length > 0) {
-      var callback = callbacks.shift();
-      if (typeof callback == 'function') {
-        callback(Module); // Pass the module as the first argument.
-        continue;
-      }
-      var func = callback.func;
-      if (typeof func == 'number') {
-        if (callback.arg === undefined) {
-          // Run the wasm function ptr with signature 'v'. If no function
-          // with such signature was exported, this call does not need
-          // to be emitted (and would confuse Closure)
-          {{{ makeDynCall('v', 'func') }}}();
-        } else {
-          // If any function with signature 'vi' was exported, run
-          // the callback with that signature.
-          {{{ makeDynCall('vi', 'func') }}}(callback.arg);
-        }
-      } else {
-        func(callback.arg === undefined ? null : callback.arg);
-      }
+      // Pass the module as the first argument.
+      callbacks.shift()(Module);
     }
   },
 

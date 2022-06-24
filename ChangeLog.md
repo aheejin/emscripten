@@ -18,13 +18,19 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.2.0
------
+3.1.15
+------
+
+3.1.14 - 06/20/2022
+-------------------
+- emcc now accepts `-print-file-name` and reports the correct library paths in
+  `-print-search-dirs`.
 - `tools/file_packager` no longer generates (or requires) any "pre-js" code when
   running in `--embed-file` mode.  Instead the embedded files are loaded at
   static constructor time.
 - Emscripten now knows what minimum browser versions the `WASM_BIGINT` feature
   requires and will automatically set the defaults accordingly. (#17163)
+- Embind now supports binding to functions specified as `noexcept`. (#17140)
 - Weak undefined symbols fixed in dynamic linking. (#17164)
 - Internally, the name of `main` function now gets mangled (by clang) in the
   same way as with other wasm targets.  This means that within the wasm module
