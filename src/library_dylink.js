@@ -95,7 +95,7 @@ var LibraryDylink = {
   },
 
   $updateGOT__internal: true,
-  $updateGOT__deps: ['$GOT', '$isInternalSym'],
+  $updateGOT__deps: ['$GOT', '$isInternalSym', '$addFunction'],
   $updateGOT: function(exports, replace) {
 #if DYLINK_DEBUG
     err("updateGOT: adding " + Object.keys(exports).length + " symbols");
@@ -249,11 +249,7 @@ var LibraryDylink = {
   },
 
   $dlSetError__internal: true,
-  $dlSetError__deps: ['__dl_seterr',
-#if MINIMAL_RUNTIME
-   '$intArrayFromString'
-#endif
-  ],
+  $dlSetError__deps: ['__dl_seterr', '$allocateUTF8OnStack'],
   $dlSetError: function(msg) {
     withStackSave(function() {
       var cmsg = allocateUTF8OnStack(msg);
@@ -479,7 +475,7 @@ var LibraryDylink = {
       if (!Module.hasOwnProperty(module_sym)) {
         Module[module_sym] = exports[sym];
       }
-#if !hasExportedFunction('_main')
+#if !hasExportedSymbol('main')
       // If the main module doesn't define main it could be defined in one of
       // the side modules, and we need to handle the mangled named.
       if (sym == '__main_argc_argv') {
@@ -505,6 +501,7 @@ var LibraryDylink = {
     '$getDylinkMetadata', '$alignMemory', '$zeroMemory',
     '$alignMemory', '$zeroMemory',
     '$CurrentModuleWeakSymbols', '$alignMemory', '$zeroMemory',
+    '$updateTableMap',
   ],
   $loadWebAssemblyModule: function(binary, flags, handle) {
     var metadata = getDylinkMetadata(binary);
@@ -961,12 +958,7 @@ var LibraryDylink = {
   },
 
   // Async version of dlopen.
-  _emscripten_dlopen_js__deps: ['$dlopenInternal', '$callUserCallback', '$dlSetError',
-#if !MINIMAL_RUNTIME
-    '$runtimeKeepalivePush',
-    '$runtimeKeepalivePop',
-#endif
-  ],
+  _emscripten_dlopen_js__deps: ['$dlopenInternal', '$callUserCallback', '$dlSetError'],
   _emscripten_dlopen_js__sig: 'viiiii',
   _emscripten_dlopen_js: function(handle, onsuccess, onerror) {
     /** @param {Object=} e */

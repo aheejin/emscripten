@@ -146,6 +146,7 @@ public:
 class Interface
 {
 public:
+    virtual ~Interface() {}
     virtual void call0() = 0;
     virtual std::wstring call1(const std::wstring& str1, const std::wstring& str2) = 0;
     virtual void call_with_typed_array(size_t size, const void*) = 0;
@@ -170,11 +171,11 @@ public:
         return call<void>(call0_symbol);
     }
 
-    std::wstring call1(const std::wstring& str1, const std::wstring& str2) {
+    std::wstring call1(const std::wstring& str1, const std::wstring& str2) override {
         return call<std::wstring>(call1_symbol, str1, str2);
     }
 
-    void call_with_typed_array(size_t size, const void* data) {
+    void call_with_typed_array(size_t size, const void* data) override {
         return call<void>(
             call_with_typed_array_symbol,
             emscripten::val::global(Uint8Array_symbol).new_(
@@ -183,7 +184,7 @@ public:
                 size));
     }
 
-    void call_with_memory_view(size_t size, const unsigned int* data) {
+    void call_with_memory_view(size_t size, const unsigned int* data) override {
         return call<void>(
             call_with_memory_view_symbol,
             emscripten::typed_memory_view(size, data));
@@ -462,6 +463,37 @@ void __attribute__((noinline)) pass_gameobject_ptr_benchmark()
     printf("C++ pass_gameobject_ptr %d iters: %f msecs.\n", N, (t2-t));
 }
 
+void __attribute__((noinline)) numeric_val_array_benchmark() {
+  using emscripten::val;
+
+  std::vector<int> vec = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,
+                          13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+                          26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
+                          39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+                          52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+
+  const int kLoopTimes = 100000;
+  double t = emscripten_get_now();
+  for (int i = 0; i < kLoopTimes; i++) {
+    val v = val::array(vec.begin(), vec.end());
+  }
+  printf("\nval::array(Iter begin, Iter end): %lf msecs.\n", emscripten_get_now() - t);
+
+  t = emscripten_get_now();
+  for (int i = 0; i < kLoopTimes; i++) {
+    val v = val::array(vec);
+  }
+  printf("val::array(const std::vector<T>& vec) with opt numeric types: %lf msecs.\n", emscripten_get_now() - t);
+
+  // It's about 20x times faster.
+  // val::array(Iter begin, Iter end): 727.300000 msecs.
+  // val::array(const std::vector<T>& vec) with opt numeric types: 29.700000 msecs.
+
+  // If compile with `--std=c++20`, the result is very close.
+  // val::array(Iter begin, Iter end): 30.400000 msecs.
+  // val::array(const std::vector<T>& vec) with opt numeric types: 27.500000 msecs.
+}
+
 int EMSCRIPTEN_KEEPALIVE main()
 {
     for(int i = 1000; i <= 100000; i *= 10)
@@ -506,4 +538,5 @@ int EMSCRIPTEN_KEEPALIVE main()
     call_through_interface1();
     call_through_interface2();
     returns_val_benchmark();
+    numeric_val_array_benchmark();
 }

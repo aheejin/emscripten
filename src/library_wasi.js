@@ -66,11 +66,7 @@ var WasiLibrary = {
     return 0;
   },
 
-  environ_get__deps: ['$getEnvStrings'
-#if MINIMAL_RUNTIME
-    , '$writeAsciiToMemory'
-#endif
-  ],
+  environ_get__deps: ['$getEnvStrings', '$writeAsciiToMemory'],
   environ_get__nothrow: true,
   environ_get__sig: 'ipp',
   environ_get: function(__environ, environ_buf) {
@@ -105,9 +101,7 @@ var WasiLibrary = {
 
   args_get__nothrow: true,
   args_get__sig: 'ipp',
-#if MINIMAL_RUNTIME && MAIN_READS_PARAMS
   args_get__deps: ['$writeAsciiToMemory'],
-#endif
   args_get: function(argv, argv_buf) {
 #if MAIN_READS_PARAMS
     var bufSize = 0;
@@ -231,7 +225,7 @@ var WasiLibrary = {
   $flush_NO_FILESYSTEM__deps: ['$printChar', '$printCharBuffers'],
   $flush_NO_FILESYSTEM: function() {
     // flush anything remaining in the buffers during shutdown
-#if hasExportedFunction('_fflush')
+#if hasExportedSymbol('fflush')
     _fflush(0);
 #endif
     if (printCharBuffers[1].length) printChar(1, {{{ charCode("\n") }}});

@@ -167,6 +167,7 @@ mergeInto(LibraryManager.library, {
     '$emscripten_realloc_buffer',
 #endif
   ],
+  emscripten_resize_heap: 'ip',
   emscripten_resize_heap: function(requestedSize) {
     var oldSize = HEAPU8.length;
     requestedSize = requestedSize >>> 0;
@@ -384,7 +385,6 @@ mergeInto(LibraryManager.library, {
   //   AppleWebKit/605.1.15 Safari/604.1 Version/13.0.4 iPhone OS 13_3 on iPhone 6s with iOS 13.3
   //   AppleWebKit/605.1.15 Version/13.0.3 Intel Mac OS X 10_15_1 on Safari 13.0.3 (15608.3.10.1.4) on macOS Catalina 10.15.1
   // Hence the support status of .copyWithin() for Safari version range [10.0.0, 10.1.0] is unknown.
-  emscripten_memcpy_big__import: true,
   emscripten_memcpy_big: '= Uint8Array.prototype.copyWithin\n' +
     '  ? function(dest, src, num) { HEAPU8.copyWithin(dest, src, src + num); }\n' +
     '  : function(dest, src, num) { HEAPU8.set(HEAPU8.subarray(src, src+num), dest); }\n',
@@ -565,11 +565,7 @@ mergeInto(LibraryManager.library, {
   tzset_impl__internal: true,
   tzset_impl__proxy: 'sync',
   tzset_impl__sig: 'viii',
-  tzset_impl__deps: [
-#if MINIMAL_RUNTIME
-    '$allocateUTF8'
-#endif
-  ],
+  tzset_impl__deps: ['$allocateUTF8'],
   tzset_impl: function(timezone, daylight, tzname) {
     var currentYear = new Date().getFullYear();
     var winter = new Date(currentYear, 0, 1);
@@ -654,10 +650,8 @@ mergeInto(LibraryManager.library, {
 
   // Note: this is not used in STANDALONE_WASM mode, because it is more
   //       compact to do it in JS.
-  strftime__deps: ['_isLeapYear', '_arraySum', '_addDays', '_MONTH_DAYS_REGULAR', '_MONTH_DAYS_LEAP'
-#if MINIMAL_RUNTIME
-    , '$intArrayFromString', '$writeArrayToMemory'
-#endif
+  strftime__deps: ['_isLeapYear', '_arraySum', '_addDays', '_MONTH_DAYS_REGULAR', '_MONTH_DAYS_LEAP',
+                   '$intArrayFromString', '$writeArrayToMemory'
   ],
   strftime__sig: 'ppppp',
   strftime: function(s, maxsize, format, tm) {
@@ -953,11 +947,8 @@ mergeInto(LibraryManager.library, {
     return _strftime(s, maxsize, format, tm); // no locale support yet
   },
 
-  strptime__deps: ['_isLeapYear', '_arraySum', '_addDays', '_MONTH_DAYS_REGULAR', '_MONTH_DAYS_LEAP', '$jstoi_q'
-#if MINIMAL_RUNTIME
-    , '$intArrayFromString'
-#endif
-  ],
+  strptime__deps: ['_isLeapYear', '_arraySum', '_addDays', '_MONTH_DAYS_REGULAR', '_MONTH_DAYS_LEAP',
+                   '$jstoi_q', '$intArrayFromString' ],
   strptime__sig: 'pppp',
   strptime: function(buf, format, tm) {
     // char *strptime(const char *restrict buf, const char *restrict format, struct tm *restrict tm);
@@ -2078,11 +2069,7 @@ mergeInto(LibraryManager.library, {
     list: [],
     map: {}
   },
-  setprotoent__deps: ['$Protocols'
-#if MINIMAL_RUNTIME
-    , '$writeAsciiToMemory'
-#endif
-  ],
+  setprotoent__deps: ['$Protocols', '$writeAsciiToMemory'],
   setprotoent: function(stayopen) {
     // void setprotoent(int stayopen);
 
@@ -2292,7 +2279,6 @@ mergeInto(LibraryManager.library, {
     return Math.random();
   },
 
-  emscripten_get_now__import: true,
   emscripten_get_now__sig: 'd',
   emscripten_get_now: ';' +
 #if ENVIRONMENT_MAY_BE_NODE
@@ -2374,7 +2360,6 @@ mergeInto(LibraryManager.library, {
     return nowIsMonotonic;
   },
 
-#if MINIMAL_RUNTIME
   $warnOnce: function(text) {
     if (!warnOnce.shown) warnOnce.shown = {};
     if (!warnOnce.shown[text]) {
@@ -2382,7 +2367,6 @@ mergeInto(LibraryManager.library, {
       err(text);
     }
   },
-#endif
 
   // Returns [parentFuncArguments, functionName, paramListName]
   $traverseStack: function(args) {
@@ -2414,11 +2398,7 @@ mergeInto(LibraryManager.library, {
     return [args, funcname, str];
   },
 
-  emscripten_get_callstack_js__deps: ['$traverseStack', '$jsStackTrace',
-#if MINIMAL_RUNTIME
-    , '$warnOnce'
-#endif
-  ],
+  emscripten_get_callstack_js__deps: ['$traverseStack', '$jsStackTrace', '$warnOnce'],
   emscripten_get_callstack_js__docs: '/** @param {number=} flags */',
   emscripten_get_callstack_js: function(flags) {
     var callstack = jsStackTrace();
@@ -2772,13 +2752,7 @@ mergeInto(LibraryManager.library, {
 
   // Look up the function name from our stack frame cache with our PC representation.
 #if USE_OFFSET_CONVERTER
-  emscripten_pc_get_function__deps: [
-    '$UNWIND_CACHE',
-    'free',
-#if MINIMAL_RUNTIME
-    '$allocateUTF8',
-#endif
-  ],
+  emscripten_pc_get_function__deps: ['$UNWIND_CACHE', 'free', '$allocateUTF8'],
   // Don't treat allocation of _emscripten_pc_get_function.ret as a leak
   emscripten_pc_get_function__noleakcheck: true,
   emscripten_pc_get_function__sig: 'pp',
@@ -2839,11 +2813,7 @@ mergeInto(LibraryManager.library, {
   },
 
   // Look up the file name from our stack frame cache with our PC representation.
-  emscripten_pc_get_file__deps: ['$convertPCtoSourceLocation', 'free',
-#if MINIMAL_RUNTIME
-    '$allocateUTF8',
-#endif
-  ],
+  emscripten_pc_get_file__deps: ['$convertPCtoSourceLocation', 'free', '$allocateUTF8'],
   // Don't treat allocation of _emscripten_pc_get_file.ret as a leak
   emscripten_pc_get_file__noleakcheck: true,
   emscripten_pc_get_file__sig: 'pp',
@@ -3255,7 +3225,13 @@ mergeInto(LibraryManager.library, {
       args = new_args;
     }
 #endif
-    return getWasmTableEntry(ptr).apply(null, args)
+    var rtn = getWasmTableEntry(ptr).apply(null, args);
+#if MEMORY64
+    if (sig[0] == 'p') {
+      rtn = Number(rtn);
+    }
+#endif
+    return rtn;
 #endif
   },
 
@@ -3312,17 +3288,19 @@ mergeInto(LibraryManager.library, {
 
   // Callable in pthread without __proxy needed.
   emscripten_exit_with_live_runtime__sig: 'v',
-#if !MINIMAL_RUNTIME
-  emscripten_exit_with_live_runtime__deps: ['$runtimeKeepalivePush'],
-#endif
   emscripten_exit_with_live_runtime: function() {
     {{{ runtimeKeepalivePush() }}}
     throw 'unwind';
   },
 
-#if MINIMAL_RUNTIME
-  emscripten_force_exit__deps: ['exit'],
+  emscripten_force_exit__deps: [
+#if !EXIT_RUNTIME && ASSERTIONS
+    '$warnOnce',
 #endif
+#if MINIMAL_RUNTIME
+    'exit',
+#endif
+  ],
   emscripten_force_exit__proxy: 'sync',
   emscripten_force_exit__sig: 'vi',
   emscripten_force_exit: function(status) {
@@ -3528,12 +3506,7 @@ mergeInto(LibraryManager.library, {
   },
 #endif
 
-  $safeSetTimeout__deps: ['$callUserCallback',
-#if !MINIMAL_RUNTIME
-   '$runtimeKeepalivePush',
-   '$runtimeKeepalivePop',
-#endif
-  ],
+  $safeSetTimeout__deps: ['$callUserCallback'],
   $safeSetTimeout__docs: '/** @param {number=} timeout */',
   $safeSetTimeout: function(func, timeout) {
     {{{ runtimeKeepalivePush() }}}
@@ -3576,7 +3549,7 @@ mergeInto(LibraryManager.library, {
   // page-aligned size, and clears the allocated space.
   $mmapAlloc__deps: ['$zeroMemory', '$alignMemory'],
   $mmapAlloc: function(size) {
-#if hasExportedFunction('_emscripten_builtin_memalign')
+#if hasExportedSymbol('emscripten_builtin_memalign')
     size = alignMemory(size, {{{ WASM_PAGE_SIZE }}});
     var ptr = _emscripten_builtin_memalign({{{ WASM_PAGE_SIZE }}}, size);
     if (!ptr) return 0;
@@ -3592,16 +3565,11 @@ mergeInto(LibraryManager.library, {
 #if RELOCATABLE
   // Globals that are normally exported from the wasm module but in relocatable
   // mode are created here and imported by the module.
-  // Mark with `__import` so these are usable from native code.  This is needed
-  // because, by default, only functions can be be imported.
   __stack_pointer: "new WebAssembly.Global({'value': '{{{ POINTER_WASM_TYPE }}}', 'mutable': true}, {{{ to64(STACK_BASE) }}})",
-  __stack_pointer__import: true,
   // tell the memory segments where to place themselves
   __memory_base: "new WebAssembly.Global({'value': '{{{ POINTER_WASM_TYPE }}}', 'mutable': false}, {{{ to64(GLOBAL_BASE) }}})",
-  __memory_base__import: true,
   // the wasm backend reserves slot 0 for the NULL function pointer
   __table_base: "new WebAssembly.Global({'value': '{{{ POINTER_WASM_TYPE }}}', 'mutable': false}, {{{ to64(1) }}})",
-  __table_base__import: true,
 #if MEMORY64
   __table_base32: 1,
 #endif
@@ -3611,11 +3579,9 @@ mergeInto(LibraryManager.library, {
   // have __heap_base hardcoded into it - it receives it from JS as an extern
   // global, basically).
   __heap_base: '{{{ to64(HEAP_BASE) }}}',
-  __heap_base__import: true,
 #if WASM_EXCEPTIONS
   // In dynamic linking we define tags here and feed them to each module
   __cpp_exception: "new WebAssembly.Tag({'parameters': ['{{{ POINTER_WASM_TYPE }}}']})",
-  __cpp_exception__import: true,
 #endif
 #if SUPPORT_LONGJMP == 'wasm'
   __c_longjmp: "new WebAssembly.Tag({'parameters': ['{{{ POINTER_WASM_TYPE }}}']})",
@@ -3661,3 +3627,29 @@ function autoAddDeps(object, name) {
     }
   }
 }
+
+#if LEGACY_RUNTIME
+// Library functions that were previously included as runtime functions are
+// automatically included when `LEGACY_RUNTIME` is set.
+DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.push(
+  '$addFunction',
+  '$removeFunction',
+  '$allocate',
+  '$AsciiToString',
+  '$stringToAscii',
+  '$UTF16ToString',
+  '$stringToUTF16',
+  '$lengthBytesUTF16',
+  '$UTF32ToString',
+  '$stringToUTF32',
+  '$lengthBytesUTF32',
+  '$allocateUTF8',
+  '$allocateUTF8OnStack',
+  '$writeStringToMemory',
+  '$writeArrayToMemory',
+  '$writeAsciiToMemory',
+  '$intArrayFromString',
+  '$intArrayToString',
+  '$warnOnce',
+);
+#endif

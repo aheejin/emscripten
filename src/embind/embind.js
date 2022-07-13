@@ -443,7 +443,6 @@ var LibraryEmbind = {
   _embind_register_bool__sig: 'vpppii',
   _embind_register_bool__deps: [
     '$getShiftFromSize', '$readLatin1String', '$registerType'],
-  _embind_register_bool__sig: 'vpppii',
   _embind_register_bool: function(rawType, name, size, trueValue, falseValue) {
     var shift = getShiftFromSize(size);
 
@@ -552,7 +551,6 @@ var LibraryEmbind = {
   _embind_register_integer__deps: [
     '$embindRepr', '$getShiftFromSize', '$integerReadValueFromPointer',
     '$readLatin1String', '$registerType'],
-  _embind_register_integer__sig: 'vpppii',
   _embind_register_integer: function(primitiveType, name, size, minRange, maxRange) {
     name = readLatin1String(name);
     // LLVM doesn't have signed and unsigned 32-bit types, so u32 literals come
@@ -609,7 +607,6 @@ var LibraryEmbind = {
   _embind_register_bigint__sig: 'vpppjj',
   _embind_register_bigint__deps: [
     '$embindRepr', '$readLatin1String', '$registerType', '$integerReadValueFromPointer'],
-  _embind_register_bigint__sig: 'vpppjj',
   _embind_register_bigint: function(primitiveType, name, size, minRange, maxRange) {
     name = readLatin1String(name);
 
@@ -629,7 +626,7 @@ var LibraryEmbind = {
             return value;
         },
         'toWireType': function (destructors, value) {
-            if (typeof value != "bigint") {
+            if (typeof value != "bigint" && typeof value != "number") {
                 throw new TypeError('Cannot convert "' + embindRepr(value) + '" to ' + this.name);
             }
             if (value < minRange || value > maxRange) {
@@ -651,7 +648,6 @@ var LibraryEmbind = {
   _embind_register_float__deps: [
     '$embindRepr', '$floatReadValueFromPointer', '$getShiftFromSize',
     '$readLatin1String', '$registerType'],
-  _embind_register_float__sig: 'vppp',
   _embind_register_float: function(rawType, name, size) {
     var shift = getShiftFromSize(size);
     name = readLatin1String(name);
@@ -678,7 +674,7 @@ var LibraryEmbind = {
 
   // For types whose wire types are 32-bit pointers.
   $simpleReadValueFromPointer: function(pointer) {
-    return this['fromWireType'](HEAPU32[pointer >> 2]);
+    return this['fromWireType']({{{ makeGetValue('pointer', '0', 'i32') }}});
   },
 
   _embind_register_std_string__sig: 'vpp',
@@ -698,14 +694,15 @@ var LibraryEmbind = {
     registerType(rawType, {
         name: name,
         'fromWireType': function(value) {
-            var length = HEAPU32[value >> 2];
+            var length = {{{ makeGetValue('value', '0', SIZE_TYPE) }}};
+            var payload = value + {{{ POINTER_SIZE }}};
 
             var str;
             if (stdStringIsUTF8) {
-                var decodeStartPtr = value + 4;
+                var decodeStartPtr = payload;
                 // Looping here to support possible embedded '0' bytes
                 for (var i = 0; i <= length; ++i) {
-                    var currentBytePtr = value + 4 + i;
+                    var currentBytePtr = payload + i;
                     if (i == length || HEAPU8[currentBytePtr] == 0) {
                         var maxRead = currentBytePtr - decodeStartPtr;
                         var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
@@ -721,7 +718,7 @@ var LibraryEmbind = {
             } else {
                 var a = new Array(length);
                 for (var i = 0; i < length; ++i) {
-                    a[i] = String.fromCharCode(HEAPU8[value + 4 + i]);
+                    a[i] = String.fromCharCode(HEAPU8[payload + i]);
                 }
                 str = a.join('');
             }
@@ -748,13 +745,14 @@ var LibraryEmbind = {
             }
 
             // assumes 4-byte alignment
-            var ptr = _malloc(4 + length + 1);
+            var base = _malloc({{{ POINTER_SIZE }}} + length + 1);
+            var ptr = base + {{{ POINTER_SIZE }}};
 #if CAN_ADDRESS_2GB
             ptr >>>= 0;
 #endif
-            HEAPU32[ptr >> 2] = length;
+            {{{ makeSetValue('base', '0', 'length', SIZE_TYPE) }}};
             if (stdStringIsUTF8 && valueIsOfTypeString) {
-                stringToUTF8(value, ptr + 4, length + 1);
+                stringToUTF8(value, ptr, length + 1);
             } else {
                 if (valueIsOfTypeString) {
                     for (var i = 0; i < length; ++i) {
@@ -763,19 +761,19 @@ var LibraryEmbind = {
                             _free(ptr);
                             throwBindingError('String has UTF-16 code units that do not fit in 8 bits');
                         }
-                        HEAPU8[ptr + 4 + i] = charCode;
+                        HEAPU8[ptr + i] = charCode;
                     }
                 } else {
                     for (var i = 0; i < length; ++i) {
-                        HEAPU8[ptr + 4 + i] = value[i];
+                        HEAPU8[ptr + i] = value[i];
                     }
                 }
             }
 
             if (destructors !== null) {
-                destructors.push(_free, ptr);
+                destructors.push(_free, base);
             }
-            return ptr;
+            return base;
         },
         'argPackAdvance': 8,
         'readValueFromPointer': simpleReadValueFromPointer,
@@ -786,10 +784,8 @@ var LibraryEmbind = {
   _embind_register_std_wstring__sig: 'vppp',
   _embind_register_std_wstring__deps: [
     '$readLatin1String', '$registerType', '$simpleReadValueFromPointer',
-#if MINIMAL_RUNTIME
     '$UTF16ToString', '$stringToUTF16', '$lengthBytesUTF16',
     '$UTF32ToString', '$stringToUTF32', '$lengthBytesUTF32',
-#endif
     ],
   _embind_register_std_wstring: function(rawType, charSize, name) {
     name = readLatin1String(name);
@@ -1658,9 +1654,19 @@ var LibraryEmbind = {
 
   $RegisteredPointer_fromWireType__deps: [
     '$downcastPointer', '$registeredPointers',
-    '$getInheritedInstance', '$makeClassHandle'],
+    '$getInheritedInstance', '$makeClassHandle',
+#if MEMORY64
+    '$bigintToI53Checked'
+#endif
+  ],
   $RegisteredPointer_fromWireType: function(ptr) {
     // ptr is a raw pointer (or a raw smartpointer)
+#if MEMORY64
+    ptr = bigintToI53Checked(ptr);
+#if ASSERTIONS
+    assert(ptr != NaN);
+#endif
+#endif
 
     // rawPointer is a maybe-null raw pointer
     var rawPointer = this.getPointee(ptr);
