@@ -2425,20 +2425,59 @@ int f() {
     self.assertEqual(no_size, line_size)
     self.assertEqual(line_size, full_size)
 
+  # Verify the existence (or lack thereof) of DWARF info in the given wasm file
+  def verify_dwarf(self, wasm_file, verify_func):
+    self.assertExists(wasm_file)
+    info = self.run_process([LLVM_DWARFDUMP, '--all', wasm_file], stdout=PIPE).stdout
+    verify_func('DW_TAG_subprogram', info) # Subprogram entry in .debug_info
+    verify_func('debug_line[0x', info) # Line table
+
+  def verify_dwarf_exists(self, wasm_file):
+    self.verify_dwarf(wasm_file, self.assertIn)
+
+  def verify_dwarf_does_not_exist(self, wasm_file):
+    self.verify_dwarf(wasm_file, self.assertNotIn)
+
+  # Verify if the given file name contains a source map
+  def verify_source_map_exists(self, map_file):
+    self.assertExists(map_file)
+    data = json.load(open(map_file))
+    # Simply check the existence of required sections
+    self.assertIn('version', data)
+    self.assertIn('sources', data)
+    self.assertIn('mappings', data)
+
   def test_dwarf(self):
     def compile_with_dwarf(args, output):
       # Test that -g enables dwarf info in object files and linked wasm
       self.run_process([EMXX, test_file('hello_world.cpp'), '-o', output, '-g'] + args)
-
-    def verify(output):
-      info = self.run_process([LLVM_DWARFDUMP, '--all', output], stdout=PIPE).stdout
-      self.assertIn('DW_TAG_subprogram', info) # Ensure there's a subprogram entry in .debug_info
-      self.assertIn('debug_line[0x', info) # Ensure there's a line table
-
     compile_with_dwarf(['-c'], 'a.o')
-    verify('a.o')
+    self.verify_dwarf_exists('a.o')
     compile_with_dwarf([], 'a.js')
-    verify('a.wasm')
+    self.verify_dwarf_exists('a.wasm')
+
+  def test_dwarf_with_source_map(self):
+    source_file = 'hello_world.cpp'
+    js_file = 'a.out.js'
+    wasm_file = 'a.out.wasm'
+    map_file = 'a.out.wasm.map'
+
+    # Generate only DWARF
+    self.emcc(test_file(source_file), ['-g'], js_file)
+    self.verify_dwarf_exists(wasm_file)
+    self.assertFalse(os.path.isfile(map_file))
+    try_delete([wasm_file, map_file, js_file])
+
+    # Generate only source map
+    self.emcc(test_file(source_file), ['-gsource-map'], js_file)
+    self.verify_dwarf_does_not_exist(wasm_file)
+    self.verify_source_map_exists(map_file)
+    try_delete([wasm_file, map_file, js_file])
+
+    # Generate DWARF with source map
+    self.emcc(test_file(source_file), ['-g', '-gsource-map'], js_file)
+    self.verify_dwarf_exists(wasm_file)
+    self.verify_source_map_exists(map_file)
 
   @unittest.skipIf(not scons_path, 'scons not found in PATH')
   @with_env_modify({'EMSCRIPTEN_ROOT': path_from_root()})
@@ -3403,6 +3442,38 @@ EMSCRIPTEN_KEEPALIVE int myreadSeekEnd() {
     shutil.copyfile(test_file('hello_world.c'), 'a.c')
     self.run_process([EMCC, 'a.c', '-MJ', 'hello.json', '-c', '-o', 'test.o'])
     self.assertContained('"file": "a.c", "output": "test.o"', read_file('hello.json'))
+
+  def test_duplicate_js_functions(self):
+    create_file('duplicated_func.c', '''
+      #include <stdio.h>
+      extern int duplicatedFunc();
+
+      int main() {
+        int res = duplicatedFunc();
+        printf("*%d*\\n", res);
+        return 0;
+      }
+    ''')
+    create_file('duplicated_func_1.js', '''
+      mergeInto(LibraryManager.library, {
+        duplicatedFunc : function() {
+            return 1;
+          }
+        }, { noOverride: true }
+      );
+    ''')
+    create_file('duplicated_func_2.js', '''
+      mergeInto(LibraryManager.library, {
+        duplicatedFunc : function() {
+            return 2;
+          }
+        }, { noOverride: true }
+      );
+    ''')
+
+    self.emcc_args += ['--js-library', 'duplicated_func_1.js', '--js-library', 'duplicated_func_2.js']
+    err = self.expect_fail([EMCC, 'duplicated_func.c'] + self.get_emcc_args())
+    self.assertContained('error: Symbol re-definition in JavaScript library: duplicatedFunc. Do not use noOverride if this is intended', err)
 
   def test_js_lib_quoted_key(self):
     create_file('lib.js', r'''
@@ -8814,10 +8885,9 @@ test_module().then((test_module_instance) => {
     self.assertContained('hello, world!', ret)
 
   @no_windows('node system() does not seem to work, see https://github.com/emscripten-core/emscripten/pull/10547')
-  def test_node_js_system(self):
-    self.run_process([EMCC, '-DENV_NODE', test_file('system.c'), '-o', 'a.js', '-O3'])
-    ret = self.run_process(config.NODE_JS + ['a.js'], stdout=PIPE).stdout
-    self.assertContained('OK', ret)
+  @requires_node
+  def test_system_node_js(self):
+    self.do_runf(test_file('test_system.c'), 'Hello from echo', emcc_args=['-DENV_NODE'])
 
   def test_node_eval(self):
     self.run_process([EMCC, '-sENVIRONMENT=node', test_file('hello_world.c'), '-o', 'a.js', '-O3'])
