@@ -3978,45 +3978,17 @@ Waste<3> *getMore() {
       self.assertContainedIf('globalCtors', src, has_global)
 
   def test_implicit_func(self):
-    create_file('src.c', r'''
-#include <stdio.h>
-int main()
-{
-    printf("hello %d\n", strnlen("waka", 2)); // Implicit declaration, no header, for strnlen
-    int (*my_strnlen)(char*, ...) = strnlen;
-    printf("hello %d\n", my_strnlen("shaka", 2));
-    return 0;
-}
-''')
+    # EMCC makes -Wimplict-function-declaration an error by default in all modes. Upstream LLVM
+    # emits a warning in gnu89 mode, but otherwise emcc's behavior is identical to upstream.
+    IMPLICIT_C89 = "error: implicit declaration of function 'strnlen'"
+    # Also check for -Wincompatible-function-pointer-types (it became an error in LLVM 16)
+    INCOMPATIBLE = ': incompatible function pointer types'
 
-    IMPLICIT_WARNING = "warning: implicit declaration of function 'strnlen' is invalid in C99"
-    IMPLICIT_WARNING_NEW = "warning: call to undeclared function 'strnlen'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]"
-
-    IMPLICIT_ERROR = "error: implicit declaration of function 'strnlen' is invalid in C99"
-    IMPLICIT_ERROR_NEW = "error: call to undeclared function 'strnlen'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]"
-
-    INCOMPATIBLE_WARNINGS = ('warning: incompatible pointer types', 'warning: incompatible function pointer types')
-    IMPLICIT_WARNINGS = (IMPLICIT_WARNING, IMPLICIT_WARNING_NEW)
-    IMPLICIT_ERRORS = (IMPLICIT_ERROR, IMPLICIT_ERROR_NEW)
-
-    for opts, expected, compile_expected in [
-      ([], None, [IMPLICIT_ERRORS]),
-      # turn error into warning
-      (['-Wno-error=implicit-function-declaration'], ['hello '], [IMPLICIT_WARNINGS]),
-      # turn error into nothing at all (runtime output is incorrect)
-      (['-Wno-implicit-function-declaration'], ['hello '], []),
-    ]:
-      print(opts, expected)
-      try_delete('a.out.js')
-      stderr = self.run_process([EMCC, 'src.c'] + opts, stderr=PIPE, check=False).stderr
-      for ce in compile_expected + [INCOMPATIBLE_WARNINGS]:
-        self.assertContained(ce, stderr)
-      if expected is None:
-        self.assertNotExists('a.out.js')
-      else:
-        output = self.run_js('a.out.js')
-        for e in expected:
-          self.assertContained(e, output)
+    try_delete('implicit_func.o')
+    stderr = self.expect_fail(
+        [EMCC, path_from_root('test/other/test_implicit_func.c'), '-c', '-o', 'implicit_func.o', '-std=gnu89'])
+    self.assertContained(IMPLICIT_C89, stderr)
+    self.assertContained(INCOMPATIBLE, stderr)
 
   @requires_native_clang
   def test_bad_triple(self):
@@ -6134,6 +6106,48 @@ int main() {
     self.run_process([EMCC, 'main.c', '-sMAIN_MODULE=2'])
     out = self.run_js('a.out.js')
     self.assertContained('invalid mode for dlopen(): Either RTLD_LAZY or RTLD_NOW is required', out)
+
+  def test_dlopen_contructors(self):
+    create_file('side.c', r'''
+      #include <stdio.h>
+      #include <assert.h>
+
+      static int foo;
+      static int* ptr = &foo;
+
+      void check_relocations(void) {
+        assert(ptr == &foo);
+      }
+
+      __attribute__((constructor)) void ctor(void) {
+        printf("foo address: %p\n", ptr);
+        // Check that relocations have already been applied by the time
+        // contructor functions run.
+        check_relocations();
+        printf("done ctor\n");
+      }
+      ''')
+    create_file('main.c', r'''
+      #include <assert.h>
+      #include <stdio.h>
+      #include <dlfcn.h>
+
+      int main() {
+        void (*check) (void);
+        void* h = dlopen("libside.wasm", RTLD_NOW|RTLD_GLOBAL);
+        assert(h);
+        check = dlsym(h, "check_relocations");
+        assert(check);
+        check();
+        printf("done\n");
+        return 0;
+      }''')
+    self.run_process([EMCC, '-g', '-o', 'libside.wasm', 'side.c', '-sSIDE_MODULE'])
+    self.run_process([EMCC, '-g', '-sMAIN_MODULE=2', 'main.c', 'libside.wasm', '-sNO_AUTOLOAD_DYLIBS'])
+    self.assertContained('done', self.run_js('a.out.js'))
+    # Repeat the test without NO_AUTOLOAD_DYLIBS
+    self.run_process([EMCC, '-g', '-sMAIN_MODULE=2', 'main.c', 'libside.wasm'])
+    self.assertContained('done', self.run_js('a.out.js'))
 
   def test_dlopen_rtld_global(self):
     # This test checks RTLD_GLOBAL where a module is loaded
