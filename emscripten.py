@@ -442,8 +442,7 @@ def get_metadata(infile, outfile, modify_wasm, args):
     building.run_binaryen_command('wasm-emscripten-finalize',
                                   infile=infile,
                                   outfile=outfile,
-                                  args=args,
-                                  stdout=subprocess.PIPE)
+                                  args=args)
     # When we do this we can generate new imports, so
     # re-read parts of the metadata post-finalize
     extract_metadata.update_metadata(outfile, metadata)
@@ -489,15 +488,19 @@ def finalize_wasm(infile, outfile, memfile):
       args.append('--dyncalls-i64')
       # we need to add some dyncalls to the wasm
       modify_wasm = True
-  if settings.LEGALIZE_JS_FFI:
-    # When we dynamically link our JS loader adds functions from wasm modules to
-    # the table. It must add the original versions of them, not legalized ones,
-    # so that indirect calls have the right type, so export those.
-    if settings.RELOCATABLE:
-      args.append('--pass-arg=legalize-js-interface-export-originals')
-    modify_wasm = True
+  if settings.AUTODEBUG:
+    # In AUTODEBUG mode we want to delay all legalization until later.  This is hack
+    # to force wasm-emscripten-finalize not to do any legalization at all.
+    args.append('--bigint')
   else:
-    args.append('--no-legalize-javascript-ffi')
+    if settings.LEGALIZE_JS_FFI:
+      # When we dynamically link our JS loader adds functions from wasm modules to
+      # the table. It must add the original versions of them, not legalized ones,
+      # so that indirect calls have the right type, so export those.
+      args += building.js_legalization_pass_flags()
+      modify_wasm = True
+    else:
+      args.append('--no-legalize-javascript-ffi')
   if memfile:
     args.append(f'--separate-data-segments={memfile}')
     args.append(f'--global-base={settings.GLOBAL_BASE}')
@@ -609,11 +612,6 @@ def add_standard_wasm_imports(send_items_map):
     if settings.SUPPORT_LONGJMP == 'wasm':
       send_items_map['__c_longjmp'] = '___c_longjmp'
 
-  if settings.MAYBE_WASM2JS or settings.AUTODEBUG or settings.LINKABLE:
-    # legalization of i64 support code may require these in some modes
-    extra_sent_items.append('setTempRet0')
-    extra_sent_items.append('getTempRet0')
-
   if settings.AUTODEBUG:
     extra_sent_items += [
       'log_execution',
@@ -681,7 +679,9 @@ def make_export_wrappers(exports, delay_assignment):
     # The emscripten stack functions are called very early (by writeStackCookie) before
     # the runtime is initialized so we can't create these wrappers that check for
     # runtimeInitialized.
-    if settings.ASSERTIONS and not name.startswith('emscripten_stack_'):
+    # Likewise `__trap` can occur before the runtime is initialized since it is used in
+    # abort.
+    if settings.ASSERTIONS and not name.startswith('emscripten_stack_') and name != '__trap':
       # With assertions enabled we create a wrapper that are calls get routed through, for
       # the lifetime of the program.
       if delay_assignment:
@@ -812,6 +812,7 @@ def create_wasm64_wrappers(metadata):
     'emscripten_stack_set_limits': '_pp',
     '__set_stack_limits': '_pp',
     '__cxa_can_catch': '_ppp',
+    '_wasmfs_write_file': '_ppp',
   }
 
   wasm64_wrappers = '''

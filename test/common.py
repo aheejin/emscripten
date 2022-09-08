@@ -31,9 +31,9 @@ import clang_native
 import jsrun
 from tools.shared import TEMP_DIR, EMCC, EMXX, DEBUG, EMCONFIGURE, EMCMAKE
 from tools.shared import EMSCRIPTEN_TEMP_DIR
-from tools.shared import get_canonical_temp_dir, try_delete, path_from_root
+from tools.shared import get_canonical_temp_dir, path_from_root
 from tools.utils import MACOS, WINDOWS, read_file, read_binary, write_file, write_binary, exit_with_error
-from tools import shared, line_endings, building, config
+from tools import shared, line_endings, building, config, utils
 
 logger = logging.getLogger('common')
 
@@ -82,13 +82,6 @@ EMRUN = shared.bat_suffix(shared.path_from_root('emrun'))
 WASM_DIS = Path(building.get_binaryen_bin(), 'wasm-dis')
 LLVM_OBJDUMP = os.path.expanduser(shared.build_llvm_tool_path(shared.exe_suffix('llvm-objdump')))
 PYTHON = sys.executable
-
-
-def delete_contents(pathname):
-  for entry in os.listdir(pathname):
-    try_delete(os.path.join(pathname, entry))
-    # TODO(sbc): Should we make try_delete have a stronger guarantee?
-    assert not os.path.exists(os.path.join(pathname, entry))
 
 
 def test_file(*path_components):
@@ -308,6 +301,44 @@ def make_executable(name):
   Path(name).chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
 
 
+def make_dir_writeable(dirname):
+  # Ensure all files are readable and writable by the current user.
+  permission_bits = stat.S_IWRITE | stat.S_IREAD
+
+  def is_writable(path):
+    return (os.stat(path).st_mode & permission_bits) != permission_bits
+
+  def make_writable(path):
+    new_mode = os.stat(path).st_mode | permission_bits
+    os.chmod(path, new_mode)
+
+  # Some tests make files and subdirectories read-only, so rmtree/unlink will not delete
+  # them. Force-make everything writable in the subdirectory to make it
+  # removable and re-attempt.
+  if not is_writable(dirname):
+    make_writable(dirname)
+
+  for directory, subdirs, files in os.walk(dirname):
+    for item in files + subdirs:
+      i = os.path.join(directory, item)
+      if not os.path.islink(i):
+        make_writable(i)
+
+
+def force_delete_dir(dirname):
+  make_dir_writeable(dirname)
+  if WINDOWS:
+    # We have seen issues where windows was unable to cleanup the test directory
+    # See: https://github.com/emscripten-core/emscripten/pull/17512
+    # TODO: Remove this try/catch.
+    try:
+      utils.delete_dir(dirname)
+    except IOError as e:
+      logger.warning(f'failed to remove directory: {dirname} ({e})')
+  else:
+    utils.delete_dir(dirname)
+
+
 def parameterized(parameters):
   """
   Mark a test as parameterized.
@@ -406,10 +437,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       self.skipTest('no dynamic linking with memory growth (without wasm)')
     if not self.is_wasm():
       self.skipTest('no dynamic linking support in wasm2js yet')
-    if '-fsanitize=address' in self.emcc_args:
-      self.skipTest('no dynamic linking support in ASan yet')
-    if '-fsanitize=leak' in self.emcc_args:
-      self.skipTest('no dynamic linking support in LSan yet')
     if '-fsanitize=undefined' in self.emcc_args:
       self.skipTest('no dynamic linking support in UBSan yet')
 
@@ -509,7 +536,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
           # expect this.  --no-clean can be used to keep the old contents for the new test
           # run. This can be useful when iterating on a given test with extra files you want to keep
           # around in the output directory.
-          delete_contents(self.working_dir)
+          utils.delete_contents(self.working_dir)
       else:
         print('Creating new test output directory')
         ensure_dir(self.working_dir)
@@ -527,7 +554,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     if not EMTEST_SAVE_DIR:
       # rmtree() fails on Windows if the current working directory is inside the tree.
       os.chdir(os.path.dirname(self.get_dir()))
-      try_delete(self.get_dir())
+      force_delete_dir(self.get_dir())
 
       if EMTEST_DETECT_TEMPFILE_LEAKS and not DEBUG:
         temp_files_after_run = []
@@ -654,6 +681,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       compiler.append('-sNO_DEFAULT_TO_CXX')
 
     if force_c:
+      assert shared.suffix(filename) != '.c', 'force_c is not needed for source files ending in .c'
       compiler.append('-xc')
 
     if output_basename:
@@ -731,6 +759,37 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     non_data_lines = [line for line in wat_lines if '(data ' not in line]
     return len(non_data_lines)
 
+  def clean_js_output(self, output):
+    """Cleaup the JS output prior to running verification steps on it.
+
+    Due to minification, when we get a crash report from JS it can sometimes
+    contains the entire program in the output (since the entire program is
+    on a single line).  In this case we can sometimes get false positives
+    when checking for strings in the output.  To avoid these false positives
+    and the make the output easier to read in such cases we attempt to remove
+    such lines from the JS output.
+    """
+    lines = output.splitlines()
+    long_lines = []
+
+    def cleanup(line):
+      if len(line) > 2048:
+        # Sanity check that this is really the emscripten program/module on
+        # a single line.
+        assert line.startswith('var Module=typeof Module!="undefined"')
+        long_lines.append(line)
+        line = '<REPLACED ENTIRE PROGRAM ON SINGLE LINE>'
+      return line
+
+    lines = [cleanup(l) for l in lines]
+    if not long_lines:
+      # No long lines found just return the unmodified output
+      return output
+
+    # Sanity check that we only a single long line.
+    assert len(long_lines) == 1
+    return '\n'.join(lines)
+
   def run_js(self, filename, engine=None, args=None,
              output_nicerizer=None,
              assert_returncode=0,
@@ -775,18 +834,20 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       ret += read_file(stderr_file)
     if output_nicerizer:
       ret = output_nicerizer(ret)
+    if assert_returncode != 0:
+      ret = self.clean_js_output(ret)
     if error or timeout_error or EMTEST_VERBOSE:
-      ret = limit_size(ret)
       print('-- begin program output --')
-      print(read_file(stdout_file), end='')
+      print(limit_size(read_file(stdout_file)), end='')
       print('-- end program output --')
       if not interleaved_output:
         print('-- begin program stderr --')
-        print(read_file(stderr_file), end='')
+        print(limit_size(read_file(stderr_file)), end='')
         print('-- end program stderr --')
     if timeout_error:
       raise timeout_error
     if error:
+      ret = limit_size(ret)
       if assert_returncode == NON_ZERO:
         self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
       else:
@@ -951,9 +1012,9 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
                          cache_name, env_init=env_init, native=native)
 
   def clear(self):
-    delete_contents(self.get_dir())
+    utils.delete_contents(self.get_dir())
     if EMSCRIPTEN_TEMP_DIR:
-      delete_contents(EMSCRIPTEN_TEMP_DIR)
+      utils.delete_contents(EMSCRIPTEN_TEMP_DIR)
 
   def run_process(self, cmd, check=True, **args):
     # Wrapper around shared.run_process.  This is desirable so that the tests
@@ -1723,7 +1784,7 @@ class BrowserCore(RunnerCore):
     outfile = 'test.html'
     args += [filename, '-o', outfile]
     # print('all args:', args)
-    try_delete(outfile)
+    utils.delete_file(outfile)
     self.compile_btest(args, reporting=reporting)
     self.assertExists(outfile)
     if post_build:

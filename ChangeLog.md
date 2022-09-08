@@ -18,8 +18,48 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.20 (in development)
-------
+3.1.21 (in development)
+-----------------------
+- The `LEGACY_RUNTIME` setting is no longer enabled by default.  If you use any
+  of these legacy runtime functions (except in library code with explict
+  dependencies) then you would need to set `LEGACY_RUNTIME` on the command line
+  or add the ones you need to `DEFAULT_LIBRARY_FUNCS_TO_INCLUDE`:
+   - addFunction
+   - removeFunction
+   - allocate
+   - AsciiToString
+   - stringToAscii
+   - UTF16ToString
+   - stringToUTF16
+   - lengthBytesUTF16
+   - UTF32ToString
+   - stringToUTF32
+   - lengthBytesUTF32
+   - allocateUTF8
+   - allocateUTF8OnStack
+   - writeStringToMemory
+   - writeArrayToMemory
+   - writeAsciiToMemory
+   - intArrayFromString
+   - intArrayToString
+   - warnOnce
+   - ccall
+   - cwrap
+  Although this is technically a breaking change for those who use these
+  functions, there are assertion in debug builds that catch such usages and
+  direct towards how to fix the issue.
+
+3.1.20 - 08/24/2022
+-------------------
+- The `getTempRet0`/`setTempRet0` helper functions are now implemented directly
+  in WebAssembly, rather than supplied by the JS host.  This simplifies the
+  wasm/JS interface.  These function are no longer exported in all cases.  If
+  your code directly calls these functions from JS, you can add them to
+  `-sEXPORTED_RUNTIME_METHODS`.
+- Several linux-specific headers were removed from the emscripten sysroot. None
+  of the functionality in these headers was ever supported by emscripten. For
+  example `sys/soundcard.h` and `sys/ptrace.h`. (#17704)
+
 3.1.19 - 08/17/2022
 -------------------
 - Old method of metadata extraction via wasm-emscripten-finalize removed

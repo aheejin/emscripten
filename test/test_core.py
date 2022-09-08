@@ -19,9 +19,9 @@ from functools import wraps
 if __name__ == '__main__':
   raise Exception('do not run this file directly; do something like: test/runner')
 
-from tools.shared import try_delete, PIPE
+from tools.shared import PIPE
 from tools.shared import EMCC, EMAR
-from tools.utils import WINDOWS, MACOS, write_file
+from tools.utils import WINDOWS, MACOS, write_file, delete_file
 from tools import shared, building, config, webassembly
 import common
 from common import RunnerCore, path_from_root, requires_native_clang, test_file, create_file
@@ -96,8 +96,6 @@ def with_both_eh_sjlj(f):
   assert callable(f)
 
   def metafunc(self, is_native):
-    if self.get_setting('MEMORY64'):
-      self.skipTest('MEMORY64 does not yet support SJLJ')
     if is_native:
       # Wasm EH is currently supported only in wasm backend and V8
       if not self.is_wasm():
@@ -111,6 +109,8 @@ def with_both_eh_sjlj(f):
       self.v8_args.append('--experimental-wasm-eh')
       f(self)
     else:
+      if self.get_setting('MEMORY64'):
+        self.skipTest('MEMORY64 does not yet support emscripten EH/SjLj')
       self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
       self.set_setting('SUPPORT_LONGJMP', 'emscripten')
       # DISABLE_EXCEPTION_CATCHING=0 exports __cxa_can_catch and
@@ -174,8 +174,6 @@ def also_with_wasmfs(func):
     print('wasmfs')
     if self.get_setting('STANDALONE_WASM'):
       self.skipTest("test currently cannot run both with WASMFS and STANDALONE_WASM")
-    if self.get_setting('MEMORY64'):
-      self.skipTest("test currently cannot run both with WASMFS and WASMFS")
     self.set_setting('WASMFS')
     self.emcc_args = self.emcc_args.copy() + ['-DWASMFS']
     func(self)
@@ -189,8 +187,6 @@ def also_with_wasmfs_js(func):
     print('wasmfs')
     if self.get_setting('STANDALONE_WASM'):
       self.skipTest("test currently cannot run both with WASMFS and STANDALONE_WASM")
-    if self.get_setting('MEMORY64'):
-      self.skipTest("test currently cannot run both with WASMFS and WASMFS")
     self.set_setting('WASMFS')
     self.set_setting('FORCE_FILESYSTEM')
     self.emcc_args = self.emcc_args.copy() + ['-DWASMFS']
@@ -412,8 +408,7 @@ class TestCoreBase(RunnerCore):
   def verify_in_strict_mode(self, filename):
     js = read_file(filename)
     filename += '.strict.js'
-    with open(filename, 'w') as outfile:
-      outfile.write('"use strict";\n' + js)
+    write_file(filename, '"use strict";\n' + js)
     self.run_js(filename)
 
   def do_core_test(self, testname, **kwargs):
@@ -608,10 +603,8 @@ class TestCoreBase(RunnerCore):
   def test_sha1(self):
     self.do_runf(test_file('sha1.c'), 'SHA1=15dd99a1991e0b3826fede3deffc1feba42278e6')
 
-  @no_wasm64('tests 32-bit specific sizes')
-  def test_wasm32_unknown_emscripten(self):
-    # No other configuration is supported, so always run this.
-    self.do_runf(test_file('wasm32-unknown-emscripten.c'), '')
+  def test_core_types(self):
+    self.do_runf(test_file('core/test_core_types.c'))
 
   def test_cube2md5(self):
     self.emcc_args += ['--embed-file', 'cube2md5.txt']
@@ -1016,49 +1009,50 @@ base align: 0, 0, 0, 0'''])
 
   @no_asan('ASan does not support custom memory allocators')
   @no_lsan('LSan does not support custom memory allocators')
-  @no_wasm64('emmalloc does not yet support MEMORY64')
   @parameterized({
     'normal': [],
     'memvalidate': ['-DEMMALLOC_MEMVALIDATE'],
     'memvalidate_verbose': ['-DEMMALLOC_MEMVALIDATE', '-DEMMALLOC_VERBOSE', '-DRANDOM_ITERS=130'],
   })
   def test_emmalloc(self, *args):
+    if '-DEMMALLOC_VERBOSE' in args and self.is_wasm64():
+      self.skipTest('EMMALLOC_VERBOSE is not compatible with wasm64')
     # in newer clang+llvm, the internal calls to malloc in emmalloc may be optimized under
     # the assumption that they are external, so like in system_libs.py where we build
     # malloc, we need to disable builtin here too
     self.set_setting('MALLOC', 'none')
-    self.emcc_args += ['-fno-builtin'] + list(args)
-
-    self.do_run(read_file(path_from_root('system/lib/emmalloc.c')) +
-                read_file(path_from_root('system/lib/sbrk.c')) +
-                read_file(test_file('core/test_emmalloc.c')),
-                read_file(test_file('core/test_emmalloc.out')), force_c=True)
+    self.emcc_args += [
+      '-fno-builtin',
+      path_from_root('system/lib/sbrk.c'),
+      path_from_root('system/lib/emmalloc.c')
+    ]
+    self.emcc_args += args
+    self.do_run_in_out_file_test(test_file('core/test_emmalloc.c'))
 
   @no_asan('ASan does not support custom memory allocators')
   @no_lsan('LSan does not support custom memory allocators')
-  @no_wasm64('emmalloc does not yet support MEMORY64')
   def test_emmalloc_usable_size(self, *args):
     self.set_setting('MALLOC', 'emmalloc')
-    self.emcc_args += list(args)
-
-    self.do_core_test('test_malloc_usable_size.c')
+    self.do_core_test('test_malloc_usable_size.c', regex=True)
 
   @no_optimize('output is sensitive to optimization flags, so only test unoptimized builds')
   @no_asan('ASan does not support custom memory allocators')
   @no_lsan('LSan does not support custom memory allocators')
   @no_ubsan('UBSan changes memory consumption')
-  @no_wasm64('emmalloc does not yet support MEMORY64')
   def test_emmalloc_memory_statistics(self, *args):
+    if self.is_wasm64():
+      out_suffix = '64'
+    else:
+      out_suffix = ''
 
     self.set_setting('MALLOC', 'emmalloc')
     self.emcc_args += ['-sINITIAL_MEMORY=128MB', '-g'] + list(args)
 
-    self.do_core_test('test_emmalloc_memory_statistics.cpp')
+    self.do_core_test('test_emmalloc_memory_statistics.cpp', out_suffix=out_suffix)
 
   @no_optimize('output is sensitive to optimization flags, so only test unoptimized builds')
   @no_asan('ASan does not support custom memory allocators')
   @no_lsan('LSan does not support custom memory allocators')
-  @no_wasm64('emmalloc does not yet support MEMORY64')
   def test_emmalloc_trim(self, *args):
     self.set_setting('MALLOC', 'emmalloc')
     self.emcc_args += ['-sINITIAL_MEMORY=128MB', '-sALLOW_MEMORY_GROWTH', '-sMAXIMUM_MEMORY=2147418112'] + list(args)
@@ -1066,7 +1060,6 @@ base align: 0, 0, 0, 0'''])
     self.do_core_test('test_emmalloc_trim.cpp')
 
   # Test case against https://github.com/emscripten-core/emscripten/issues/10363
-  @no_wasm64('emmalloc does not yet support MEMORY64')
   def test_emmalloc_memalign_corruption(self, *args):
     self.set_setting('MALLOC', 'emmalloc')
     self.do_core_test('emmalloc_memalign_corruption.cpp')
@@ -2823,7 +2816,6 @@ The current type of b is: 9
 
   @no_asan('ASan does not support custom memory allocators')
   @no_lsan('LSan does not support custom memory allocators')
-  @no_wasm64('emmalloc does not yet support MEMORY64')
   @node_pthreads
   def test_pthread_emmalloc(self):
     self.emcc_args += ['-fno-builtin']
@@ -2936,7 +2928,7 @@ The current type of b is: 9
 
   def test_stack_overflow(self):
     self.set_setting('ASSERTIONS', 2)
-    self.do_runf(test_file('core/stack_overflow.cpp'), 'stack overflow', assert_returncode=NON_ZERO)
+    self.do_runf(test_file('core/stack_overflow.cpp'), 'Aborted(stack overflow', assert_returncode=NON_ZERO)
 
   def test_stackAlloc(self):
     self.do_core_test('stackAlloc.cpp')
@@ -3087,7 +3079,7 @@ The current type of b is: 9
         }
       };
 
-      Foo global;
+      Foo side_global;
       ''')
     self.build_dlfcn_lib('liblib.cpp')
 
@@ -3396,6 +3388,7 @@ Var: 42
     self.do_run(src, '100\n200\n13\n42\n', force_c=True)
 
   @needs_dylink
+  @no_sanitize('contains ODR violation')
   def test_dlfcn_alignment_and_zeroing(self):
     self.set_setting('INITIAL_MEMORY', '16mb')
     create_file('liblib.c', r'''
@@ -3473,6 +3466,19 @@ Var: 42
     self.set_setting('MAIN_MODULE')
     self.set_setting('EXPORT_ALL')
 
+    self.do_core_test('test_dlfcn_self.c')
+
+    # check that we only export relevant things.
+    # disable this in WasmFS as it adds a bunch of additional exports for its
+    # own purposes internally TODO: when we focus on code size, we'll likely
+    # want to look at this
+    if self.get_setting('WASMFS'):
+      return
+
+    # sanitizers add a lot of extra symbols
+    if is_sanitizing(self.emcc_args):
+      return
+
     def get_data_exports(wasm):
       wat = self.get_wasm_text(wasm)
       lines = wat.splitlines()
@@ -3481,19 +3487,12 @@ Var: 42
       data_exports = [d.split()[1].strip('"') for d in data_exports]
       return data_exports
 
-    self.do_core_test('test_dlfcn_self.c')
-
-    # check that we only export relevant things.
-    # disable this in WasmFS as it adds a bunch of additional exports for its
-    # own purposes internally TODO: when we focus on code size, we'll likely
-    # want to look at this
-    if not self.get_setting('WASMFS'):
-      data_exports = get_data_exports('test_dlfcn_self.wasm')
-      # Certain exports are removed by wasm-emscripten-finalize, but this
-      # tool is not run in all configurations, so ignore these exports.
-      data_exports = [d for d in data_exports if d not in ('__start_em_asm', '__stop_em_asm')]
-      data_exports = '\n'.join(sorted(data_exports)) + '\n'
-      self.assertFileContents(test_file('core/test_dlfcn_self.exports'), data_exports)
+    data_exports = get_data_exports('test_dlfcn_self.wasm')
+    # Certain exports are removed by wasm-emscripten-finalize, but this
+    # tool is not run in all configurations, so ignore these exports.
+    data_exports = [d for d in data_exports if d not in ('__start_em_asm', '__stop_em_asm')]
+    data_exports = '\n'.join(sorted(data_exports)) + '\n'
+    self.assertFileContents(test_file('core/test_dlfcn_self.exports'), data_exports)
 
   @needs_dylink
   def test_dlfcn_unique_sig(self):
@@ -3747,7 +3746,7 @@ ok
     self.build_dlfcn_lib('liblib.c')
 
     self.prep_dlfcn_main()
-    self.do_runf(test_file('dlmalloc_proxy.c'), '*294,153*')
+    self.do_runf(test_file('dlmalloc_proxy.c'), '*293,153*')
 
   @needs_dylink
   def test_dlfcn_longjmp(self):
@@ -3805,7 +3804,7 @@ pre 7
 pre 8
 pre 9
 out!
-''', force_c=True)
+''')
 
   # TODO: make this work. need to forward tempRet0 across modules
   # TODO Enable @with_both_eh_sjlj (the test is not working now)
@@ -4024,7 +4023,7 @@ ok
     if header:
       create_file('header.h', header)
 
-    return self.dylink_testf(main, side, expected, force_c, main_module=main_module, **kwargs)
+    return self.dylink_testf(main, side, expected, main_module=main_module, **kwargs)
 
   def dylink_testf(self, main, side=None, expected=None, force_c=False, main_emcc_args=None,
                    main_module=2,
@@ -4064,7 +4063,7 @@ ok
 
     if isinstance(main, list):
       # main is just a library
-      try_delete('main.js')
+      delete_file('main.js')
       self.run_process([EMCC] + main + self.get_emcc_args() + ['-o', 'main.js'])
       self.do_run('main.js', expected, no_build=True, **kwargs)
     else:
@@ -4127,6 +4126,7 @@ ok
     self.do_basic_dylink_test()
 
   @needs_dylink
+  @no_asan('SAFE_HEAP cannot be used with ASan')
   def test_dylink_safe_heap(self):
     self.set_setting('SAFE_HEAP')
     self.do_basic_dylink_test()
@@ -4549,6 +4549,8 @@ res64 - external 64\n''', header='''\
         temp[1] = 'x';
         puts(ret);
         printf("pow_two: %d.\n", (int)pow_two(5.9));
+        free(ret);
+        free(temp);
         return 0;
       }
     ''', side=r'''
@@ -4750,6 +4752,8 @@ res64 - external 64\n''', header='''\
           cout << "KO" << endl;
         }
 
+        delete base;
+        delete derived;
         return 0;
       }
     ''', side=r'''
@@ -5720,7 +5724,7 @@ main( int argv, char ** argc ) {
     self.do_runf(test_file('utf32.cpp'), 'OK.', args=['-fshort-wchar'])
 
   def test_utf16(self):
-    self.set_setting('EXPORTED_RUNTIME_METHODS', ['writeAsciiToMemory'])
+    self.set_setting('EXPORTED_RUNTIME_METHODS', ['writeAsciiToMemory', 'UTF16ToString', 'stringToUTF16'])
     self.do_runf(test_file('core/test_utf16.cpp'), 'OK.')
 
   def test_utf8(self):
@@ -5847,6 +5851,11 @@ main( int argv, char ** argc ) {
 
   @also_with_noderawfs
   def test_fs_writeFile(self):
+    self.do_run_in_out_file_test('fs/test_writeFile.cpp')
+
+  def test_fs_writeFile_wasmfs(self):
+    self.emcc_args += ['-sWASMFS']
+    self.emcc_args += ['-sFORCE_FILESYSTEM']
     self.do_run_in_out_file_test('fs/test_writeFile.cpp')
 
   def test_fs_write(self):
@@ -6255,11 +6264,11 @@ PORT: 3979
 
   @with_env_modify({'LC_CTYPE': 'latin-1', 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0'})
   def test_unicode_js_library(self):
-    create_file('main.cpp', '''
+    create_file('main.c', '''
       #include <stdio.h>
-      extern "C" {
-        extern void printey();
-      }
+
+      extern void printey();
+
       int main() {
         printey();
         return 0;
@@ -6271,13 +6280,13 @@ PORT: 3979
     # are having the desired effect.
     # This means that files open()'d by emscripten without an explicit encoding will
     # cause this test to file, hopefully catching any places where we forget to do this.
-    create_file('expect_fail.py', 'print(len(open("%s").read()))' % test_file('unicode_library.js'))
+    create_file('expect_fail.py', 'print(len(open(r"%s").read()))' % test_file('unicode_library.js'))
     err = self.expect_fail([PYTHON, 'expect_fail.py'], expect_traceback=True)
     self.assertContained('UnicodeDecodeError', err)
 
     create_file('modularize_post.js', '(async function main(){await Module();})()')
-    self.emcc_args += ['-sMODULARIZE', '--js-library', test_file('unicode_library.js'), '--extern-post-js', 'modularize_post.js']
-    self.do_runf('main.cpp', u'Unicode snowman \u2603 says hello! \u00e0\u010c\u0161\u00f1\u00e9\u00e1\u00fa\u00cd\u0173\u00e5\u00ea\u00e2\u0103\u0161\u010d\u1ebf\u1ec7\u00fc\u00e7\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac\u0431\u044a\u043b\u0433\u0430\u0440\u0441\u043a\u0438\u0050\u0443\u0441\u0441\u043a\u0438\u0439\u0421\u0440\u043f\u0441\u043a\u0438\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430\ud55c\uad6d\uc5b4\u4e2d\u6587\u666e\u901a\u8bdd\u0028\u4e2d\u56fd\u5927\u9646\u0029\u666e\u901a\u8bdd\u0028\u9999\u6e2f\u0029\u4e2d\u6587\u0028\u53f0\u7063\u0029\u7cb5\u8a9e\u0028\u9999\u6e2f\u0029\u65e5\u672c\u8a9e\u0939\u093f\u0928\u094d\u0926\u0940\u0e20\u0e32\u0e29\u0e32\u0e44\u0e17\u0e22')
+    self.emcc_args += ['-sMODULARIZE', '--js-library', test_file('unicode_library.js'), '--extern-post-js', 'modularize_post.js', '--post-js', test_file('unicode_postjs.js')]
+    self.do_run_from_file('main.c', test_file('test_unicode_js_library.out'))
 
   def test_funcptr_import_type(self):
     self.emcc_args += ['--js-library', test_file('core/test_funcptr_import_type.js')]
@@ -6395,7 +6404,7 @@ int main(void) {
     if self.emcc_args == []:
       # emcc should build in dlmalloc automatically, and do all the sign correction etc. for it
 
-      try_delete('src.js')
+      delete_file('src.js')
       self.run_process([EMCC, test_file('dlmalloc_test.c'), '-sINITIAL_MEMORY=128MB', '-o', 'src.js'], stdout=PIPE, stderr=self.stderr_redirect)
 
       self.do_run(None, '*1,0*', ['200', '1'], no_build=True)
@@ -6724,11 +6733,7 @@ void* operator new(size_t size) {
       self.set_setting('USE_PTHREADS')
       self.setup_node_pthreads()
     self.emcc_args += ['-sUSE_SQLITE3']
-    self.do_run_from_file(
-      test_file('sqlite/benchmark.c'),
-      test_file('sqlite/benchmark.txt'),
-      force_c=True
-    )
+    self.do_run_in_out_file_test(test_file('sqlite/benchmark.c'))
 
   @needs_make('mingw32-make')
   @is_slow_test
@@ -7614,6 +7619,7 @@ void* operator new(size_t size) {
     # TODO(): Remove once we make webidl output closure-warning free.
     self.ldflags.remove('-sCLOSURE_WARNINGS=error')
     self.set_setting('WASM_ASYNC_COMPILATION', 0)
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$intArrayFromString'])
     if self.maybe_closure():
       # avoid closure minified names competing with our test code in the global name space
       self.set_setting('MODULARIZE')
@@ -8017,6 +8023,7 @@ int main() {
     # check bad ccall use
     # needs to flush stdio streams
     self.set_setting('EXIT_RUNTIME')
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$ccall'])
     self.set_setting('ASYNCIFY')
     self.set_setting('ASSERTIONS')
     self.set_setting('INVOKE_RUN', 0)
@@ -8052,6 +8059,7 @@ Module['onRuntimeInitialized'] = function() {
     self.set_setting('ASYNCIFY')
     self.set_setting('ASSERTIONS')
     self.set_setting('INVOKE_RUN', 0)
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$ccall'])
     create_file('main.c', r'''
 #include <stdio.h>
 #include <emscripten.h>
@@ -8081,7 +8089,7 @@ Module['onRuntimeInitialized'] = function() {
     self.set_setting('INVOKE_RUN', 0)
     self.set_setting('EXIT_RUNTIME', exit_runtime)
     self.set_setting('EXPORTED_FUNCTIONS', ['_stringf', '_floatf'])
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$maybeExit'])
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$maybeExit', '$ccall'])
     create_file('main.c', r'''
 #include <stdio.h>
 #include <emscripten.h>
@@ -8499,15 +8507,16 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_stack_overflow_check(self):
     self.set_setting('TOTAL_STACK', 1048576)
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
-    self.do_runf(test_file('stack_overflow.cpp'), 'stack overflow', assert_returncode=NON_ZERO)
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$allocateUTF8OnStack')
+    self.do_runf(test_file('stack_overflow.cpp'), 'Aborted(stack overflow', assert_returncode=NON_ZERO)
 
     self.emcc_args += ['-DONE_BIG_STRING']
-    self.do_runf(test_file('stack_overflow.cpp'), 'stack overflow', assert_returncode=NON_ZERO)
+    self.do_runf(test_file('stack_overflow.cpp'), 'Aborted(stack overflow', assert_returncode=NON_ZERO)
 
     # ASSERTIONS=2 implies STACK_OVERFLOW_CHECK=2
     self.clear_setting('STACK_OVERFLOW_CHECK')
     self.set_setting('ASSERTIONS', 2)
-    self.do_runf(test_file('stack_overflow.cpp'), 'stack overflow', assert_returncode=NON_ZERO)
+    self.do_runf(test_file('stack_overflow.cpp'), 'Aborted(stack overflow', assert_returncode=NON_ZERO)
 
   @node_pthreads
   def test_binaryen_2170_emscripten_atomic_cas_u8(self):
@@ -8914,6 +8923,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.emcc_args.append('-fsanitize=address')
     self.set_setting('ALLOW_MEMORY_GROWTH')
     self.set_setting('INITIAL_MEMORY', '300mb')
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$allocateUTF8OnStack'])
     self.do_runf(test_file('core/test_asan_js_stack_op.c'),
                  expected_output='Hello, World!')
 
@@ -9462,6 +9472,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_em_async_js(self):
     self.uses_es6 = True
     self.set_setting('ASYNCIFY')
+    self.set_setting('EXPORTED_RUNTIME_METHODS', 'ccall')
     self.maybe_closure()
     self.do_core_test('test_em_async_js.c')
 
@@ -9480,8 +9491,13 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_js_library_i64_params(self):
     # Tests the defineI64Param and receiveI64ParamAsI53 helpers that are
     # used to recieve i64 argument in syscalls.
+    self.set_setting('EXPORTED_RUNTIME_METHODS', ['setTempRet0'])
     self.emcc_args += ['--js-library=' + test_file('core/js_library_i64_params.js')]
     self.do_core_test('js_library_i64_params.c')
+
+  def test_main_reads_args(self):
+    self.run_process([EMCC, '-c', test_file('core/test_main_reads_args_real.c'), '-o', 'real.o'] + self.get_emcc_args(ldflags=False))
+    self.do_core_test('test_main_reads_args.c', emcc_args=['real.o', '-sEXIT_RUNTIME'])
 
 
 # Generate tests for everything
@@ -9550,10 +9566,12 @@ cores = make_run('cores', emcc_args=['-Os'])
 corez = make_run('corez', emcc_args=['-Oz'])
 
 # MEMORY64=1
-wasm64 = make_run('wasm64', emcc_args=['--profiling-funcs'], settings={'MEMORY64': 1},
+wasm64 = make_run('wasm64', emcc_args=['-Wno-experimental', '--profiling-funcs'],
+                  settings={'MEMORY64': 1},
                   require_v8=True, v8_args=['--experimental-wasm-memory64'])
 # MEMORY64=2, or "lowered"
-wasm64l = make_run('wasm64l', emcc_args=['--profiling-funcs'], settings={'MEMORY64': 2},
+wasm64l = make_run('wasm64l', emcc_args=['-Wno-experimental', '--profiling-funcs'],
+                   settings={'MEMORY64': 2},
                    node_args=['--experimental-wasm-bigint'])
 
 lto0 = make_run('lto0', emcc_args=['-flto', '-O0'])

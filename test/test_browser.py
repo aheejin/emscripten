@@ -16,6 +16,7 @@ import time
 import unittest
 import webbrowser
 import zlib
+from functools import wraps
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.request import urlopen
@@ -26,7 +27,7 @@ from common import read_file, requires_v8, also_with_minimal_runtime, EMRUN
 from tools import shared
 from tools import ports
 from tools.shared import EMCC, WINDOWS, FILE_PACKAGER, PIPE
-from tools.shared import try_delete
+from tools.utils import delete_file, delete_dir
 
 
 def test_chunked_synchronous_xhr_server(support_byte_ranges, chunkSize, data, checksum, port):
@@ -112,6 +113,7 @@ def also_with_wasm64(f):
   def metafunc(self, with_wasm64):
     if with_wasm64:
       self.set_setting('MEMORY64', 2)
+      self.emcc_args.append('-Wno-experimental')
       f(self)
     else:
       f(self)
@@ -169,8 +171,9 @@ def requires_threads(f):
 
 
 def also_with_threads(f):
+  @wraps(f)
   def decorated(self, *args, **kwargs):
-    f(self)
+    f(self, *args, **kwargs)
     if not os.environ.get('EMTEST_LACKS_THREAD_SUPPORT'):
       print('(threads)')
       self.emcc_args += ['-pthread']
@@ -245,8 +248,8 @@ class browser(BrowserCore):
       ''')
     # use relative paths when calling emcc, because file:// URIs can only load
     # sourceContent when the maps are relative paths
-    try_delete(html_file)
-    try_delete(html_file + '.map')
+    delete_file(html_file)
+    delete_file(html_file + '.map')
     self.compile_btest(['src.cpp', '-o', 'src.html', '-gsource-map'])
     self.assertExists(html_file)
     self.assertExists('src.wasm.map')
@@ -339,7 +342,7 @@ If manually bisecting:
     self.btest_exit('main.cpp', args=['--preload-file', absolute_src_path])
 
     # Test subdirectory handling with asset packaging.
-    try_delete('assets')
+    delete_dir('assets')
     ensure_dir('assets/sub/asset1/'.replace('\\', '/'))
     ensure_dir('assets/sub/asset1/.git'.replace('\\', '/')) # Test adding directory that shouldn't exist.
     ensure_dir('assets/sub/asset2/'.replace('\\', '/'))
@@ -1339,18 +1342,21 @@ keydown(100);keyup(100); // trigger the end
     shutil.move('test.html', 'third.html')
 
   def test_fs_idbfs_sync(self):
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall')
     for extra in [[], ['-DEXTRA_WORK']]:
       secret = str(time.time())
       self.btest(test_file('fs/test_idbfs_sync.c'), '1', args=['-lidbfs.js', '-DFIRST', '-DSECRET=\"' + secret + '\"', '-sEXPORTED_FUNCTIONS=_main,_test,_success', '-lidbfs.js'])
       self.btest(test_file('fs/test_idbfs_sync.c'), '1', args=['-lidbfs.js', '-DSECRET=\"' + secret + '\"', '-sEXPORTED_FUNCTIONS=_main,_test,_success', '-lidbfs.js'] + extra)
 
   def test_fs_idbfs_sync_force_exit(self):
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall')
     secret = str(time.time())
     self.btest(test_file('fs/test_idbfs_sync.c'), '1', args=['-lidbfs.js', '-DFIRST', '-DSECRET=\"' + secret + '\"', '-sEXPORTED_FUNCTIONS=_main,_test,_success', '-sEXIT_RUNTIME', '-DFORCE_EXIT', '-lidbfs.js'])
     self.btest(test_file('fs/test_idbfs_sync.c'), '1', args=['-lidbfs.js', '-DSECRET=\"' + secret + '\"', '-sEXPORTED_FUNCTIONS=_main,_test,_success', '-sEXIT_RUNTIME', '-DFORCE_EXIT', '-lidbfs.js'])
 
   def test_fs_idbfs_fsync(self):
     # sync from persisted state into memory before main()
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall')
     create_file('pre.js', '''
       Module.preRun = function() {
         addRunDependency('syncfs');
@@ -1392,6 +1398,7 @@ keydown(100);keyup(100); // trigger the end
     self.btest_exit(test_file('fs/test_workerfs_read.c'), args=['-lworkerfs.js', '--pre-js', 'pre.js', '-DSECRET=\"' + secret + '\"', '-DSECRET2=\"' + secret2 + '\"', '--proxy-to-worker', '-lworkerfs.js'])
 
   def test_fs_workerfs_package(self):
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall')
     create_file('file1.txt', 'first')
     ensure_dir('sub')
     create_file('sub/file2.txt', 'second')
@@ -1409,6 +1416,7 @@ keydown(100);keyup(100); // trigger the end
 
     # compress in emcc, -sLZ4 tells it to tell the file packager
     print('emcc-normal')
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall')
     self.btest_exit(Path('fs/test_lz4fs.cpp'), 2, args=['-sLZ4=1', '--preload-file', 'file1.txt', '--preload-file', 'subdir/file2.txt', '--preload-file', 'file3.txt'])
     assert os.path.getsize('file1.txt') + os.path.getsize(Path('subdir/file2.txt')) + os.path.getsize('file3.txt') == 3 * 1024 * 128 * 10 + 1
     assert os.path.getsize('test.data') < (3 * 1024 * 128 * 10) / 2  # over half is gone
@@ -2223,7 +2231,6 @@ void *getBindBuffer() {
     shutil.copyfile(test_file('screenshot.dds'), 'screenshot.dds')
     self.btest('s3tc.c', reference='s3tc.png', args=['--preload-file', 'screenshot.dds', '-sLEGACY_GL_EMULATION', '-sGL_FFP_ONLY', '-lGL', '-lSDL'])
 
-  @no_chrome('see #7117')
   @requires_graphics_hardware
   def test_aniso(self):
     shutil.copyfile(test_file('water.dds'), 'water.dds')
@@ -2373,6 +2380,7 @@ void *getBindBuffer() {
     test('nothing.nowhere', 'got_error')
 
   def test_runtime_misuse(self):
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall,$cwrap')
     post_prep = '''
       var expected_ok = false;
       function doCcall(n) {
@@ -2465,7 +2473,7 @@ void *getBindBuffer() {
         self.btest(filename, expected='606', args=['--post-js', 'post.js'] + extra_args + mode, reporting=Reporting.NONE)
 
   def test_cwrap_early(self):
-    self.btest(Path('browser/cwrap_early.cpp'), args=['-O2', '-sASSERTIONS', '--pre-js', test_file('browser/cwrap_early.js'), '-sEXPORTED_RUNTIME_METHODS=[cwrap]'], expected='0')
+    self.btest(Path('browser/cwrap_early.cpp'), args=['-O2', '-sASSERTIONS', '--pre-js', test_file('browser/cwrap_early.js'), '-sEXPORTED_RUNTIME_METHODS=cwrap'], expected='0')
 
   def test_worker_api(self):
     self.compile_btest([test_file('worker_api_worker.cpp'), '-o', 'worker.js', '-sBUILD_AS_WORKER', '-sEXPORTED_FUNCTIONS=_one'])
@@ -2560,8 +2568,8 @@ void *getBindBuffer() {
     print(out)
 
     # Tidy up files that might have been created by this test.
-    try_delete(test_file('uuid/test.js'))
-    try_delete(test_file('uuid/test.js.map'))
+    delete_file(test_file('uuid/test.js'))
+    delete_file(test_file('uuid/test.js.map'))
 
     # Now run test in browser
     self.btest_exit(test_file('uuid/test.c'), args=['-luuid'])
@@ -4040,7 +4048,7 @@ Module["preRun"].push(function () {
     # Test that it is possible to define "Module.locateFile(foo)" function to locate where worker.js will be loaded from.
     create_file('shell2.html', read_file(path_from_root('src/shell.html')).replace('var Module = {', 'var Module = { locateFile: function(filename) { if (filename == "test.worker.js") return "cdn/test.worker.js"; else return filename; }, '))
     self.compile_btest(['main.cpp', '--shell-file', 'shell2.html', '-sWASM=0', '-sIN_TEST_HARNESS', '-sUSE_PTHREADS', '-sPTHREAD_POOL_SIZE', '-o', 'test2.html'], reporting=Reporting.JS_ONLY)
-    try_delete('test.worker.js')
+    delete_file('test.worker.js')
     self.run_browser('test2.html', '/report_result?exit:0')
 
   # Test that if the main thread is performing a futex wait while a pthread needs it to do a proxied operation (before that pthread would wake up the main thread), that it's not a deadlock.
@@ -4328,16 +4336,32 @@ Module["preRun"].push(function () {
   def test_utf16_textdecoder(self):
     self.btest_exit('benchmark_utf16.cpp', 0, args=['--embed-file', test_file('utf16_corpus.txt') + '@/utf16_corpus.txt', '-sEXPORTED_RUNTIME_METHODS=[UTF16ToString,stringToUTF16,lengthBytesUTF16]'])
 
+  @parameterized({
+    '': ([],),
+    'closure': (['--closure=1'],),
+  })
   @also_with_threads
-  def test_TextDecoder(self):
+  def test_TextDecoder(self, args):
+    self.emcc_args += args
+
     self.btest('browser_test_hello_world.c', '0', args=['-sTEXTDECODER=0'])
     just_fallback = os.path.getsize('test.js')
+    print('just_fallback:\t%s' % just_fallback)
+
     self.btest('browser_test_hello_world.c', '0')
     td_with_fallback = os.path.getsize('test.js')
+    print('td_with_fallback:\t%s' % td_with_fallback)
+
     self.btest('browser_test_hello_world.c', '0', args=['-sTEXTDECODER=2'])
     td_without_fallback = os.path.getsize('test.js')
-    self.assertGreater(td_without_fallback, just_fallback)
-    self.assertLess(just_fallback, td_with_fallback)
+    print('td_without_fallback:\t%s' % td_without_fallback)
+
+    # td_with_fallback should always be largest of all three in terms of code side
+    self.assertGreater(td_with_fallback, td_without_fallback)
+    self.assertGreater(td_with_fallback, just_fallback)
+
+    # the fallback is also expected to be larger in code size than using td
+    self.assertGreater(just_fallback, td_without_fallback)
 
   def test_small_js_flags(self):
     self.btest('browser_test_hello_world.c', '0', args=['-O3', '--closure=1', '-sINCOMING_MODULE_JS_API=[]', '-sENVIRONMENT=web'])
@@ -5306,7 +5330,7 @@ Module["preRun"].push(function () {
     create_file('data.dat', 'hello, fetch')
     create_file('small.dat', 'hello')
     create_file('test.txt', 'fetch 2')
-    try_delete('subdir')
+    delete_dir('subdir')
     ensure_dir('subdir')
     create_file('subdir/backendfile', 'file 1')
     create_file('subdir/backendfile2', 'file 2')

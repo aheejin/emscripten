@@ -14,7 +14,7 @@ from enum import IntEnum, auto
 from glob import iglob
 
 from . import shared, building, utils
-from . import deps_info, tempfiles
+from . import deps_info
 from . import diagnostics
 from tools.shared import demangle_c_symbol_name
 from tools.settings import settings
@@ -50,7 +50,7 @@ def get_base_cflags(force_object_files=False):
   if settings.RELOCATABLE:
     flags += ['-sRELOCATABLE']
   if settings.MEMORY64:
-    flags += ['-sMEMORY64=' + str(settings.MEMORY64)]
+    flags += ['-Wno-experimental', '-sMEMORY64=' + str(settings.MEMORY64)]
   return flags
 
 
@@ -312,7 +312,13 @@ class Library:
       else:
         cmd = [shared.EMXX]
 
-      cmd += cflags
+      if ext == '.s':
+        # .s files are processed directly by the assembler.  In this case we can't pass
+        # pre-processor flags such as `-I` and `-D` but we still want core flags such as
+        # `-sMEMORY64`.
+        cmd += get_base_cflags()
+      else:
+        cmd += cflags
       if ext in ('.s', '.S'):
         # TODO(sbc) There is an llvm bug that causes a crash when `-g` is used with
         # assembly files that define wasm globals.
@@ -335,7 +341,7 @@ class Library:
     utils.safe_ensure_dirs(build_dir)
     create_lib(out_filename, self.build_objects(build_dir))
     if not shared.DEBUG:
-      tempfiles.try_delete(build_dir)
+      utils.delete_dir(build_dir)
 
   @classmethod
   def _inherit_list(cls, attr):
@@ -624,10 +630,6 @@ class SjLjLibrary(Library):
     is_wasm = settings.SUPPORT_LONGJMP == 'wasm'
     return super().get_default_variation(is_wasm=is_wasm, **kwargs)
 
-  def can_build(self):
-    # wasm-sjlj is not yet supported with MEMORY64
-    return not (settings.MEMORY64 and self.is_wasm)
-
 
 class MuslInternalLibrary(Library):
   includes = [
@@ -687,6 +689,7 @@ class libcompiler_rt(MTLibrary, SjLjLibrary):
         'stack_limits.S',
         'emscripten_setjmp.c',
         'emscripten_exception_builtins.c',
+        'emscripten_tempret.s',
         '__trap.c',
       ])
 
@@ -808,6 +811,7 @@ class libc(MuslInternalLibrary,
         'alarm.c', 'syscall.c', 'popen.c', 'pclose.c',
         'getgrouplist.c', 'initgroups.c', 'wordexp.c', 'timer_create.c',
         'getentropy.c',
+        'getauxval.c',
         # 'process' exclusion
         'fork.c', 'vfork.c', 'posix_spawn.c', 'posix_spawnp.c', 'execve.c', 'waitid.c', 'system.c',
         '_Fork.c',
@@ -1385,11 +1389,6 @@ class libmalloc(MTLibrary):
   def can_use(self):
     return super().can_use() and settings.MALLOC != 'none'
 
-  def can_build(self):
-    # emmalloc is not currently compatible with 64-bit pointers.  See
-    # the comment at the top of emmalloc.c.
-    return not self.malloc.startswith('emmalloc') or not settings.MEMORY64
-
   @classmethod
   def vary_on(cls):
     return super().vary_on() + ['is_debug', 'use_errno', 'is_tracing', 'memvalidate', 'verbose']
@@ -1618,6 +1617,7 @@ class libubsan_rt(SanitizerLibrary):
 
   cflags = ['-DUBSAN_CAN_USE_CXXABI']
   src_dir = 'system/lib/compiler-rt/lib/ubsan'
+  src_glob_exclude = ['ubsan_diag_standalone.cpp']
 
 
 class liblsan_common_rt(SanitizerLibrary):
@@ -1760,7 +1760,7 @@ def warn_on_unexported_main(symbolses):
 
 
 def handle_reverse_deps(input_files):
-  if settings.REVERSE_DEPS == 'none':
+  if settings.REVERSE_DEPS == 'none' or settings.SIDE_MODULE:
     return
   elif settings.REVERSE_DEPS == 'all':
     # When not optimzing we add all possible reverse dependencies rather
@@ -1865,16 +1865,37 @@ def get_libs_to_link(args, forced, only_forced):
   if '-nodefaultlibs' in args:
     return libs_to_link
 
+  sanitize = settings.USE_LSAN or settings.USE_ASAN or settings.UBSAN_RUNTIME
+
+  def add_sanitizer_libs():
+    if settings.USE_ASAN:
+      force_include.append('libasan_rt')
+      add_library('libasan_rt')
+      add_library('libasan_js')
+    elif settings.USE_LSAN:
+      force_include.append('liblsan_rt')
+      add_library('liblsan_rt')
+
+    if settings.UBSAN_RUNTIME == 1:
+      add_library('libubsan_minimal_rt')
+    elif settings.UBSAN_RUNTIME == 2:
+      add_library('libubsan_rt')
+
+    if settings.USE_LSAN or settings.USE_ASAN:
+      add_library('liblsan_common_rt')
+
+    if sanitize:
+      add_library('libsanitizer_common_rt')
+
   if only_forced:
     add_library('libcompiler_rt')
+    add_sanitizer_libs()
     return libs_to_link
 
   if settings.AUTO_NATIVE_LIBRARIES:
     add_library('libGL')
     add_library('libal')
     add_library('libhtml5')
-
-  sanitize = settings.USE_LSAN or settings.USE_ASAN or settings.UBSAN_RUNTIME
 
   # JS math must come before anything else, so that it overrides the normal
   # libc math.
@@ -1907,25 +1928,6 @@ def get_libs_to_link(args, forced, only_forced):
     if settings.WASM_EXCEPTIONS:
       add_library('libunwind')
 
-  if settings.USE_ASAN:
-    force_include.append('libasan_rt')
-    add_library('libasan_rt')
-    add_library('libasan_js')
-  elif settings.USE_LSAN:
-    force_include.append('liblsan_rt')
-    add_library('liblsan_rt')
-
-  if settings.UBSAN_RUNTIME == 1:
-    add_library('libubsan_minimal_rt')
-  elif settings.UBSAN_RUNTIME == 2:
-    add_library('libubsan_rt')
-
-  if settings.USE_LSAN or settings.USE_ASAN:
-    add_library('liblsan_common_rt')
-
-  if sanitize:
-    add_library('libsanitizer_common_rt')
-
   if settings.PROXY_POSIX_SOCKETS:
     add_library('libsockets_proxy')
   else:
@@ -1937,6 +1939,7 @@ def get_libs_to_link(args, forced, only_forced):
   if settings.WASM_WORKERS:
     add_library('libwasm_workers')
 
+  add_sanitizer_libs()
   return libs_to_link
 
 
