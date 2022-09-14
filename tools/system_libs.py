@@ -682,7 +682,7 @@ class libcompiler_rt(MTLibrary, SjLjLibrary):
   cflags = ['-fno-builtin']
   src_dir = 'system/lib/compiler-rt/lib/builtins'
   # gcc_personality_v0.c depends on libunwind, which don't include by default.
-  src_files = glob_in_path(src_dir, '*.c', excludes=['gcc_personality_v0.c'])
+  src_files = glob_in_path(src_dir, '*.c', excludes=['gcc_personality_v0.c', 'truncdfbf2.c', 'truncsfbf2.c'])
   src_files += files_in_path(
       path='system/lib/compiler-rt',
       filenames=[
@@ -714,7 +714,10 @@ class libc(MuslInternalLibrary,
   # functions to something else based on assumptions that they behave exactly
   # like the standard library. This can cause unexpected bugs when we use our
   # custom standard library. The same for other libc/libm builds.
-  cflags = ['-Os', '-fno-builtin']
+  # We use -fno-inline-functions because it can produce slightly smaller
+  # (and slower) code in some cases.  TODO(sbc): remove this and let llvm weight
+  # the cost/benefit of inlining.
+  cflags = ['-Os', '-fno-inline-functions', '-fno-builtin']
 
   # Disable certain warnings for code patterns that are contained in upstream musl
   cflags += ['-Wno-ignored-attributes',
@@ -1024,7 +1027,7 @@ class libc(MuslInternalLibrary,
 class libc_optz(libc):
   name = 'libc_optz'
 
-  cflags = ['-Os', '-fno-builtin', '-DEMSCRIPTEN_OPTIMIZE_FOR_OZ']
+  cflags = ['-Os', '-fno-inline-functions', '-fno-builtin', '-DEMSCRIPTEN_OPTIMIZE_FOR_OZ']
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
@@ -1130,7 +1133,7 @@ class libwasm_workers(MTLibrary):
 class libsockets(MuslInternalLibrary, MTLibrary):
   name = 'libsockets'
 
-  cflags = ['-Os', '-fno-builtin', '-Wno-shift-op-parentheses']
+  cflags = ['-Os', '-fno-inline-functions', '-fno-builtin', '-Wno-shift-op-parentheses']
 
   def get_files(self):
     return files_in_path(
@@ -1144,7 +1147,7 @@ class libsockets(MuslInternalLibrary, MTLibrary):
 class libsockets_proxy(MTLibrary):
   name = 'libsockets_proxy'
 
-  cflags = ['-Os']
+  cflags = ['-Os', '-fno-inline-functions']
 
   def get_files(self):
     return [utils.path_from_root('system/lib/websocket/websocket_to_posix_socket.c')]
@@ -1214,6 +1217,7 @@ class libcxxabi(NoExceptLibrary, MTLibrary):
   name = 'libc++abi'
   cflags = [
       '-Oz',
+      '-fno-inline-functions',
       '-D_LIBCXXABI_BUILDING_LIBRARY',
       '-DLIBCXXABI_NON_DEMANGLING_TERMINATE',
       '-std=c++14',
@@ -1273,6 +1277,7 @@ class libcxx(NoExceptLibrary, MTLibrary):
 
   cflags = [
     '-Oz',
+    '-fno-inline-functions',
     '-DLIBCXX_BUILDING_LIBCXXABI=1',
     '-D_LIBCPP_BUILDING_LIBRARY',
     '-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS',
@@ -1305,7 +1310,7 @@ class libunwind(NoExceptLibrary, MTLibrary):
   # See https://bugs.llvm.org/show_bug.cgi?id=44353
   force_object_files = True
 
-  cflags = ['-Oz', '-D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS']
+  cflags = ['-Oz', '-fno-inline-functions', '-D_LIBUNWIND_DISABLE_VISIBILITY_ANNOTATIONS']
   src_dir = 'system/lib/libunwind/src'
   # Without this we can't build libunwind since it will pickup the unwind.h
   # that is part of llvm (which is not compatible for some reason).
@@ -1420,7 +1425,7 @@ class libmalloc(MTLibrary):
 class libal(Library):
   name = 'libal'
 
-  cflags = ['-Os']
+  cflags = ['-Os', '-fno-inline-functions']
   src_dir = 'system/lib'
   src_files = ['al.c']
 
@@ -1431,7 +1436,7 @@ class libGL(MTLibrary):
   src_dir = 'system/lib/gl'
   src_files = ['gl.c', 'webgl1.c', 'libprocaddr.c']
 
-  cflags = ['-Oz']
+  cflags = ['-Oz', '-fno-inline-functions']
 
   def __init__(self, **kwargs):
     self.is_legacy = kwargs.pop('is_legacy')
@@ -1574,7 +1579,7 @@ class libwasmfs(DebugLibrary, AsanInstrumentedLibrary, MTLibrary):
 class libhtml5(Library):
   name = 'libhtml5'
 
-  cflags = ['-Oz']
+  cflags = ['-Oz', '-fno-inline-functions']
   src_dir = 'system/lib/html5'
   src_glob = '*.c'
 
@@ -1663,7 +1668,7 @@ class libstandalonewasm(MuslInternalLibrary):
   # LTO defeats the weak linking trick used in __original_main.c
   force_object_files = True
 
-  cflags = ['-Os', '-fno-builtin']
+  cflags = ['-Os', '-fno-inline-functions', '-fno-builtin']
   src_dir = 'system/lib'
 
   def __init__(self, **kwargs):
@@ -1733,7 +1738,7 @@ class libstandalonewasm(MuslInternalLibrary):
 
 class libjsmath(Library):
   name = 'libjsmath'
-  cflags = ['-Os']
+  cflags = ['-Os', '-fno-inline-functions']
   src_dir = 'system/lib'
   src_files = ['jsmath.c']
 
