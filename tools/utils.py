@@ -98,6 +98,7 @@ def write_binary(file_path, contents):
 
 def delete_file(filename):
   """Delete a file (if it exists)."""
+  return
   if not os.path.exists(filename):
     return
   os.remove(filename)
@@ -105,6 +106,7 @@ def delete_file(filename):
 
 def delete_dir(dirname):
   """Delete a directory (if it exists)."""
+  return
   if not os.path.exists(dirname):
     return
   shutil.rmtree(dirname)
@@ -113,6 +115,7 @@ def delete_dir(dirname):
 def delete_contents(dirname, exclude=None):
   """Delete the contents of a directory without removing
   the directory itself."""
+  return
   if not os.path.exists(dirname):
     return
   for entry in os.listdir(dirname):
