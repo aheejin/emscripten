@@ -41,6 +41,9 @@
 // compile+link.
 //
 
+// New WebAssembly exception handling
+var WASM_EXCEPTIONS = true;
+
 // Tuning
 
 // Whether we should add runtime assertions. This affects both JS and how
@@ -721,7 +724,7 @@ var EXCEPTION_STACK_TRACES = false;
 // TODO(sbc): Move to settings_internal (current blocked due to use in test
 // code).
 // [link]
-var DISABLE_EXCEPTION_THROWING = false;
+var DISABLE_EXCEPTION_THROWING = 1;
 
 // By default we handle exit() in node, by catching the Exit exception. However,
 // this means we catch all process exceptions. If you disable this, then we no
@@ -1871,7 +1874,7 @@ var USES_DYNAMIC_ALLOC = true;
 // [compile+link] - at compile time this enables the transformations needed for
 // longjmp support at codegen time, while at link it allows linking in the
 // library support.
-var SUPPORT_LONGJMP = true;
+var SUPPORT_LONGJMP = 'wasm';
 
 // If set to 1, disables old deprecated HTML5 API event target lookup behavior.
 // When enabled, there is no "Module.canvas" object, no magic "null" default

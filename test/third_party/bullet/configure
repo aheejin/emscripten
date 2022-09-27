@@ -8521,15 +8521,15 @@ lt_prog_compiler_no_builtin_flag=
 if test "$GCC" = yes; then
   lt_prog_compiler_no_builtin_flag=' -fno-builtin'
 
-  { echo "$as_me:$LINENO: checking if $compiler supports -fno-rtti -fno-exceptions" >&5
-echo $ECHO_N "checking if $compiler supports -fno-rtti -fno-exceptions... $ECHO_C" >&6; }
+  { echo "$as_me:$LINENO: checking if $compiler supports -fno-rtti -fwasm-exceptions" >&5
+echo $ECHO_N "checking if $compiler supports -fno-rtti -fwasm-exceptions... $ECHO_C" >&6; }
 if test "${lt_cv_prog_compiler_rtti_exceptions+set}" = set; then
   echo $ECHO_N "(cached) $ECHO_C" >&6
 else
   lt_cv_prog_compiler_rtti_exceptions=no
    ac_outfile=conftest.$ac_objext
    echo "$lt_simple_compile_test_code" > conftest.$ac_ext
-   lt_compiler_flag="-fno-rtti -fno-exceptions"
+   lt_compiler_flag="-fno-rtti -fwasm-exceptions"
    # Insert the option either (1) after the last *FLAGS variable, or
    # (2) before a word containing "conftest.", or (3) at the end.
    # Note that $ac_compile itself does not contain backslashes and begins
@@ -8560,7 +8560,7 @@ fi
 echo "${ECHO_T}$lt_cv_prog_compiler_rtti_exceptions" >&6; }
 
 if test x"$lt_cv_prog_compiler_rtti_exceptions" = xyes; then
-    lt_prog_compiler_no_builtin_flag="$lt_prog_compiler_no_builtin_flag -fno-rtti -fno-exceptions"
+    lt_prog_compiler_no_builtin_flag="$lt_prog_compiler_no_builtin_flag -fno-rtti -fwasm-exceptions"
 else
     :
 fi
