@@ -2630,10 +2630,13 @@ def phase_linker_setup(options, state, newargs, user_settings):
     settings.REQUIRED_EXPORTS += ['__trap']
 
   # When ASSERTIONS is set, we include stack traces in Wasm exception objects
-  # using the JS API, which needs this C++ tag exported.
-  if settings.ASSERTIONS and settings.WASM_EXCEPTIONS:
-    settings.EXPORTED_FUNCTIONS += ['___cpp_exception']
-    settings.EXPORT_EXCEPTION_HANDLING_HELPERS = True
+  # using the JS API, which needs the tags exported.
+  if settings.ASSERTIONS:
+    if settings.WASM_EXCEPTIONS:
+      settings.EXPORTED_FUNCTIONS += ['___cpp_exception']
+      settings.EXPORT_EXCEPTION_HANDLING_HELPERS = True
+    if settings.SUPPORT_LONGJMP == 'wasm':
+      settings.EXPORTED_FUNCTIONS += ['___c_longjmp']
 
   # Make `getExceptionMessage` and other necessary functions available for use.
   if settings.EXPORT_EXCEPTION_HANDLING_HELPERS:

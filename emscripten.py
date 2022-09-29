@@ -638,6 +638,11 @@ def add_standard_wasm_imports(send_items_map):
 
   if settings.RELOCATABLE:
     send_items_map['__indirect_function_table'] = 'wasmTable'
+    #if settings.WASM_EXCEPTIONS:
+    #  send_items_map['__cpp_exception'] = '___cpp_exception'
+    #TODO check if necessary
+    #if settings.SUPPORT_LONGJMP == 'wasm':
+    #  send_items_map['__c_longjmp'] = '___c_longjmp'
 
   if settings.AUTODEBUG:
     extra_sent_items += [
@@ -691,7 +696,7 @@ def make_export_wrappers(exports, delay_assignment):
   wrappers = []
   for name in exports:
     # Tags cannot be wrapped in createExportWrapper
-    if name == '__cpp_exception':
+    if name in ['__cpp_exception', '__c_longjmp']:
       continue
     mangled = asmjs_mangle(name)
     # The emscripten stack functions are called very early (by writeStackCookie) before

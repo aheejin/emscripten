@@ -81,13 +81,21 @@ struct __WasmLongjmpArgs {
 
 thread_local struct __WasmLongjmpArgs __wasm_longjmp_args;
 
+void _wasm_throw_longjmp(struct __WasmLongjmpArgs*); // In src/library.js
+
 // Wasm EH allows us to throw and catch multiple values, but that requires
 // multivalue support in the toolchain, whch is not reliable at the time.
 // TODO Consider switching to throwing two values at the same time later.
 void __wasm_longjmp(void *env, int val) {
   __wasm_longjmp_args.env = env;
   __wasm_longjmp_args.val = val;
+#ifdef NDEBUG
   __builtin_wasm_throw(1, &__wasm_longjmp_args);
+#else
+  // In debug mode, call a JS library function to use WebAssembly.Exception
+  // JS API, which enables us to include stack traces
+  _wasm_throw_longjmp(&__wasm_longjmp_args);
+#endif
 }
 
 #endif

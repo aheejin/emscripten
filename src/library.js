@@ -1237,7 +1237,23 @@ mergeInto(LibraryManager.library, {
 
 #if SUPPORT_LONGJMP == 'emscripten'
   _emscripten_throw_longjmp__sig: 'v',
-  _emscripten_throw_longjmp: function() { throw Infinity; },
+  _emscripten_throw_longjmp: function() {
+#if ASSERTIONS
+    throw new Error('longjmp');
+#else
+    throw Infinity;
+#endif
+  },
+#elif SUPPORT_LONGJMP == 'wasm' && ASSERTIONS
+  _wasm_throw_longjmp__sig: 'vi',
+  _wasm_throw_longjmp: function(env) {
+    // In Wasm SjLj we use a Wasm throw instruction directly, but when ASSERTION
+    // is set, we use WebAssembly.Exception JS API to include stack traces
+    var longjmp_tag = Module['asm']['__c_longjmp'];
+    var e = new WebAssembly.Exception(longjmp_tag, [env], {traceStack: true});
+    e.message = 'longjmp';
+    throw e;
+  },
 #endif
 
 #if !SUPPORT_LONGJMP
