@@ -2329,8 +2329,6 @@ def phase_linker_setup(options, state, newargs, user_settings):
   # Any "pointers" passed to JS will now be i64's, in both modes.
   # Also turn off minifying, which clashes with instrumented functions in preamble.js
   if settings.MEMORY64:
-    if settings.RELOCATABLE:
-      exit_with_error('MEMORY64 is not compatible with dynamic linking')
     if settings.ASYNCIFY and settings.MEMORY64 == 1:
       exit_with_error('MEMORY64=1 is not compatible with ASYNCIFY')
     if not settings.DISABLE_EXCEPTION_CATCHING:
@@ -3002,13 +3000,13 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
   # Deploy the Wasm Worker bootstrap file as an output file (*.ww.js)
   if settings.WASM_WORKERS == 1:
     worker_output = os.path.join(target_dir, settings.WASM_WORKER_FILE)
-    with open(worker_output, 'w') as f:
-      f.write(shared.read_and_preprocess(shared.path_from_root('src', 'wasm_worker.js'), expand_macros=True))
+    contents = shared.read_and_preprocess(shared.path_from_root('src/wasm_worker.js'), expand_macros=True)
+    write_file(worker_output, contents)
 
     # Minify the wasm_worker.js file in optimized builds
     if (settings.OPT_LEVEL >= 1 or settings.SHRINK_LEVEL >= 1) and not settings.DEBUG_LEVEL:
       minified_worker = building.acorn_optimizer(worker_output, ['minifyWhitespace'], return_output=True)
-      open(worker_output, 'w').write(minified_worker)
+      write_file(worker_output, minified_worker)
 
   # track files that will need native eols
   generated_text_files_with_native_eols = []
