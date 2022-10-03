@@ -978,6 +978,7 @@ class libc(MuslInternalLibrary,
         path='system/lib/pthread',
         filenames=[
           'library_pthread.c',
+          'em_task_queue.c',
           'proxying.c',
           'pthread_create.c',
           'pthread_kill.c',
@@ -1236,11 +1237,11 @@ class libwasm_workers(MTLibrary):
   name = 'libwasm_workers'
 
   def get_cflags(self):
-    cflags = get_base_cflags() + ['-pthread', '-D_DEBUG' if self.debug else '-Oz']
+    cflags = get_base_cflags() + ['-D_DEBUG' if self.debug else '-Oz']
     if not self.debug:
       cflags += ['-DNDEBUG']
     if self.is_ww or self.is_mt:
-      cflags += ['-sWASM_WORKERS']
+      cflags += ['-pthread', '-sWASM_WORKERS']
     if settings.MAIN_MODULE:
       cflags += ['-fPIC']
     return cflags
