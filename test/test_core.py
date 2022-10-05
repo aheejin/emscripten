@@ -7329,6 +7329,7 @@ void* operator new(size_t size) {
   def test_demangle_stacks_symbol_map(self):
     # disable aggressive inlining in binaryen
     self.set_setting('BINARYEN_EXTRA_PASSES', '--one-caller-inline-max-function-size=1')
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$stackTrace')
 
     self.set_setting('DEMANGLE_SUPPORT')
     if '-O' not in str(self.emcc_args) or '-O0' in self.emcc_args or '-O1' in self.emcc_args or '-g' in self.emcc_args:
@@ -9458,6 +9459,13 @@ NODEFS is no longer included by default; build with -lnodefs.js
     # And not be translated into abort by makeAbortWrapper
     self.assertNotContained('unhandled exception', output)
     self.assertNotContained('Aborted', output)
+
+  @node_pthreads
+  def test_abort_on_exceptions_pthreads(self):
+    self.set_setting('ABORT_ON_WASM_EXCEPTIONS')
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('EXIT_RUNTIME')
+    self.do_core_test('test_hello_world.c')
 
   @needs_dylink
   def test_gl_main_module(self):
