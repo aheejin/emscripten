@@ -1351,7 +1351,7 @@ class crtbegin(MuslInternalLibrary):
     return super().can_use() and settings.SHARED_MEMORY
 
 
-class libcxxabi(NoExceptLibrary, MTLibrary):
+class libcxxabi(NoExceptLibrary, MTLibrary, DebugLibrary):
   name = 'libc++abi'
   cflags = [
       '-Oz',
@@ -1364,7 +1364,6 @@ class libcxxabi(NoExceptLibrary, MTLibrary):
 
   def get_cflags(self):
     cflags = super().get_cflags()
-    cflags.append('-DNDEBUG')
     if not self.is_mt and not self.is_ww:
       cflags.append('-D_LIBCXXABI_HAS_NO_THREADS')
     if self.eh_mode == Exceptions.NONE:
