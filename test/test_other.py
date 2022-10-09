@@ -7463,11 +7463,11 @@ int main() {
     # find the imports we send from JS
     js = read_file('a.out.js')
     start = js.find('asmLibraryArg = ')
-    assert(start != -1)
+    assert start != -1
     end = js.find('}', start)
-    assert(end != -1)
+    assert end != -1
     start = js.find('{', start)
-    assert(start != -1)
+    assert start != -1
     relevant = js[start + 2:end - 1]
     relevant = relevant.replace(' ', '').replace('"', '').replace("'", '').split(',')
     sent = [x.split(':')[0].strip() for x in relevant]
@@ -9684,7 +9684,7 @@ int main () {
 
   # Tests the library_c_preprocessor.js functionality.
   def test_c_preprocessor(self):
-    self.run_process([EMXX, test_file('test_c_preprocessor.c'), '--js-library', path_from_root('src/library_c_preprocessor.js'), '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$remove_cpp_comments_in_shaders,$preprocess_c_code'])
+    self.run_process([EMXX, test_file('test_c_preprocessor.c'), '--js-library', path_from_root('src/library_c_preprocessor.js')])
     normal = self.run_js('a.out.js')
     print(str(normal))
 
@@ -10023,7 +10023,6 @@ int main(void) {
   })
   def test_offset_converter(self, *args):
     self.set_setting('USE_OFFSET_CONVERTER')
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$ptrToString'])
     self.emcc_args += ['--profiling-funcs']
     self.do_runf(test_file('other/test_offset_converter.c'), 'ok', emcc_args=list(args))
 
@@ -10034,7 +10033,6 @@ int main(void) {
   def test_offset_converter_source_map(self, *args):
     self.set_setting('USE_OFFSET_CONVERTER')
     self.set_setting('LOAD_SOURCE_MAP')
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$ptrToString'])
     self.emcc_args += ['-gsource-map', '-DUSE_SOURCE_MAP']
     self.do_runf(test_file('other/test_offset_converter.c'), 'ok', emcc_args=list(args))
 
@@ -11055,9 +11053,9 @@ int main () {
     # we used to include malloc by default. show a clear error in builds with
     # ASSERTIONS to help with any confusion when the user calls a JS API that
     # requires malloc
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$allocateUTF8')
     create_file('unincluded_malloc.c', r'''
       #include <emscripten.h>
+      EM_JS_DEPS(main, "$allocateUTF8");
       int main() {
         EM_ASM({
           try {
@@ -11492,7 +11490,6 @@ exec "$@"
 
   def test_runtime_keepalive(self):
     self.uses_es6 = True
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$runtimeKeepalivePush', '$runtimeKeepalivePop', '$callUserCallback'])
     self.set_setting('EXIT_RUNTIME')
     self.do_other_test('test_runtime_keepalive.cpp')
 
@@ -11530,7 +11527,7 @@ exec "$@"
     main = '#include<stdio.h>\n%s int main() { int value = 0; %s printf("%%d\\n", value); }' % (decls, calls)
     open('main.c', 'w').write(main)
 
-    assert(sum(len(f) for f in files) > 32767)
+    assert sum(len(f) for f in files) > 32767
 
     self.run_process(building.get_command_with_possible_response_file([EMCC, 'main.c'] + files))
     self.assertContained(str(count * (count - 1) // 2), self.run_js('a.out.js'))
@@ -12320,7 +12317,8 @@ Module['postRun'] = function() {{
   @requires_v8
   def test_extended_const(self):
     self.v8_args = ['--experimental-wasm-extended-const']
-    self.do_runf(test_file('hello_world.c'), emcc_args=['-mextended-const', '-sMAIN_MODULE=2'])
+    # Export at least one global so that we exercise the parsing of the global section.
+    self.do_runf(test_file('hello_world.c'), emcc_args=['-sEXPORTED_FUNCTIONS=_main,___stdout_used', '-mextended-const', '-sMAIN_MODULE=2'])
     wat = self.get_wasm_text('hello_world.wasm')
     # Test that extended-const expressions are used in the data segments.
     self.assertTrue(re.search(r'\(data \(i32.add\s+\(global.get \$\S+\)\s+\(i32.const \d+\)', wat))
@@ -12494,10 +12492,11 @@ Module['postRun'] = function() {{
       self.assertEqual(v1, v2, msg=m)
 
   def test_warn_once(self):
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$warnOnce'])
     create_file('main.c', r'''\
       #include <stdio.h>
       #include <emscripten.h>
+
+      EM_JS_DEPS(main, "$warnOnce");
 
       int main() {
         EM_ASM({
@@ -12539,3 +12538,28 @@ Module['postRun'] = function() {{
 
   def test_strict_js_closure(self):
     self.do_runf(test_file('hello_world.c'), emcc_args=['-sSTRICT_JS', '-Werror=closure', '--closure=1', '-O3'])
+
+  def test_em_js_deps(self):
+    # Check that EM_JS_DEPS works. Specifically, multiple different instances in different
+    # object files.
+    create_file('f1.c', '''
+    #include <emscripten.h>
+
+    EM_JS_DEPS(other, "$allocateUTF8OnStack");
+    ''')
+    create_file('f2.c', '''
+    #include <emscripten.h>
+
+    EM_JS_DEPS(main, "$getHeapMax");
+
+    int main() {
+      EM_ASM({
+        err(getHeapMax());
+        var x = stackSave();
+        allocateUTF8OnStack("hello");
+        stackRestore(x);
+      });
+      return 0;
+    }
+    ''')
+    self.do_runf('f2.c', emcc_args=['f1.c'])
