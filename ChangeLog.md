@@ -18,12 +18,14 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.24 (in development)
+3.1.25 (in development)
 -----------------------
+
+3.1.24 - 10/11/22
+-----------------
 - In Wasm exception mode (`-fwasm-exceptions`), when `ASSERTIONS` is enabled,
   uncaught exceptions will display stack traces and what() message. (#17979 and
   #18003)
-  uncaught exceptions will display stack traces. (#17979)
 - It is now possible to specify indirect dependencies on JS library functions
   directly in C/C++ source code.  For example, in the case of a EM_JS or EM_ASM
   JavaScript function that depends on a JS library function.  See the
