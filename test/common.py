@@ -512,7 +512,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
           self.temp_files_before_run.append(os.path.normpath(os.path.join(root, filename)))
 
     if EMTEST_SAVE_DIR:
-      self.working_dir = os.path.join(self.temp_dir, 'emscripten_test')
+      self.working_dir = os.path.join(self.temp_dir, 'emtest_emeh')
       if os.path.exists(self.working_dir):
         if EMTEST_SAVE_DIR == 2:
           print('Not clearing existing test directory')
@@ -996,6 +996,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       configure = list(configure)
       configure += configure_args
 
+    emcc_args.append('-fexceptions')
     cflags = ' '.join(emcc_args)
     env_init.setdefault('CFLAGS', cflags)
     env_init.setdefault('CXXFLAGS', cflags)
@@ -1320,6 +1321,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       # Avoid warning about ERROR_ON_UNDEFINED_SYMBOLS being used at compile time
       '-Wno-unused-command-line-argument',
       '-Wno-js-compiler',
+      '-fexceptions'
     ]
     env_init = env_init.copy() if env_init else {}
     env_init['FONTCONFIG_CFLAGS'] = ' '

@@ -675,7 +675,7 @@ var LZ4 = false;
 // This option is mutually exclusive with EXCEPTION_CATCHING_ALLOWED.
 //
 // [compile+link] - affects user code at compile and system libraries at link
-var DISABLE_EXCEPTION_CATCHING = 1;
+var DISABLE_EXCEPTION_CATCHING = 0;
 
 // Enables catching exception but only in the listed functions.  This
 // option acts like a more precise version of `DISABLE_EXCEPTION_CATCHING=0`.

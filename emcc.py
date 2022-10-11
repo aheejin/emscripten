@@ -825,6 +825,7 @@ def get_target_flags():
 
 def get_clang_flags(user_args):
   flags = get_target_flags()
+  flags.append('-fexceptions')
 
   # if exception catching is disabled, we can prevent that code from being
   # generated in the frontend
@@ -2629,9 +2630,9 @@ def phase_linker_setup(options, state, newargs, user_settings):
       'EXCEPTION_CATCHING_ALLOWED',
       'DISABLE_EXCEPTION_THROWING',
     ]
-    for setting in cxx_only_settings:
-      if setting in user_settings:
-        diagnostics.warning('linkflags', 'setting `%s` is not meaningful unless linking as C++', setting)
+    #for setting in cxx_only_settings:
+    #  if setting in user_settings:
+    #    diagnostics.warning('linkflags', 'setting `%s` is not meaningful unless linking as C++', setting)
 
   if settings.WASM_EXCEPTIONS:
     settings.REQUIRED_EXPORTS += ['__trap']

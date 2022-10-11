@@ -290,6 +290,7 @@ def inspect_headers(headers, cflags):
     # memeory64 to run.  All we care about is that the output is correct.
     cmd += ['-sMEMORY64=2', '-Wno-experimental']
 
+  cmd += ['-sDISABLE_EXCEPTION_CATCHING']
   show(shared.shlex_join(cmd))
   try:
     subprocess.check_call(cmd, env=system_libs.clean_env())
