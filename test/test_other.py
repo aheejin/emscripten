@@ -798,6 +798,8 @@ f.close()
   # Tests that the CMake variable EMSCRIPTEN_VERSION is properly provided to user CMake scripts
   def test_cmake_emscripten_version(self):
     self.run_process([EMCMAKE, 'cmake', test_file('cmake/emscripten_version')])
+    self.clear()
+    self.run_process([EMCMAKE, 'cmake', test_file('cmake/emscripten_version'), '-DEMSCRIPTEN_FORCE_COMPILERS=OFF'])
 
   def test_cmake_emscripten_system_processor(self):
     cmake_dir = test_file('cmake/emscripten_system_processor')
@@ -1956,7 +1958,7 @@ int f() {
     self.assertContained('libpng passes test', output)
 
   @node_pthreads
-  def test_libpng_with_pthreads(self):
+  def test_zzz_libpng_with_pthreads(self):
     shutil.copyfile(test_file('third_party/libpng/pngtest.png'), 'pngtest.png')
     self.emcc(test_file('third_party/libpng/pngtest.c'), ['--embed-file', 'pngtest.png', '-sUSE_LIBPNG', '-sUSE_PTHREADS'], output_filename='a.out.js')
     output = self.run_js('a.out.js')
