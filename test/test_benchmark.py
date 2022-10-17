@@ -31,9 +31,9 @@ from tools import building, utils
 # 3: 1 second
 # 4: 5 seconds
 # 5: 10 seconds
-DEFAULT_ARG = '4'
+DEFAULT_ARG = '1'
 
-TEST_REPS = 5
+TEST_REPS = 1
 
 # by default, run just core benchmarks
 CORE_BENCHMARKS = True
@@ -45,7 +45,7 @@ non_core = unittest.skipIf(CORE_BENCHMARKS, "only running core benchmarks")
 
 IGNORE_COMPILATION = 0
 
-OPTIMIZATIONS = '-O3'
+OPTIMIZATIONS = '-Oz'
 
 PROFILING = 0
 
@@ -130,6 +130,7 @@ class NativeBenchmarker(Benchmarker):
     self.cc = cc
     self.cxx = cxx
     self.args = args or [OPTIMIZATIONS]
+    self.args += [OPTIMIZATIONS, '-fuse-ld=lld', '-static']
 
   def build(self, parent, filename, args, shared_args, emcc_args, native_args, native_exec, lib_builder, has_output_parser):
     native_args = native_args or []
@@ -356,7 +357,8 @@ benchmarkers = []
 
 if not common.EMTEST_FORCE64:
   benchmarkers += [
-    NativeBenchmarker('clang', [CLANG_CC], [CLANG_CXX]),
+    NativeBenchmarker('clang-noeh', [CLANG_CC], [CLANG_CXX], ['-fignore-exceptions']),
+    #NativeBenchmarker('clang', [CLANG_CC], [CLANG_CXX]),
     # NativeBenchmarker('gcc',   ['gcc', '-no-pie'],  ['g++', '-no-pie'])
   ]
 
@@ -368,13 +370,13 @@ if config.V8_ENGINE and config.V8_ENGINE in config.JS_ENGINES:
   default_v8_name = os.environ.get('EMBENCH_NAME') or 'v8'
   if common.EMTEST_FORCE64:
     benchmarkers += [
-      EmscriptenBenchmarker(default_v8_name, aot_v8, ['-sMEMORY64=2']),
+      #EmscriptenBenchmarker(default_v8_name, aot_v8, ['-sMEMORY64=2']),
     ]
   else:
     benchmarkers += [
       EmscriptenBenchmarker(default_v8_name, aot_v8),
-      EmscriptenBenchmarker(default_v8_name + '-lto', aot_v8, ['-flto']),
-      EmscriptenBenchmarker(default_v8_name + '-ctors', aot_v8, ['-sEVAL_CTORS']),
+      #EmscriptenBenchmarker(default_v8_name + '-lto', aot_v8, ['-flto']),
+      # EmscriptenBenchmarker(default_v8_name + '-ctors', aot_v8, ['-sEVAL_CTORS']),
       # EmscriptenWasm2CBenchmarker('wasm2c')
     ]
   if os.path.exists(CHEERP_BIN):
@@ -1107,7 +1109,7 @@ class benchmark(common.RunnerCore):
       return self.get_poppler_library(env_init=env_init)
 
     # TODO: Fix poppler native build and remove skip_native=True
-    self.do_benchmark('poppler', '', 'hashed printout',
+    self.do_benchmark('poppler', '', '', #'hashed printout',
                       shared_args=['-I' + test_file('poppler/include'),
                                    '-I' + test_file('freetype/include')],
                       emcc_args=['-sFILESYSTEM', '--pre-js=pre.js', '--embed-file',
