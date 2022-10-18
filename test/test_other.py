@@ -1939,6 +1939,18 @@ int f() {
     self.run_process([EMXX, 'main.cpp'])
     self.assertContained('1234, 1234, 4321\n', self.run_js('a.out.js'))
 
+  def test_sdl_scan_code_from_key(self):
+    create_file('main.cpp', r'''
+      #include <stdio.h>
+      #include <SDL/SDL_keyboard.h>
+
+      int main() {
+        printf("%d\n", SDL_GetScancodeFromKey(35));
+        return 0;
+      }
+    ''')
+    self.do_runf('main.cpp', '204\n')
+
   def test_sdl2_mixer_wav(self):
     self.emcc(test_file('browser/test_sdl2_mixer_wav.c'), ['-sUSE_SDL_MIXER=2'], output_filename='a.out.js')
 
@@ -3240,7 +3252,6 @@ m0.ccall('myreadSeekEnd', 'number', [], []);
 ''')
 
     create_file('proxyfs_pre.js', r'''
-if (typeof Module === 'undefined') Module = {};
 Module["noInitialRun"]=true;
 Module["noExitRuntime"]=true;
 ''')
@@ -12546,9 +12557,13 @@ Module['postRun'] = function() {{
     self.do_runf('main.c', 'warning: foo\ndone\n')
 
   def test_dyncallwrapper(self):
-    self.set_setting('MAIN_MODULE', 1)
-    expected = "2 7\ni: 2 j: 8589934599 f: 3.120000 d: 77.120000"
-    self.do_runf(test_file('test_runtime_dyncall_wrapper.c'), expected)
+    self.set_setting("MAIN_MODULE", 1)
+    expected = """\
+2 7
+i: 2 j: 8589934599 f: 3.120000 d: 77.120000
+j1: 8589934599, j2: 30064771074, j3: 12884901891
+"""
+    self.do_runf(test_file("test_runtime_dyncall_wrapper.c"), expected)
 
   def test_compile_with_cache_lock(self):
     # Verify that, after warming the cache, running emcc does not require the cache lock.
