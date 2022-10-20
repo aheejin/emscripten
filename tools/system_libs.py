@@ -58,7 +58,10 @@ def glob_in_path(path, glob_pattern, excludes=()):
 def get_base_cflags(build_dir, force_object_files=False, preprocess=True):
   # Always build system libraries with debug information.  Non-debug builds
   # will ignore this at link time because we link with `-strip-debug`.
-  flags = ['-g', '-sSTRICT', '-Werror']
+  # bench_debug: We removed '-g' here because to compare debug info coverage
+  # apples-to-apples we shouldn't include libraries because x86 system libraries
+  # don't contain debug info.
+  flags = ['-sSTRICT', '-Werror']
   if settings.LTO and not force_object_files:
     flags += ['-flto=' + settings.LTO]
   if settings.RELOCATABLE or settings.MAIN_MODULE:

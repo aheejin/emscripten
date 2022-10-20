@@ -107,10 +107,10 @@ var EMSCRIPTEN_VERSION = '';
 var USE_RTTI = true;
 
 // This will contain the optimization level (-Ox).
-var OPT_LEVEL = 0;
+var OPT_LEVEL = 1;
 
 // This will contain the debug level (-gx).
-var DEBUG_LEVEL = 0;
+var DEBUG_LEVEL = 3;
 
 // This will contain the shrink level (1 or 2 for -Os or -Oz, or just 0).
 var SHRINK_LEVEL = 0;

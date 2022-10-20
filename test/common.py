@@ -1138,6 +1138,7 @@ class RunnerCore(RetryableTestCase, metaclass=RunnerMeta):
       configure = list(configure)
       configure += configure_args
 
+    cfags = cflags + ['-g', '-O1']
     cflags = ' '.join(cflags)
     env_init.setdefault('CFLAGS', cflags)
     env_init.setdefault('CXXFLAGS', cflags)
@@ -1455,6 +1456,7 @@ class RunnerCore(RetryableTestCase, metaclass=RunnerMeta):
       '-Wno-unused-command-line-argument',
       '-Wno-js-compiler',
       '-Wno-nontrivial-memaccess',
+      '-g',
     ]
     env_init = env_init.copy() if env_init else {}
     env_init['FONTCONFIG_CFLAGS'] = ' '

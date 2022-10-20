@@ -13,6 +13,8 @@
 # If you have problems, try without defining CC and CFLAGS before reporting
 # an error.
 
+CFLAGS += "-g -O1"
+
 if [ -n "${CHOST}" ]; then
     uname="$(echo "${CHOST}" | sed -e 's/^[^-]*-\([^-]*\)$/\1/' -e 's/^[^-]*-[^-]*-\([^-]*\)$/\1/' -e 's/^[^-]*-[^-]*-\([^-]*\)-.*$/\1/')"
     CROSS_PREFIX="${CHOST}-"
@@ -97,16 +99,16 @@ EOF
 
 test -z "$CC" && echo Checking for ${CROSS_PREFIX}gcc...
 cc=${CC-${CROSS_PREFIX}gcc}
-cflags=${CFLAGS-"-O3"}
-# to force the asm version use: CFLAGS="-O3 -DASMV" ./configure
+cflags=${CFLAGS-"-g -O1"}
+# to force the asm version use: CFLAGS="-O1 -DASMV" ./configure
 case "$cc" in
   *gcc*) gcc=1 ;;
 esac
 
 if test "$gcc" -eq 1 && ($cc -c $cflags $test.c) 2>/dev/null; then
   CC="$cc"
-  SFLAGS="${CFLAGS--O3} -fPIC"
-  CFLAGS="${CFLAGS--O3}"
+  SFLAGS="${CFLAGS--O1} -fPIC"
+  CFLAGS="${CFLAGS--O1}"
   if test $build64 -eq 1; then
     CFLAGS="${CFLAGS} -m64"
     SFLAGS="${SFLAGS} -m64"
@@ -157,8 +159,8 @@ else
     uname=`(uname -sr || echo unknown) 2>/dev/null`
   fi
   case "$uname" in
-  HP-UX*)    SFLAGS=${CFLAGS-"-O +z"}
-             CFLAGS=${CFLAGS-"-O"}
+  HP-UX*)    SFLAGS=${CFLAGS-"-g -O1 +z"}
+             CFLAGS=${CFLAGS-"-g -O1"}
 #            LDSHARED=${LDSHARED-"ld -b +vnocompatwarnings"}
              LDSHARED=${LDSHARED-"ld -b"}
          case `(uname -m || echo unknown) 2>/dev/null` in
@@ -169,58 +171,58 @@ else
              shared_ext='.sl'
              SHAREDLIB='libz.sl' ;;
          esac ;;
-  IRIX*)     SFLAGS=${CFLAGS-"-ansi -O2 -rpath ."}
-             CFLAGS=${CFLAGS-"-ansi -O2"}
+  IRIX*)     SFLAGS=${CFLAGS-"-ansi -g -O1 -rpath ."}
+             CFLAGS=${CFLAGS-"-ansi -g -O1"}
              LDSHARED=${LDSHARED-"cc -shared -Wl,-soname,libz.so.1"} ;;
-  OSF1\ V4*) SFLAGS=${CFLAGS-"-O -std1"}
-             CFLAGS=${CFLAGS-"-O -std1"}
+  OSF1\ V4*) SFLAGS=${CFLAGS-"-g -O1 -std1"}
+             CFLAGS=${CFLAGS-"-g -O1 -std1"}
              LDFLAGS="${LDFLAGS} -Wl,-rpath,."
              LDSHARED=${LDSHARED-"cc -shared  -Wl,-soname,libz.so -Wl,-msym -Wl,-rpath,$(libdir) -Wl,-set_version,${VER}:1.0"} ;;
-  OSF1*)     SFLAGS=${CFLAGS-"-O -std1"}
-             CFLAGS=${CFLAGS-"-O -std1"}
+  OSF1*)     SFLAGS=${CFLAGS-"-g -O1 -std1"}
+             CFLAGS=${CFLAGS-"-g -O1 -std1"}
              LDSHARED=${LDSHARED-"cc -shared -Wl,-soname,libz.so.1"} ;;
-  QNX*)      SFLAGS=${CFLAGS-"-4 -O"}
-             CFLAGS=${CFLAGS-"-4 -O"}
+  QNX*)      SFLAGS=${CFLAGS-"-g -O1"}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"cc"}
              RANLIB=${RANLIB-"true"}
              AR_RC="cc -A" ;;
-  SCO_SV\ 3.2*) SFLAGS=${CFLAGS-"-O3 -dy -KPIC "}
-             CFLAGS=${CFLAGS-"-O3"}
+  SCO_SV\ 3.2*) SFLAGS=${CFLAGS-"-g -O1 -dy -KPIC "}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"cc -dy -KPIC -G"} ;;
   SunOS\ 5*) LDSHARED=${LDSHARED-"cc -G"}
          case `(uname -m || echo unknown) 2>/dev/null` in
          i86*)
-             SFLAGS=${CFLAGS-"-xpentium -fast -KPIC -R."}
-             CFLAGS=${CFLAGS-"-xpentium -fast"} ;;
+             SFLAGS=${CFLAGS-"-g -O1 -xpentium -fast -KPIC -R."}
+             CFLAGS=${CFLAGS-"-g -O1 -xpentium -fast"} ;;
          *)
-             SFLAGS=${CFLAGS-"-fast -xcg92 -KPIC -R."}
-             CFLAGS=${CFLAGS-"-fast -xcg92"} ;;
+             SFLAGS=${CFLAGS-"-g -O1 -fast -xcg92 -KPIC -R."}
+             CFLAGS=${CFLAGS-"-g -O1 -fast -xcg92"} ;;
          esac ;;
-  SunOS\ 4*) SFLAGS=${CFLAGS-"-O2 -PIC"}
-             CFLAGS=${CFLAGS-"-O2"}
+  SunOS\ 4*) SFLAGS=${CFLAGS-"-g -O1 -PIC"}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"ld"} ;;
-  SunStudio\ 9*) SFLAGS=${CFLAGS-"-fast -xcode=pic32 -xtarget=ultra3 -xarch=v9b"}
-             CFLAGS=${CFLAGS-"-fast -xtarget=ultra3 -xarch=v9b"}
+  SunStudio\ 9*) SFLAGS=${CFLAGS-"-g -O1 -fast -xcode=pic32 -xtarget=ultra3 -xarch=v9b"}
+             CFLAGS=${CFLAGS-"-g -O1 -fast -xtarget=ultra3 -xarch=v9b"}
              LDSHARED=${LDSHARED-"cc -xarch=v9b"} ;;
   UNIX_System_V\ 4.2.0)
-             SFLAGS=${CFLAGS-"-KPIC -O"}
-             CFLAGS=${CFLAGS-"-O"}
+             SFLAGS=${CFLAGS-"-g -O1 -KPIC"}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"cc -G"} ;;
   UNIX_SV\ 4.2MP)
-             SFLAGS=${CFLAGS-"-Kconform_pic -O"}
-             CFLAGS=${CFLAGS-"-O"}
+             SFLAGS=${CFLAGS-"-g -O1 -Kconform_pic"}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"cc -G"} ;;
   OpenUNIX\ 5)
-             SFLAGS=${CFLAGS-"-KPIC -O"}
-             CFLAGS=${CFLAGS-"-O"}
+             SFLAGS=${CFLAGS-"-g -O1 -KPIC"}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"cc -G"} ;;
   AIX*)  # Courtesy of dbakker@arrayasolutions.com
-             SFLAGS=${CFLAGS-"-O -qmaxmem=8192"}
-             CFLAGS=${CFLAGS-"-O -qmaxmem=8192"}
+             SFLAGS=${CFLAGS-"-g -O1 -qmaxmem=8192"}
+             CFLAGS=${CFLAGS-"-g -O1 -qmaxmem=8192"}
              LDSHARED=${LDSHARED-"xlc -G"} ;;
   # send working options for other systems to zlib@gzip.org
-  *)         SFLAGS=${CFLAGS-"-O"}
-             CFLAGS=${CFLAGS-"-O"}
+  *)         SFLAGS=${CFLAGS-"-g -O1"}
+             CFLAGS=${CFLAGS-"-g -O1"}
              LDSHARED=${LDSHARED-"cc -shared"} ;;
   esac
 fi
@@ -265,8 +267,8 @@ cat > $test.c <<EOF
 off64_t dummy = 0;
 EOF
 if test "`($CC -c $CFLAGS -D_LARGEFILE64_SOURCE=1 $test.c) 2>&1`" = ""; then
-  CFLAGS="${CFLAGS} -D_LARGEFILE64_SOURCE=1"
-  SFLAGS="${SFLAGS} -D_LARGEFILE64_SOURCE=1"
+  CFLAGS="${CFLAGS} -g -O1 -D_LARGEFILE64_SOURCE=1"
+  SFLAGS="${SFLAGS} -g -O1 -D_LARGEFILE64_SOURCE=1"
   ALL="${ALL} all64"
   TEST="${TEST} test64"
   echo "Checking for off64_t... Yes."

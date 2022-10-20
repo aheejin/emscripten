@@ -34,9 +34,9 @@ from tools.utils import run_process
 # 3: 1 second
 # 4: 5 seconds
 # 5: 10 seconds
-DEFAULT_ARG = '4'
+DEFAULT_ARG = '1'
 
-TEST_REPS = 5
+TEST_REPS = 1
 
 # by default, run just core benchmarks
 CORE_BENCHMARKS = True
@@ -46,7 +46,7 @@ if 'benchmark.' in str(sys.argv):
 
 non_core = unittest.skipIf(CORE_BENCHMARKS, "only running core benchmarks")
 
-OPTIMIZATIONS = '-O3'
+OPTIMIZATIONS = '-O1'
 
 PROFILING = 0
 
@@ -54,7 +54,8 @@ LLVM_FEATURE_FLAGS = ['-mnontrapping-fptoint']
 
 # A comma separated list of benchmarkers to run during test_benchmark tests. See
 # `named_benchmarkers` for what is available.
-EMTEST_BENCHMARKERS = os.getenv('EMTEST_BENCHMARKERS', 'clang,v8,v8-lto,v8-ctors')
+#EMTEST_BENCHMARKERS = os.getenv('EMTEST_BENCHMARKERS', 'clang,v8,v8-lto,v8-ctors')
+EMTEST_BENCHMARKERS = os.getenv('EMTEST_BENCHMARKERS', 'clang,v8')
 
 
 class Benchmarker:
@@ -160,6 +161,7 @@ class NativeBenchmarker(Benchmarker):
     self.cc = cc
     self.cxx = cxx
     self.args = args or [OPTIMIZATIONS]
+    self.args += [OPTIMIZATIONS, '-g']
 
   def build(self, parent, filename, args, shared_args, emcc_args, native_args, native_exec, lib_builder):
     native_args = native_args or []
@@ -216,6 +218,7 @@ class EmscriptenBenchmarker(Benchmarker):
 
   def build(self, parent, filename, args, shared_args, emcc_args, native_args, native_exec, lib_builder):
     emcc_args = emcc_args or []
+    emcc_args = emcc_args + ['-g']
     self.filename = filename
     llvm_root = self.env.get('LLVM') or config.LLVM_ROOT
     if lib_builder:
@@ -361,18 +364,18 @@ aot_v8 = (config.V8_ENGINE if config.V8_ENGINE else []) + ['--no-liftoff']
 
 named_benchmarkers = {
   'clang': NativeBenchmarker('clang', [CLANG_CC], [CLANG_CXX]),
-  'gcc': NativeBenchmarker('gcc',   ['gcc', '-no-pie'],  ['g++', '-no-pie']),
-  'size': SizeBenchmarker('size'),
+#  'gcc': NativeBenchmarker('gcc',   ['gcc', '-no-pie'],  ['g++', '-no-pie']),
+#  'size': SizeBenchmarker('size'),
   'v8': EmscriptenBenchmarker('v8', aot_v8),
-  'v8-lto': EmscriptenBenchmarker('v8-lto', aot_v8, ['-flto']),
-  'v8-ctors': EmscriptenBenchmarker('v8-ctors', aot_v8, ['-sEVAL_CTORS']),
-  'v8-64': EmscriptenBenchmarker('v8-64', aot_v8, ['-sMEMORY64=2']),
-  'node': EmscriptenBenchmarker('node', config.NODE_JS_TEST),
-  'node-64': EmscriptenBenchmarker('node-64', config.NODE_JS_TEST, ['-sMEMORY64=2']),
-  'cherp-v8': CheerpBenchmarker('cheerp-v8-wasm', aot_v8),
+#  'v8-lto': EmscriptenBenchmarker('v8-lto', aot_v8, ['-flto']),
+#  'v8-ctors': EmscriptenBenchmarker('v8-ctors', aot_v8, ['-sEVAL_CTORS']),
+#  'v8-64': EmscriptenBenchmarker('v8-64', aot_v8, ['-sMEMORY64=2']),
+#  'node': EmscriptenBenchmarker('node', config.NODE_JS_TEST),
+#  'node-64': EmscriptenBenchmarker('node-64', config.NODE_JS_TEST, ['-sMEMORY64=2']),
+#  'cherp-v8': CheerpBenchmarker('cheerp-v8-wasm', aot_v8),
   # TODO: ensure no baseline compiler is used, see v8
-  'sm': EmscriptenBenchmarker('sm', config.SPIDERMONKEY_ENGINE),
-  'cherp-sm': CheerpBenchmarker('cheerp-sm-wasm', config.SPIDERMONKEY_ENGINE),
+#  'sm': EmscriptenBenchmarker('sm', config.SPIDERMONKEY_ENGINE),
+#  'cherp-sm': CheerpBenchmarker('cheerp-sm-wasm', config.SPIDERMONKEY_ENGINE),
 }
 
 for name in EMTEST_BENCHMARKERS.split(','):
@@ -1119,7 +1122,7 @@ class benchmark(common.RunnerCore):
         env_init['LDFLAGS'] = '-sMEMORY64'
       return self.get_poppler_library(env_init=env_init)
 
-    self.do_benchmark('poppler', '', 'hashed printout',
+    self.do_benchmark('poppler', '', '', #'hashed printout',
                       shared_args=['-I' + test_file('poppler/include'),
                                    '-I' + test_file('freetype/include')],
                       emcc_args=['-sFILESYSTEM', '--pre-js=pre.js', '--embed-file',
