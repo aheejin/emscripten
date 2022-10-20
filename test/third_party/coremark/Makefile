@@ -10,7 +10,7 @@ OBJECTS = \
 all: coremark.a
 
 %.o: %.c
-	$(CC) $(CFLAGS) -I. $< -o $@ -O2 -c
+	$(CC) $(CFLAGS) -I. $< -o $@ -g -O1 -c
 
 coremark.a: $(OBJECTS)
 	$(AR) rvs $@ $(OBJECTS)
