@@ -3366,9 +3366,6 @@ Module["preRun"].push(function () {
       create_file('filey.txt', 'sync_tunnel\nsync_tunnel_bool\n')
     self.btest('browser/async_returnvalue.cpp', '0', args=['-sASYNCIFY', '-sASYNCIFY_IGNORE_INDIRECT', '--js-library', test_file('browser/async_returnvalue.js')] + args + ['-sASSERTIONS'])
 
-  def test_async_stack_overflow(self):
-    self.btest('browser/async_stack_overflow.cpp', 'abort:RuntimeError: unreachable', args=['-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=4'])
-
   def test_async_bad_list(self):
     self.btest('browser/async_bad_list.cpp', '0', args=['-sASYNCIFY', '-sASYNCIFY_ONLY=[waka]', '--profiling'])
 
@@ -5312,6 +5309,12 @@ Module["preRun"].push(function () {
     test(['-sMALLOC=emmalloc-debug'])
     test(['-sMALLOC=emmalloc-memvalidate'])
     test(['-sMALLOC=emmalloc-memvalidate-verbose'])
+
+  # Test that it is possible to malloc() a huge 3GB memory block in 4GB mode using dlmalloc.
+  @no_firefox('no 4GB support yet')
+  def test_dlmalloc_3GB(self):
+    self.btest_exit(test_file('alloc_3gb.cpp'),
+                    args=['-sMALLOC=dlmalloc', '-sMAXIMUM_MEMORY=4GB', '-sALLOW_MEMORY_GROWTH=1'])
 
   @parameterized({
     # the fetch backend works even on the main thread: we proxy to a background

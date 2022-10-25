@@ -9182,6 +9182,24 @@ _d
     self.assertContained('[asyncify] g can', out)
     self.assertContained('[asyncify] i can', out)
 
+  def test_asyncify_stack_overflow(self):
+    self.emcc_args = ['-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=4']
+
+    # The unreachable error on small stack sizes is not super-helpful. Try at
+    # least to hint at increasing the stack size.
+
+    def test(args, expected):
+      self.do_runf(test_file('other/test_asyncify_stack_overflow.cpp'),
+                   emcc_args=args,
+                   assert_returncode=common.NON_ZERO,
+                   expected_output=[expected])
+
+    test(['-sASSERTIONS=0'],
+         'Aborted(RuntimeError: unreachable). Build with -sASSERTIONS for more info.')
+
+    test(['-sASSERTIONS=1'],
+         'Aborted(RuntimeError: unreachable). "unreachable" may be due to ASYNCIFY_STACK_SIZE not being large enough (try increasing it)')
+
   # Sockets and networking
 
   def test_inet(self):
@@ -12127,10 +12145,10 @@ Module['postRun'] = function() {{
     self.emcc_args += ['--preload-file', 'js_backend_files/file.dat']
     self.do_run_in_out_file_test('wasmfs/wasmfs_before_preload.c')
 
-  @disabled('Running with initial >2GB heaps is not currently supported on the CI version of Node')
+  # Requires v8 for now since the version of node we use in CI doesn't support >2GB heaps
+  @requires_v8
   def test_hello_world_above_2gb(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-sGLOBAL_BASE=2147483648', '-sINITIAL_MEMORY=3GB'])
-    self.assertContained('hello, world!', self.run_js('a.out.js'))
+    self.do_runf(test_file('hello_world.c'), 'hello, world!', emcc_args=['-sGLOBAL_BASE=2147483648', '-sINITIAL_MEMORY=3GB'])
 
   def test_hello_function(self):
     # hello_function.cpp is referenced/used in the docs.  This test ensures that it
