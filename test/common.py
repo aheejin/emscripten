@@ -1879,7 +1879,7 @@ def build_library(name,
         with open(os.path.join(project_dir, 'configure_err'), 'w') as err:
           stdout = out if EMTEST_BUILD_VERBOSE < 2 else None
           stderr = err if EMTEST_BUILD_VERBOSE < 1 else None
-          shared.run_process(configure, env=env, stdout=stdout, stderr=stderr,
+          shared.run_process(configure, env=env, #stdout=stdout, stderr=stderr,
                              cwd=project_dir)
     except subprocess.CalledProcessError:
       print('-- configure stdout --')
@@ -1908,7 +1908,8 @@ def build_library(name,
       with open_make_err('w') as make_err:
         stdout = make_out if EMTEST_BUILD_VERBOSE < 2 else None
         stderr = make_err if EMTEST_BUILD_VERBOSE < 1 else None
-        shared.run_process(make + make_args, stdout=stdout, stderr=stderr, env=env,
+        shared.run_process(make + make_args, #stdout=stdout, stderr=stderr,
+                           env=env,
                            cwd=project_dir)
   except subprocess.CalledProcessError:
     with open_make_out() as f:
