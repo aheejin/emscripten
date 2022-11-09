@@ -3642,6 +3642,8 @@ def parse_args(newargs):
     sys.exit(0)
 
   newargs = [a for a in newargs if a]
+  if settings.DEBUG_LEVEL >= 3:
+    newargs.append('-gdwarf-5')
   return options, settings_changes, user_js_defines, newargs
 
 

@@ -1383,7 +1383,7 @@ var DYNCALLS = false;
 // i64 is used. If WASM_BIGINT is present, the default minimum supported browser
 // versions will be increased to the min version that supports BigInt.
 // [link]
-var WASM_BIGINT = false;
+var WASM_BIGINT = true;
 
 // WebAssembly defines a "producers section" which compilers and tools can
 // annotate themselves in, and LLVM emits this by default.
@@ -1404,7 +1404,7 @@ var EMIT_EMSCRIPTEN_LICENSE = false;
 // in order to interface with JavaScript.  For non-web/non-JS embeddings, setting
 // this to 0 may be desirable.
 // [link]
-var LEGALIZE_JS_FFI = true;
+var LEGALIZE_JS_FFI = false;
 
 // Ports
 
