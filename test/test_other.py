@@ -5598,6 +5598,37 @@ int main(void) {
     self.assertFalse(output.stderr)
     self.assertEqual(output.stdout, 'hello, world!\nhello, world!\n')
 
+  @node_pthreads
+  def test_pthread_print_override_modularize(self):
+    self.set_setting('EXPORT_NAME', 'Test')
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('MODULARIZE')
+    create_file('main.c', '''
+      #include <emscripten/console.h>
+
+      int main() {
+        _emscripten_out("hello, world!");
+        return 0;
+      }
+    ''')
+    create_file('main.js', '''
+      const Test = require('./test.js');
+
+      async function main() {
+        await Test({
+          // world -> earth
+          print: (text) => console.log(text.replace('world', 'earth'))
+        });
+      }
+      main();
+    ''')
+
+    self.emcc('main.c', output_filename='test.js')
+    output = self.run_js('main.js')
+    self.assertNotContained('hello, world!', output)
+    self.assertContained('hello, earth!', output)
+
   def test_define_modularize(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-sMODULARIZE', '-sASSERTIONS=0'])
     src = 'var module = 0; ' + read_file('a.out.js')
@@ -8457,6 +8488,17 @@ end
     err = self.expect_fail(base + ['--embed-file', 'somefile'])
     self.assertContained(expected, err)
 
+  def test_noderawfs_access_abspath(self):
+    create_file('foo', 'bar')
+    create_file('access.c', r'''
+      #include <unistd.h>
+      int main(int argc, char** argv) {
+        return access(argv[1], F_OK);
+      }
+    ''')
+    self.run_process([EMCC, 'access.c', '-sNODERAWFS'])
+    self.run_js('a.out.js', args=[os.path.abspath('foo')])
+
   @disabled('https://github.com/nodejs/node/issues/18265')
   def test_node_code_caching(self):
     self.run_process([EMCC, test_file('hello_world.c'),
@@ -11189,7 +11231,7 @@ exec "$@"
 
   def test_LIBRARY_DEBUG(self):
     self.set_setting('LIBRARY_DEBUG')
-    self.do_runf(test_file('hello_world.c'), '[library call:_fd_write: 0x1')
+    self.do_runf(test_file('hello_world.c'), '[library call:_fd_write: 0x00000001 (1)')
 
   def test_SUPPORT_LONGJMP_executable(self):
     err = self.expect_fail([EMCC, test_file('core/test_longjmp.c'), '-sSUPPORT_LONGJMP=0'])
