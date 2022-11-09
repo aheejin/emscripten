@@ -1489,7 +1489,7 @@ var EMIT_EMSCRIPTEN_LICENSE = false;
 // this to 0 may be desirable.
 // [link]
 // [deprecated]
-var LEGALIZE_JS_FFI = true;
+var LEGALIZE_JS_FFI = false;
 
 // Ports
 
