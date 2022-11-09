@@ -131,7 +131,7 @@ class NativeBenchmarker(Benchmarker):
     self.cc = cc
     self.cxx = cxx
     self.args = args or [OPTIMIZATIONS]
-    self.args += [OPTIMIZATIONS, '-g']
+    self.args += [OPTIMIZATIONS, '-g', '-ffunction-sections', '-Wl,--gc-sections']
 
   def build(self, parent, filename, args, shared_args, emcc_args, native_args, native_exec, lib_builder, has_output_parser):
     native_args = native_args or []
