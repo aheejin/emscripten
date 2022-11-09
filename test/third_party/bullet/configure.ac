@@ -146,8 +146,8 @@ AC_MSG_RESULT([$build_mode])
 
 
 
-CFLAGS="$ARCH_SPECIFIC_CFLAGS $CFLAGS -g -O1"
-CXXFLAGS="$ARCH_SPECIFIC_CFLAGS $CXXFLAGS $CFLAGS -g -O1"
+CFLAGS="$ARCH_SPECIFIC_CFLAGS $CFLAGS -g -O1 -ffunction-sections"
+CXXFLAGS="$ARCH_SPECIFIC_CFLAGS $CXXFLAGS $CFLAGS -g -O1 -ffunction-sections"
 #----------------------------------------------------------------------------
 # Emit generated files.
 #----------------------------------------------------------------------------

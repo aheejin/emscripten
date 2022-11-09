@@ -13,7 +13,7 @@
 # If you have problems, try without defining CC and CFLAGS before reporting
 # an error.
 
-CFLAGS += "-g -O1"
+CFLAGS += "-g -O1 -ffunction-sections"
 
 if [ -n "${CHOST}" ]; then
     uname="$(echo "${CHOST}" | sed -e 's/^[^-]*-\([^-]*\)$/\1/' -e 's/^[^-]*-[^-]*-\([^-]*\)$/\1/' -e 's/^[^-]*-[^-]*-\([^-]*\)-.*$/\1/')"
@@ -99,7 +99,7 @@ EOF
 
 test -z "$CC" && echo Checking for ${CROSS_PREFIX}gcc...
 cc=${CC-${CROSS_PREFIX}gcc}
-cflags=${CFLAGS-"-g -O1"}
+cflags=${CFLAGS-"-g -O1 -ffunction-sections"}
 # to force the asm version use: CFLAGS="-O1 -DASMV" ./configure
 case "$cc" in
   *gcc*) gcc=1 ;;
@@ -159,8 +159,8 @@ else
     uname=`(uname -sr || echo unknown) 2>/dev/null`
   fi
   case "$uname" in
-  HP-UX*)    SFLAGS=${CFLAGS-"-g -O1 +z"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+  HP-UX*)    SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections +z"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
 #            LDSHARED=${LDSHARED-"ld -b +vnocompatwarnings"}
              LDSHARED=${LDSHARED-"ld -b"}
          case `(uname -m || echo unknown) 2>/dev/null` in
@@ -171,58 +171,58 @@ else
              shared_ext='.sl'
              SHAREDLIB='libz.sl' ;;
          esac ;;
-  IRIX*)     SFLAGS=${CFLAGS-"-ansi -g -O1 -rpath ."}
-             CFLAGS=${CFLAGS-"-ansi -g -O1"}
+  IRIX*)     SFLAGS=${CFLAGS-"-ansi -g -O1 -ffunction-sections -rpath ."}
+             CFLAGS=${CFLAGS-"-ansi -g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc -shared -Wl,-soname,libz.so.1"} ;;
-  OSF1\ V4*) SFLAGS=${CFLAGS-"-g -O1 -std1"}
-             CFLAGS=${CFLAGS-"-g -O1 -std1"}
+  OSF1\ V4*) SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -std1"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -std1"}
              LDFLAGS="${LDFLAGS} -Wl,-rpath,."
              LDSHARED=${LDSHARED-"cc -shared  -Wl,-soname,libz.so -Wl,-msym -Wl,-rpath,$(libdir) -Wl,-set_version,${VER}:1.0"} ;;
-  OSF1*)     SFLAGS=${CFLAGS-"-g -O1 -std1"}
-             CFLAGS=${CFLAGS-"-g -O1 -std1"}
+  OSF1*)     SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -std1"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -std1"}
              LDSHARED=${LDSHARED-"cc -shared -Wl,-soname,libz.so.1"} ;;
-  QNX*)      SFLAGS=${CFLAGS-"-g -O1"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+  QNX*)      SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc"}
              RANLIB=${RANLIB-"true"}
              AR_RC="cc -A" ;;
-  SCO_SV\ 3.2*) SFLAGS=${CFLAGS-"-g -O1 -dy -KPIC "}
-             CFLAGS=${CFLAGS-"-g -O1"}
+  SCO_SV\ 3.2*) SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -dy -KPIC "}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc -dy -KPIC -G"} ;;
   SunOS\ 5*) LDSHARED=${LDSHARED-"cc -G"}
          case `(uname -m || echo unknown) 2>/dev/null` in
          i86*)
-             SFLAGS=${CFLAGS-"-g -O1 -xpentium -fast -KPIC -R."}
-             CFLAGS=${CFLAGS-"-g -O1 -xpentium -fast"} ;;
+             SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -xpentium -fast -KPIC -R."}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -xpentium -fast"} ;;
          *)
-             SFLAGS=${CFLAGS-"-g -O1 -fast -xcg92 -KPIC -R."}
-             CFLAGS=${CFLAGS-"-g -O1 -fast -xcg92"} ;;
+             SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -fast -xcg92 -KPIC -R."}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -fast -xcg92"} ;;
          esac ;;
-  SunOS\ 4*) SFLAGS=${CFLAGS-"-g -O1 -PIC"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+  SunOS\ 4*) SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -PIC"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"ld"} ;;
-  SunStudio\ 9*) SFLAGS=${CFLAGS-"-g -O1 -fast -xcode=pic32 -xtarget=ultra3 -xarch=v9b"}
-             CFLAGS=${CFLAGS-"-g -O1 -fast -xtarget=ultra3 -xarch=v9b"}
+  SunStudio\ 9*) SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -fast -xcode=pic32 -xtarget=ultra3 -xarch=v9b"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -fast -xtarget=ultra3 -xarch=v9b"}
              LDSHARED=${LDSHARED-"cc -xarch=v9b"} ;;
   UNIX_System_V\ 4.2.0)
-             SFLAGS=${CFLAGS-"-g -O1 -KPIC"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+             SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -KPIC"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc -G"} ;;
   UNIX_SV\ 4.2MP)
-             SFLAGS=${CFLAGS-"-g -O1 -Kconform_pic"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+             SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -Kconform_pic"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc -G"} ;;
   OpenUNIX\ 5)
-             SFLAGS=${CFLAGS-"-g -O1 -KPIC"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+             SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -KPIC"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc -G"} ;;
   AIX*)  # Courtesy of dbakker@arrayasolutions.com
-             SFLAGS=${CFLAGS-"-g -O1 -qmaxmem=8192"}
-             CFLAGS=${CFLAGS-"-g -O1 -qmaxmem=8192"}
+             SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -qmaxmem=8192"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections -qmaxmem=8192"}
              LDSHARED=${LDSHARED-"xlc -G"} ;;
   # send working options for other systems to zlib@gzip.org
-  *)         SFLAGS=${CFLAGS-"-g -O1"}
-             CFLAGS=${CFLAGS-"-g -O1"}
+  *)         SFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
+             CFLAGS=${CFLAGS-"-g -O1 -ffunction-sections"}
              LDSHARED=${LDSHARED-"cc -shared"} ;;
   esac
 fi
@@ -267,8 +267,8 @@ cat > $test.c <<EOF
 off64_t dummy = 0;
 EOF
 if test "`($CC -c $CFLAGS -D_LARGEFILE64_SOURCE=1 $test.c) 2>&1`" = ""; then
-  CFLAGS="${CFLAGS} -g -O1 -D_LARGEFILE64_SOURCE=1"
-  SFLAGS="${SFLAGS} -g -O1 -D_LARGEFILE64_SOURCE=1"
+  CFLAGS="${CFLAGS} -g -O1 -ffunction-sections -D_LARGEFILE64_SOURCE=1"
+  SFLAGS="${SFLAGS} -g -O1 -ffunction-sections -D_LARGEFILE64_SOURCE=1"
   ALL="${ALL} all64"
   TEST="${TEST} test64"
   echo "Checking for off64_t... Yes."

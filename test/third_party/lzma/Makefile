@@ -10,7 +10,7 @@ OBJECTS = \
 all: lzma.a
 
 %.o: %.c
-	$(CC) -I. $< -o $@ -O1 -g -c
+	$(CC) -I. $< -o $@ -g -O1 -ffunction-sections -c
 
 lzma.a: $(OBJECTS)
 	$(AR) rv $@ $(OBJECTS)

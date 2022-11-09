@@ -29,6 +29,8 @@ esac
 fi
 
 
+
+
 # PATH needs CR
 # Avoid depending upon Character Ranges.
 as_cr_letters='abcdefghijklmnopqrstuvwxyz'
@@ -3219,7 +3221,7 @@ else
   ac_save_c_werror_flag=$ac_c_werror_flag
    ac_c_werror_flag=yes
    ac_cv_prog_cc_g=no
-   CFLAGS="-g -O1"
+   CFLAGS="-g -O1 -ffunction-sections"
    cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -3257,7 +3259,7 @@ else
   echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-	CFLAGS="-g -O1"
+	CFLAGS="-g -O1 -ffunction-sections"
       cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -3296,7 +3298,7 @@ else
 sed 's/^/| /' conftest.$ac_ext >&5
 
 	ac_c_werror_flag=$ac_save_c_werror_flag
-	 CFLAGS="-g -O1"
+	 CFLAGS="-g -O1 -ffunction-sections"
 	 cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -3352,15 +3354,15 @@ if test "$ac_test_CFLAGS" = set; then
   CFLAGS=$ac_save_CFLAGS
 elif test $ac_cv_prog_cc_g = yes; then
   if test "$GCC" = yes; then
-    CFLAGS="-g -O1"
+    CFLAGS="-g -O1 -ffunction-sections"
   else
-    CFLAGS="-g -O1"
+    CFLAGS="-g -O1 -ffunction-sections"
   fi
 else
   if test "$GCC" = yes; then
-    CFLAGS="-g -O1"
+    CFLAGS="-g -O1 -ffunction-sections"
   else
-    CFLAGS="-g -O1"
+    CFLAGS="-g -O1 -ffunction-sections"
   fi
 fi
 { echo "$as_me:$LINENO: checking for $CC option to accept ISO C89" >&5
@@ -3932,7 +3934,7 @@ else
   ac_save_cxx_werror_flag=$ac_cxx_werror_flag
    ac_cxx_werror_flag=yes
    ac_cv_prog_cxx_g=no
-   CXXFLAGS="-g -O1"
+   CXXFLAGS="-g -O1 -ffunction-sections"
    cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -3970,7 +3972,7 @@ else
   echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-	CXXFLAGS="-g -O1"
+	CXXFLAGS="-g -O1 -ffunction-sections"
       cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -4009,7 +4011,7 @@ else
 sed 's/^/| /' conftest.$ac_ext >&5
 
 	ac_cxx_werror_flag=$ac_save_cxx_werror_flag
-	 CXXFLAGS="-g -O1"
+	 CXXFLAGS="-g -O1 -ffunction-sections"
 	 cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -4065,15 +4067,15 @@ if test "$ac_test_CXXFLAGS" = set; then
   CXXFLAGS=$ac_save_CXXFLAGS
 elif test $ac_cv_prog_cxx_g = yes; then
   if test "$GXX" = yes; then
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   else
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   fi
 else
   if test "$GXX" = yes; then
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   else
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   fi
 fi
 ac_ext=c
@@ -7550,7 +7552,7 @@ else
   ac_save_cxx_werror_flag=$ac_cxx_werror_flag
    ac_cxx_werror_flag=yes
    ac_cv_prog_cxx_g=no
-   CXXFLAGS="-g -O1"
+   CXXFLAGS="-g -O1 -ffunction-sections"
    cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -7588,7 +7590,7 @@ else
   echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
-	CXXFLAGS="-g -O1"
+	CXXFLAGS="-g -O1 -ffunction-sections"
       cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -7627,7 +7629,7 @@ else
 sed 's/^/| /' conftest.$ac_ext >&5
 
 	ac_cxx_werror_flag=$ac_save_cxx_werror_flag
-	 CXXFLAGS="-g -O1"
+	 CXXFLAGS="-g -O1 -ffunction-sections"
 	 cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
 _ACEOF
@@ -7683,15 +7685,15 @@ if test "$ac_test_CXXFLAGS" = set; then
   CXXFLAGS=$ac_save_CXXFLAGS
 elif test $ac_cv_prog_cxx_g = yes; then
   if test "$GXX" = yes; then
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   else
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   fi
 else
   if test "$GXX" = yes; then
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   else
-    CXXFLAGS="-g -O1"
+    CXXFLAGS="-g -O1 -ffunction-sections"
   fi
 fi
 ac_ext=c
@@ -11750,7 +11752,7 @@ fi
   case $lt_cv_dlopen in
   dlopen)
     save_CPPFLAGS="$CPPFLAGS"
-    test "x$ac_cv_header_dlfcn_h" = xyes && CPPFLAGS="$CPPFLAGS -g -O1 -DHAVE_DLFCN_H"
+    test "x$ac_cv_header_dlfcn_h" = xyes && CPPFLAGS="$CPPFLAGS -g -O1 -ffunction-sections -DHAVE_DLFCN_H"
 
     save_LDFLAGS="$LDFLAGS"
     wl=$lt_prog_compiler_wl eval LDFLAGS=\"\$LDFLAGS $export_dynamic_flag_spec\"
@@ -15793,8 +15795,8 @@ echo "${ECHO_T}$build_mode" >&6; }
 
 
 
-CFLAGS="$ARCH_SPECIFIC_CFLAGS $CFLAGS -g -O1"
-CXXFLAGS="$ARCH_SPECIFIC_CFLAGS $CXXFLAGS $CFLAGS -g -O1"
+CFLAGS="$ARCH_SPECIFIC_CFLAGS $CFLAGS -g -O1 -ffunction-sections"
+CXXFLAGS="$ARCH_SPECIFIC_CFLAGS $CXXFLAGS $CFLAGS -g -O1 -ffunction-sections"
 #----------------------------------------------------------------------------
 # Emit generated files.
 #----------------------------------------------------------------------------
