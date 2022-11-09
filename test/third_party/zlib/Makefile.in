@@ -18,13 +18,13 @@
 
 CC=cc
 
-CFLAGS=-O1 -g
+CFLAGS=-g -O1 -ffunction-sections
 #CFLAGS=-O -DMAX_WBITS=14 -DMAX_MEM_LEVEL=7
 #CFLAGS=-g -DDEBUG
 #CFLAGS=-O3 -Wall -Wwrite-strings -Wpointer-arith -Wconversion \
 #           -Wstrict-prototypes -Wmissing-prototypes
 
-SFLAGS=-O1
+SFLAGS=-g -O1 -ffunction-sections
 LDFLAGS=
 TEST_LDFLAGS=-L. libz.a
 LDSHARED=$(CC)

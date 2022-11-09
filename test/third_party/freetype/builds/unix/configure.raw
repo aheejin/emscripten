@@ -70,17 +70,17 @@ AC_SUBST(EXEEXT_BUILD)
 # get compiler flags right
 
 if test "x$GCC" = xyes; then
-  XX_CFLAGS="-g -O1 -Wall"
-  XX_ANSIFLAGS="-g -O1 -pedantic -ansi"
+  XX_CFLAGS="-g -O1 -ffunction-sections -Wall"
+  XX_ANSIFLAGS="-g -O1 -ffunction-sections -pedantic -ansi"
 else
   case "$host" in
   *-dec-osf*)
-    CFLAGS="-g -O1"
-    XX_CFLAGS="-g -O1 -std1 -g3"
+    CFLAGS="-g -O1 -ffunction-sections"
+    XX_CFLAGS="-g -O1 -ffunction-sections -std1 -g3"
     XX_ANSIFLAGS=
     ;;
   *)
-    XX_CFLAGS="-g -O1"
+    XX_CFLAGS="-g -O1 -ffunction-sections"
     XX_ANSIFLAGS=
     ;;
   esac

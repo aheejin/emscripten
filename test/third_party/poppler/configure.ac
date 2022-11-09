@@ -31,7 +31,7 @@ if test "x$GXX" = "xyes"; then
     cygwin* | mingw*)
     ;;
     *)
-      CXXFLAGS="$CXXFLAGS -g -O1 -ansi"
+      CXXFLAGS="$CXXFLAGS -g -O1 -ffunction-sections -ansi"
     ;;
   esac
 fi

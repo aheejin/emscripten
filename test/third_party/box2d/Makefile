@@ -51,7 +51,7 @@ OBJECTS = \
 all: box2d.a
 
 %.o: %.cpp
-	$(CXX) $(CFLAGS) -I. $< -o $@ -O1 -c -g -fno-exceptions -fno-rtti -Wno-null-conversion
+	$(CXX) $(CFLAGS) -I. $< -o $@ -O1 -c -g -ffunction-sections -fno-exceptions -fno-rtti -Wno-null-conversion
 
 box2d.a: $(OBJECTS)
 	$(AR) rvs $@ $(OBJECTS)
