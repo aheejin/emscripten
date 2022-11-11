@@ -32,6 +32,7 @@ import shutil
 import stat
 import sys
 import time
+import tarfile
 from enum import Enum, unique, auto
 from subprocess import PIPE
 from urllib.parse import quote
@@ -276,6 +277,7 @@ class EmccOptions:
     self.no_entry = False
     self.shared = False
     self.relocatable = False
+    self.reproduce = None
 
 
 def will_metadce():
@@ -284,6 +286,67 @@ def will_metadce():
   if settings.ASSERTIONS:
     return False
   return settings.OPT_LEVEL >= 3 or settings.SHRINK_LEVEL >= 1
+
+
+def create_reproduce_file(name, args):
+  def make_relative(filename):
+    filename = os.path.normpath(os.path.abspath(filename))
+    filename = os.path.splitdrive(filename)[1]
+    filename = filename[1:]
+    return filename
+
+  root = unsuffixed_basename(name)
+  with tarfile.open(name, 'w') as reproduce_file:
+    reproduce_file.add(shared.path_from_root('emscripten-version.txt'), os.path.join(root, 'version.txt'))
+
+    with shared.get_temp_files().get_file(suffix='.tar') as rsp_name:
+      with open(rsp_name, 'w') as rsp:
+        ignore_next = False
+        output_arg = None
+
+        for arg in args:
+          ignore = ignore_next
+          ignore_next = False
+          if arg.startswith('--reproduce='):
+            continue
+
+          if arg.startswith('-o='):
+            rsp.write('-o\n')
+            arg = arg[3:]
+            output_arg = True
+            ignore = True
+
+          if output_arg:
+            # If -o path contains directories, "emcc @response.txt" will likely
+            # fail because the archive we are creating doesn't contain empty
+            # directories for the output path (-o doesn't create directories).
+            # Strip directories to prevent the issue.
+            arg = os.path.basename(arg)
+            output_arg = False
+
+          if not arg.startswith('-') and not ignore:
+            relpath = make_relative(arg)
+            rsp.write(relpath + '\n')
+            reproduce_file.add(arg, os.path.join(root, relpath))
+          else:
+            rsp.write(arg + '\n')
+
+          if ignore:
+            continue
+
+          if arg in ('-MT', '-MF', '-MJ', '-MQ', '-D', '-U', '-o', '-x',
+                     '-Xpreprocessor', '-include', '-imacros', '-idirafter',
+                     '-iprefix', '-iwithprefix', '-iwithprefixbefore',
+                     '-isysroot', '-imultilib', '-A', '-isystem', '-iquote',
+                     '-install_name', '-compatibility_version',
+                     '-current_version', '-I', '-L', '-include-pch',
+                     '-Xlinker', '-Xclang'):
+            ignore_next = True
+
+          if arg == '-o':
+            output_arg = True
+
+      reproduce_file.add(rsp_name, os.path.join(root, 'response.txt'))
 
 
 def setup_environment_settings():
@@ -1142,11 +1205,17 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   if 'EMMAKEN_CFLAGS' in os.environ:
     exit_with_error('`EMMAKEN_CFLAGS` is no longer supported, please use `EMCC_CFLAGS` instead')
 
+  if 'EMCC_REPRODUCE' in os.environ:
+    options.reproduce = os.environ['EMCC_REPRODUCE']
+
   # For internal consistency, ensure we don't attempt or read or write any link time
   # settings until we reach the linking phase.
   settings.limit_settings(COMPILE_TIME_SETTINGS)
 
   newargs, input_files = phase_setup(options, state, newargs)
+
+  if options.reproduce:
+    create_reproduce_file(options.reproduce, args)
 
   if state.mode == Mode.POST_LINK_ONLY:
     settings.limit_settings(None)
@@ -1815,6 +1884,14 @@ def phase_linker_setup(options, state, newargs):
   if not settings.AUTO_JS_LIBRARIES:
     default_setting('USE_SDL', 0)
 
+  if 'GLOBAL_BASE' not in user_settings and not settings.SHRINK_LEVEL and not settings.OPT_LEVEL:
+    # When optimizing for size it helps to put static data first before
+    # the stack (sincs this makes instructions for accessing this data
+    # use a smaller LEB encoding).
+    # However, for debugability is better to have the stack come first
+    # (becuase stack overflows will trap rather than corrupting data).
+    settings.STACK_FIRST = True
+
   # Default to TEXTDECODER=2 (always use TextDecoder to decode UTF-8 strings)
   # in -Oz builds, since custom decoder for UTF-8 takes up space.
   # In pthreads enabled builds, TEXTDECODER==2 may not work, see
@@ -2006,7 +2083,8 @@ def phase_linker_setup(options, state, newargs):
     settings.REQUIRED_EXPORTS += [
       'emscripten_stack_get_end',
       'emscripten_stack_get_free',
-      'emscripten_stack_get_base'
+      'emscripten_stack_get_base',
+      'emscripten_stack_get_current',
     ]
 
     # We call one of these two functions during startup which caches the stack limits
@@ -2151,7 +2229,7 @@ def phase_linker_setup(options, state, newargs):
     exit_with_error('cannot have both DYNAMIC_EXECUTION=0 and RELOCATABLE enabled at the same time, since RELOCATABLE needs to eval()')
 
   if settings.SIDE_MODULE and 'GLOBAL_BASE' in user_settings:
-    exit_with_error('Cannot set GLOBAL_BASE when building SIDE_MODULE')
+    exit_with_error('GLOBAL_BASE is not compatible with SIDE_MODULE')
 
   if options.use_preload_plugins or len(options.preload_files) or len(options.embed_files):
     if settings.NODERAWFS:
@@ -2499,6 +2577,7 @@ def phase_linker_setup(options, state, newargs):
     # We start our global data after the shadow memory.
     # We don't need to worry about alignment here.  wasm-ld will take care of that.
     settings.GLOBAL_BASE = shadow_size
+    settings.STACK_FIRST = False
 
     if not settings.ALLOW_MEMORY_GROWTH:
       settings.INITIAL_MEMORY = total_mem
@@ -3175,6 +3254,8 @@ def parse_args(newargs):
       options.use_closure_compiler = int(consume_arg())
     elif check_arg('--js-transform'):
       options.js_transform = consume_arg()
+    elif check_arg('--reproduce'):
+      options.reproduce = consume_arg()
     elif check_arg('--pre-js'):
       options.pre_js.append(consume_arg_file())
     elif check_arg('--post-js'):
