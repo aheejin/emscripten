@@ -161,7 +161,12 @@ class NativeBenchmarker(Benchmarker):
     self.cc = cc
     self.cxx = cxx
     self.args = args or [OPTIMIZATIONS]
-    self.args += [OPTIMIZATIONS, '-g', '-ffunction-sections', '-Wl,--gc-sections']
+    self.args += [OPTIMIZATIONS, '-g', '-ffunction-sections', '-fuse-ld=lld',
+                  '-Wl,--gc-sections',
+                  '-Wl,-zdead-reloc-in-nonalloc=.debug_*=0xffffffffffffffff,',
+                  '-Wl,-zdead-reloc-in-nonalloc=.debug_loc=0xfffffffffffffffe',
+                  '-Wl,-zdead-reloc-in-nonalloc=.debug_ranges=0xfffffffffffffffe'
+                  ]
 
   def build(self, parent, filename, args, shared_args, emcc_args, native_args, native_exec, lib_builder):
     native_args = native_args or []
