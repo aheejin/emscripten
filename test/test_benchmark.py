@@ -1030,7 +1030,7 @@ class benchmark(common.RunnerCore):
                       emcc_args=['-sFILESYSTEM', '-sMINIMAL_RUNTIME=0'],
                       force_c=True)
 
-  def test_zzz_poppler(self):
+  def zzztest_zzz_poppler(self):
     with open('pre.js', 'w') as f:
       f.write('''
         var benchmarkArgument = %s;
