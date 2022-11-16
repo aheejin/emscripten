@@ -1082,7 +1082,7 @@ class benchmark(common.RunnerCore):
                       force_c=True)
 
   @needs_make('depends on freetype')
-  def test_zzz_poppler(self):
+  def zzztest_zzz_poppler(self):
     utils.write_file('pre.js', '''
       var benchmarkArgument = %s;
       var benchmarkArgumentToPageCount = {
