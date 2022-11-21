@@ -2217,9 +2217,14 @@ int main(int argc, char **argv) {
     self.do_run_from_file('src.cpp', 'result.out')
     self.do_run_from_file('src.cpp', 'result.out', force_c=True)
 
-  def test_main_thread_async_em_asm(self):
-    self.do_core_test('test_main_thread_async_em_asm.cpp')
-    self.do_core_test('test_main_thread_async_em_asm.cpp', force_c=True)
+  @needs_dylink
+  @parameterized({
+    '': ([], False),
+    'relocatable': (['-sMAIN_MODULE=2'], False),
+    'force_c': ([], True),
+  })
+  def test_main_thread_async_em_asm(self, args, force_c=False):
+    self.do_core_test('test_main_thread_async_em_asm.cpp', emcc_args=args, force_c=force_c)
 
   # Tests MAIN_THREAD_EM_ASM_INT() function call with different signatures.
   def test_main_thread_em_asm_signatures(self):
@@ -2761,7 +2766,6 @@ The current type of b is: 9
 
   @node_pthreads
   def test_pthread_proxying_dropped_work(self):
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE=2')
     self.do_run_in_out_file_test('pthread/test_pthread_proxying_dropped_work.c')
 
@@ -2774,7 +2778,6 @@ The current type of b is: 9
 
   @node_pthreads
   def test_pthread_dispatch_after_exit(self):
-    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('pthread/test_pthread_dispatch_after_exit.c', interleaved_output=False)
 
   @node_pthreads
@@ -2786,7 +2789,6 @@ The current type of b is: 9
 
   @node_pthreads
   def test_pthread_nested_work_queue(self):
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE', 1)
     self.do_run_in_out_file_test('pthread/test_pthread_nested_work_queue.c')
 
@@ -2799,13 +2801,11 @@ The current type of b is: 9
 
   @node_pthreads
   def test_pthread_cleanup(self):
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE', 4)
     self.do_run_in_out_file_test('pthread/test_pthread_cleanup.cpp')
 
   @node_pthreads
   def test_pthread_setspecific_mainthread(self):
-    self.set_setting('EXIT_RUNTIME')
     print('.. return')
     self.do_runf(test_file('pthread/test_pthread_setspecific_mainthread.c'), 'done!', emcc_args=['-DRETURN'])
     print('.. exit')
@@ -2815,7 +2815,6 @@ The current type of b is: 9
 
   @node_pthreads
   def test_pthread_attr_getstack(self):
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE', 1)
     self.do_run_in_out_file_test('pthread/test_pthread_attr_getstack.c')
 
@@ -2831,7 +2830,6 @@ The current type of b is: 9
 
   @node_pthreads
   def test_pthread_abort_interrupt(self):
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('PTHREAD_POOL_SIZE', 1)
     expected = ['Aborted(). Build with -sASSERTIONS for more info', 'Aborted(native code called abort())']
     self.do_runf(test_file('pthread/test_pthread_abort_interrupt.c'), expected, assert_returncode=NON_ZERO)
@@ -6846,6 +6844,7 @@ void* operator new(size_t size) {
   @no_wasm64('MEMORY64 does not yet support SJLJ')
   @is_slow_test
   def test_poppler(self):
+    poppler = self.get_poppler_library()
     pdf_data = read_binary(test_file('poppler/paper.pdf'))
     create_file('paper.pdf.js', str(list(bytearray(pdf_data))))
 
@@ -6862,7 +6861,7 @@ void* operator new(size_t size) {
 
     ppm_data = str(list(bytearray(read_binary(test_file('poppler/ref.ppm')))))
     self.do_run('', ppm_data.replace(' ', ''),
-                libraries=self.get_poppler_library(),
+                libraries=poppler,
                 args=['-scale-to', '512', 'paper.pdf', 'filename'])
 
   @needs_make('make')
@@ -9106,13 +9105,11 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_cxx_threads(self):
     self.set_setting('PTHREAD_POOL_SIZE', 1)
-    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('pthread/test_pthread_cxx_threads.cpp')
 
   @node_pthreads
   def test_pthread_busy_wait(self):
     self.set_setting('PTHREAD_POOL_SIZE', 1)
-    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('pthread/test_pthread_busy_wait.cpp')
 
   @node_pthreads
@@ -9161,11 +9158,9 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   @node_pthreads
   def test_pthread_exit_main(self):
-    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('core/pthread/test_pthread_exit_main.c')
 
   def test_pthread_exit_main_stub(self):
-    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('core/pthread/test_pthread_exit_main.c')
 
   @node_pthreads
@@ -9217,7 +9212,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_stdio_locking(self):
     self.set_setting('PTHREAD_POOL_SIZE', '2')
-    self.set_setting('EXIT_RUNTIME')
     self.do_run_in_out_file_test('core/test_stdio_locking.c')
 
   @needs_dylink
@@ -9232,7 +9226,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_dylink(self):
     self.emcc_args.append('-Wno-experimental')
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_PTHREADS')
     self.set_setting('PTHREAD_POOL_SIZE', 2)
     main = test_file('core/pthread/test_pthread_dylink.c')
@@ -9253,7 +9246,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_dylink_entry_point(self, args):
     self.emcc_args.append('-Wno-experimental')
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_PTHREADS')
     self.set_setting('PTHREAD_POOL_SIZE', 1)
     main = test_file('core/pthread/test_pthread_dylink_entry_point.c')
@@ -9263,7 +9255,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_dylink_exceptions(self):
     self.emcc_args.append('-Wno-experimental')
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_PTHREADS')
     self.emcc_args.append('-fexceptions')
     self.dylink_testf(test_file('core/pthread/test_pthread_dylink_exceptions.cpp'))
@@ -9306,7 +9297,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_dylink_tls(self):
     self.emcc_args.append('-Wno-experimental')
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_PTHREADS')
     self.set_setting('PTHREAD_POOL_SIZE', 1)
     main = test_file('core/pthread/test_pthread_dylink_tls.c')
@@ -9316,7 +9306,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_dylink_longjmp(self):
     self.emcc_args.append('-Wno-experimental')
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_PTHREADS')
     self.set_setting('PTHREAD_POOL_SIZE=1')
     main = test_file('core/pthread/test_pthread_dylink_longjmp.c')
@@ -9326,7 +9315,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @node_pthreads
   def test_pthread_dylink_main_module_1(self):
     self.emcc_args.append('-Wno-experimental')
-    self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_PTHREADS')
     self.set_setting('MAIN_MODULE')
     self.do_runf(test_file('hello_world.c'))

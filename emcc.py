@@ -48,10 +48,12 @@ from tools.shared import do_replace, strip_prefix
 from tools.response_file import substitute_response_files
 from tools.minimal_runtime_shell import generate_minimal_runtime_html
 import tools.line_endings
+from tools import feature_matrix
 from tools import js_manipulation
 from tools import wasm2c
 from tools import webassembly
 from tools import config
+from tools import cache
 from tools.settings import user_settings, settings, MEM_SIZE_SETTINGS, COMPILE_TIME_SETTINGS
 from tools.utils import read_file, write_file, read_binary, delete_file
 
@@ -466,21 +468,6 @@ def apply_user_settings():
       settings.LTO = 0 if value else 'full'
 
 
-# apply minimum browser version defaults based on user settings. if
-# a user requests a feature that we know is only supported in browsers
-# from a specific version and above, we can assume that browser version.
-def apply_min_browser_versions():
-
-  def default_min_browser_version(browser, version):
-    default_setting(f'MIN_{browser.upper()}_VERSION', version)
-
-  if settings.WASM_BIGINT:
-    default_min_browser_version('Safari', 150000)
-    default_min_browser_version('Edge', 79)
-    default_min_browser_version('Firefox', 68)
-    # Chrome has BigInt since v67 which is less than default min version.
-
-
 def is_ar_file_with_missing_index(archive_file):
   # We parse the archive header outselves because llvm-nm --print-armap is slower and less
   # reliable.
@@ -614,6 +601,11 @@ def get_binaryen_passes():
     passes += ['--safe-heap']
   if settings.MEMORY64 == 2:
     passes += ['--memory64-lowering']
+  # sign-ext is enabled by default by llvm.  If the target browser settings don't support
+  # this we lower it away here using a binaryen pass.
+  if not feature_matrix.caniuse(feature_matrix.Feature.SIGN_EXT):
+    logger.debug('lowering sign-ext feature due to incompatiable target browser engines')
+    passes += ['--signext-lowering']
   if optimizing:
     passes += ['--post-emscripten']
   if optimizing:
@@ -852,7 +844,7 @@ def parse_s_args(args):
 
 
 def emsdk_cflags(user_args):
-  cflags = ['--sysroot=' + shared.Cache.get_sysroot(absolute=True)]
+  cflags = ['--sysroot=' + cache.get_sysroot(absolute=True)]
 
   def array_contains_any_of(hay, needles):
     for n in needles:
@@ -1678,7 +1670,7 @@ def phase_linker_setup(options, state, newargs):
     # Add `#!` line to output JS and make it executable.
     options.executable = True
 
-  system_libpath = '-L' + str(shared.Cache.get_lib_dir(absolute=True))
+  system_libpath = '-L' + str(cache.get_lib_dir(absolute=True))
   add_link_flag(state, sys.maxsize, system_libpath)
 
   if settings.OPT_LEVEL >= 1:
@@ -2339,11 +2331,17 @@ def phase_linker_setup(options, state, newargs):
   if 'MAXIMUM_MEMORY' in user_settings and not settings.ALLOW_MEMORY_GROWTH:
     diagnostics.warning('unused-command-line-argument', 'MAXIMUM_MEMORY is only meaningful with ALLOW_MEMORY_GROWTH')
 
-  if settings.EXPORT_ES6 and not settings.MODULARIZE:
-    # EXPORT_ES6 requires output to be a module
-    if 'MODULARIZE' in user_settings:
-      exit_with_error('EXPORT_ES6 requires MODULARIZE to be set')
-    settings.MODULARIZE = 1
+  if settings.EXPORT_ES6:
+    if not settings.MODULARIZE:
+      # EXPORT_ES6 requires output to be a module
+      if 'MODULARIZE' in user_settings:
+        exit_with_error('EXPORT_ES6 requires MODULARIZE to be set')
+      settings.MODULARIZE = 1
+    if shared.target_environment_may_be('node') and not settings.USE_ES6_IMPORT_META:
+      # EXPORT_ES6 + ENVIRONMENT=*node* requires the use of import.meta.url
+      if 'USE_ES6_IMPORT_META' in user_settings:
+        exit_with_error('EXPORT_ES6 and ENVIRONMENT=*node* requires USE_ES6_IMPORT_META to be set')
+      settings.USE_ES6_IMPORT_META = 1
 
   if settings.MODULARIZE and not settings.DECLARE_ASM_MODULE_EXPORTS:
     # When MODULARIZE option is used, currently requires declaring all module exports
@@ -2748,7 +2746,7 @@ def phase_linker_setup(options, state, newargs):
     if settings.WASM_EXCEPTIONS:
       settings.EXPORTED_FUNCTIONS += ['___cpp_exception', '___cxa_increment_exception_refcount', '___cxa_decrement_exception_refcount', '___thrown_object_from_unwind_exception']
 
-  apply_min_browser_versions()
+  feature_matrix.apply_min_browser_versions()
 
   if settings.SIDE_MODULE:
     # For side modules, we ignore all REQUIRED_EXPORTS that might have been added above.
@@ -2911,7 +2909,6 @@ def phase_compile_inputs(options, state, newargs, input_files):
       linker_inputs.append((i, input_file))
     elif building.is_ar(input_file):
       logger.debug(f'using static library: {input_file}')
-      ensure_archive_index(input_file)
       linker_inputs.append((i, input_file))
     elif language_mode:
       compile_source_file(i, input_file)
@@ -3104,13 +3101,17 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
     # mode)
     final_js = building.closure_compiler(final_js, pretty=False, advanced=False, extra_closure_args=options.closure_args)
 
-  # Unmangle previously mangled `import.meta` references in both main code and libraries.
+  # Unmangle previously mangled `import.meta` and `await import` references in
+  # both main code and libraries.
   # See also: `preprocess` in parseTools.js.
   if settings.EXPORT_ES6 and settings.USE_ES6_IMPORT_META:
     src = read_file(final_js)
     final_js += '.esmeta.js'
-    write_file(final_js, src.replace('EMSCRIPTEN$IMPORT$META', 'import.meta'))
-    save_intermediate('es6-import-meta')
+    write_file(final_js, src
+               .replace('EMSCRIPTEN$IMPORT$META', 'import.meta')
+               .replace('EMSCRIPTEN$AWAIT$IMPORT', 'await import'))
+    shared.get_temp_files().note(final_js)
+    save_intermediate('es6-module')
 
   # Apply pre and postjs files
   if options.extern_pre_js or options.extern_post_js:
@@ -3372,19 +3373,19 @@ def parse_args(newargs):
       logger.error('jcache is no longer supported')
     elif check_arg('--cache'):
       config.CACHE = os.path.normpath(consume_arg())
-      shared.reconfigure_cache()
+      cache.setup(config.CACHE)
       # Ensure child processes share the same cache (e.g. when using emcc to compiler system
       # libraries)
       os.environ['EM_CACHE'] = config.CACHE
     elif check_flag('--clear-cache'):
-      logger.info('clearing cache as requested by --clear-cache: `%s`', shared.Cache.dirname)
-      shared.Cache.erase()
+      logger.info('clearing cache as requested by --clear-cache: `%s`', cache.cachedir)
+      cache.erase()
       shared.perform_sanity_checks() # this is a good time for a sanity check
       should_exit = True
     elif check_flag('--clear-ports'):
       logger.info('clearing ports and cache as requested by --clear-ports')
       ports.clear()
-      shared.Cache.erase()
+      cache.erase()
       shared.perform_sanity_checks() # this is a good time for a sanity check
       should_exit = True
     elif check_flag('--check'):
@@ -3694,10 +3695,32 @@ def phase_binaryen(target, options, wasm_target):
     write_file(final_js, js)
 
 
+def node_es6_imports():
+  if not settings.EXPORT_ES6 or not shared.target_environment_may_be('node'):
+    return ''
+
+  # Multi-environment builds uses `await import` in `shell.js`
+  if shared.target_environment_may_be('web'):
+    return ''
+
+  # Use static import declaration if we only target Node.js
+  return '''
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+'''
+
+
 def modularize():
   global final_js
   logger.debug(f'Modularizing, assigning to var {settings.EXPORT_NAME}')
   src = read_file(final_js)
+
+  # Multi-environment ES6 builds require an async function
+  async_emit = ''
+  if settings.EXPORT_ES6 and \
+     shared.target_environment_may_be('node') and \
+     shared.target_environment_may_be('web'):
+    async_emit = 'async '
 
   return_value = settings.EXPORT_NAME
   if settings.WASM_ASYNC_COMPILATION:
@@ -3706,7 +3729,7 @@ def modularize():
     return_value = '{}'
 
   src = '''
-function(%(EXPORT_NAME)s) {
+%(maybe_async)sfunction(%(EXPORT_NAME)s) {
   %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
 
 %(src)s
@@ -3714,6 +3737,7 @@ function(%(EXPORT_NAME)s) {
   return %(return_value)s
 }
 ''' % {
+    'maybe_async': async_emit,
     'EXPORT_NAME': settings.EXPORT_NAME,
     'src': src,
     'return_value': return_value
@@ -3724,24 +3748,25 @@ function(%(EXPORT_NAME)s) {
     # document.currentScript, so a simple export declaration is enough.
     src = 'var %s=%s' % (settings.EXPORT_NAME, src)
   else:
-    script_url_node = ""
+    script_url_node = ''
     # When MODULARIZE this JS may be executed later,
     # after document.currentScript is gone, so we save it.
     # In EXPORT_ES6 + USE_PTHREADS the 'thread' is actually an ES6 module webworker running in strict mode,
     # so doesn't have access to 'document'. In this case use 'import.meta' instead.
     if settings.EXPORT_ES6 and settings.USE_ES6_IMPORT_META:
-      script_url = "import.meta.url"
+      script_url = 'import.meta.url'
     else:
       script_url = "typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined"
       if shared.target_environment_may_be('node'):
         script_url_node = "if (typeof __filename !== 'undefined') _scriptDir = _scriptDir || __filename;"
-    src = '''
+    src = '''%(node_imports)s
 var %(EXPORT_NAME)s = (() => {
   var _scriptDir = %(script_url)s;
   %(script_url_node)s
   return (%(src)s);
 })();
 ''' % {
+      'node_imports': node_es6_imports(),
       'EXPORT_NAME': settings.EXPORT_NAME,
       'script_url': script_url,
       'script_url_node': script_url_node,
@@ -4055,6 +4080,10 @@ def process_libraries(state, linker_inputs):
   settings.JS_LIBRARIES = [lib[1] for lib in settings.JS_LIBRARIES]
   state.link_flags = new_flags
 
+  for _, f in linker_inputs:
+    if building.is_ar(f):
+      ensure_archive_index(f)
+
 
 class ScriptSource:
   def __init__(self):
@@ -4238,5 +4267,5 @@ if __name__ == '__main__':
   try:
     sys.exit(main(sys.argv))
   except KeyboardInterrupt:
-    logger.warning('KeyboardInterrupt')
+    logger.debug('KeyboardInterrupt')
     sys.exit(1)

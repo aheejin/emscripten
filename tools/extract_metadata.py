@@ -4,11 +4,13 @@
 # found in the LICENSE file.
 
 import logging
+from typing import List, Dict
 
 from . import webassembly
 from .webassembly import OpCode, AtomicOpCode, MemoryOpCode
 from .shared import exit_with_error
 from .settings import settings
+
 
 logger = logging.getLogger('extract_metadata')
 
@@ -207,7 +209,7 @@ def get_section_strings(module, export_map, section_name):
   end = seg_offset + size
   while str_start < end:
     str_end = data.find(b'\0', str_start)
-    asm_strings[str(start_addr - seg_offset + str_start)] = data_to_string(data[str_start:str_end])
+    asm_strings[start_addr - seg_offset + str_start] = data_to_string(data[str_start:str_end])
     str_start = str_end + 1
   return asm_strings
 
@@ -277,16 +279,16 @@ def get_string_at(module, address):
 
 
 class Metadata:
-  imports: []
-  export: []
-  asmConsts: []
-  jsDeps: []
-  emJsFuncs: {}
-  emJsFuncTypes: []
-  features: []
-  invokeFuncs: []
+  imports: List[str]
+  export: List[str]
+  asmConsts: Dict[int, str]
+  jsDeps: List[str]
+  emJsFuncs: Dict[str, str]
+  emJsFuncTypes: Dict[str, str]
+  features: List[str]
+  invokeFuncs: List[str]
   mainReadsParams: bool
-  namedGlobals: []
+  namedGlobals: List[str]
 
   def __init__(self):
     pass

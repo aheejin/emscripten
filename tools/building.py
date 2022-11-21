@@ -16,6 +16,7 @@ import sys
 from typing import Set, Dict
 from subprocess import PIPE
 
+from . import cache
 from . import diagnostics
 from . import response_file
 from . import shared
@@ -37,7 +38,7 @@ logger = logging.getLogger('building')
 
 #  Building
 binaryen_checked = False
-EXPECTED_BINARYEN_VERSION = 109
+EXPECTED_BINARYEN_VERSION = 110
 
 # cache results of nm - it can be slow to run
 nm_cache = {}
@@ -75,10 +76,10 @@ def get_building_env():
   env['HOST_CXX'] = CLANG_CXX
   env['HOST_CFLAGS'] = '-W' # if set to nothing, CFLAGS is used, which we don't want
   env['HOST_CXXFLAGS'] = '-W' # if set to nothing, CXXFLAGS is used, which we don't want
-  env['PKG_CONFIG_LIBDIR'] = shared.Cache.get_sysroot_dir('local/lib/pkgconfig') + os.path.pathsep + shared.Cache.get_sysroot_dir('lib/pkgconfig')
+  env['PKG_CONFIG_LIBDIR'] = cache.get_sysroot_dir('local/lib/pkgconfig') + os.path.pathsep + cache.get_sysroot_dir('lib/pkgconfig')
   env['PKG_CONFIG_PATH'] = os.environ.get('EM_PKG_CONFIG_PATH', '')
   env['EMSCRIPTEN'] = path_from_root()
-  env['PATH'] = shared.Cache.get_sysroot_dir('bin') + os.pathsep + env['PATH']
+  env['PATH'] = cache.get_sysroot_dir('bin') + os.pathsep + env['PATH']
   env['CROSS_COMPILE'] = path_from_root('em') # produces /path/to/emscripten/em , which then can have 'cc', 'ar', etc appended to it
   return env
 
@@ -405,7 +406,7 @@ def acorn_optimizer(filename, passes, extra_info=None, return_output=False):
   return output_file
 
 
-acorn_optimizer.counter = 0
+acorn_optimizer.counter = 0  # type: ignore
 
 WASM_CALL_CTORS = '__wasm_call_ctors'
 
@@ -1315,7 +1316,7 @@ def save_intermediate(src, dst):
     shutil.copyfile(src, dst)
 
 
-save_intermediate.counter = 0
+save_intermediate.counter = 0  # type: ignore
 
 
 def js_legalization_pass_flags():

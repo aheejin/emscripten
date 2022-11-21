@@ -1236,7 +1236,8 @@ var EXPORT_ES6 = false;
 
 // Use the ES6 Module relative import feature 'import.meta.url'
 // to auto-detect WASM Module path.
-// It might not be supported on old browsers / toolchains
+// It might not be supported on old browsers / toolchains. This setting
+// may not be disabled when Node.js is targeted (-sENVIRONMENT=*node*).
 // [link]
 var USE_ES6_IMPORT_META = true;
 
@@ -1749,14 +1750,16 @@ var MIN_FIREFOX_VERSION = 65;
 
 // Specifies the oldest version of desktop Safari to target. Version is encoded
 // in MMmmVV, e.g. 70101 denotes Safari 7.1.1.
-// Safari 12.0.0 was released on September 17, 2018, bundled with macOS 10.14.0
-// Mojave.
+// Safari 14.1.0 was released on April 26, 2021, bundled with macOS 11.0 Big
+// Sur and iOS 14.5.
+// The previous default, Safari 12.0.0 was released on September 17, 2018,
+// bundled with macOS 10.14.0 Mojave.
 // NOTE: Emscripten is unable to produce code that would work in iOS 9.3.5 and
 // older, i.e. iPhone 4s, iPad 2, iPad 3, iPad Mini 1, Pod Touch 5 and older,
 // see https://github.com/emscripten-core/emscripten/pull/7191.
 // MAX_INT (0x7FFFFFFF, or -1) specifies that target is not supported.
 // [link]
-var MIN_SAFARI_VERSION = 120000;
+var MIN_SAFARI_VERSION = 140100;
 
 // Specifies the oldest version of Internet Explorer to target. E.g. pass -s
 // MIN_IE_VERSION = 11 to drop support for IE 10 and older.
@@ -1768,10 +1771,17 @@ var MIN_IE_VERSION = 0x7FFFFFFF;
 // Specifies the oldest version of Edge (EdgeHTML, the non-Chromium based
 // flavor) to target. E.g. pass -sMIN_EDGE_VERSION=40 to drop support for
 // EdgeHTML 39 and older.
-// Edge 44.17763 was released on November 13, 2018
+// EdgeHTML 44.17763 was released on November 13, 2018
+// EdgeHTML was completely in April 2021 and replaced by the current
+// Chromium-based Edge.
+// Since version 79, Edge version numbers have mirrored chromium version
+// numbers, so it no longer makes sense specify MIN_EDGE_VERSION independenly.
+// If Chromium and Edge ever start to diverage this setting may be revived with
+// more modern post-chromium default value.
+// See https://en.wikipedia.org/wiki/Microsoft_Edge#New_Edge_release_history
 // MAX_INT (0x7FFFFFFF, or -1) specifies that target is not supported.
 // [link]
-var MIN_EDGE_VERSION = 44;
+var MIN_EDGE_VERSION = 0x7FFFFFFF;
 
 // Specifies the oldest version of Chrome. E.g. pass -sMIN_CHROME_VERSION=58 to
 // drop support for Chrome 57 and older.
@@ -1959,7 +1969,9 @@ var SEPARATE_DWARF_URL = '';
 // not in others like split-dwarf).
 // When this flag is turned on, we error at link time if the build requires any
 // changes to the wasm after link. This can be useful in testing, for example.
-// [link]
+// Some example of features that require post-link wasm changes are:
+// - Lowering i64 to i32 pairs at the JS boundary (See WASM_BIGINT)
+// - Lowering sign-extnesion operation when targeting older browsers.
 var ERROR_ON_WASM_CHANGES_AFTER_LINK = false;
 
 // Abort on unhandled excptions that occur when calling exported WebAssembly
