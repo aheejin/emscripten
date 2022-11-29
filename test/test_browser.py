@@ -1283,6 +1283,9 @@ keydown(100);keyup(100); // trigger the end
     temp_filepath = os.path.basename(filepath)
     shutil.copyfile(filepath, temp_filepath)
 
+    # testAntiAliasing uses a window-sized buffer on the stack
+    self.set_setting('STACK_SIZE', '1MB')
+
     # perform tests with attributes activated
     self.btest_exit('test_webgl_context_attributes_glut.c', args=['--js-library', 'check_webgl_attributes_support.js', '-DAA_ACTIVATED', '-DDEPTH_ACTIVATED', '-DSTENCIL_ACTIVATED', '-DALPHA_ACTIVATED', '-lGL', '-lglut', '-lGLEW'])
     self.btest_exit('test_webgl_context_attributes_sdl.c', args=['--js-library', 'check_webgl_attributes_support.js', '-DAA_ACTIVATED', '-DDEPTH_ACTIVATED', '-DSTENCIL_ACTIVATED', '-DALPHA_ACTIVATED', '-lGL', '-lSDL', '-lGLEW'])
@@ -3316,7 +3319,7 @@ Module["preRun"].push(function () {
     # Error.stackTraceLimit default to 10 in chrome but this test relies on more
     # than 40 stack frames being reported.
     create_file('pre.js', 'Error.stackTraceLimit = 80;\n')
-    self.btest_exit('browser/async_2.cpp', args=['-O3', '--pre-js', 'pre.js', '-sASYNCIFY'])
+    self.btest_exit('browser/async_2.cpp', args=['-O3', '--pre-js', 'pre.js', '-sASYNCIFY', '-sSTACK_SIZE=1MB'])
 
   def test_async_virtual(self):
     for opts in [0, 3]:
@@ -5344,8 +5347,6 @@ Module["preRun"].push(function () {
   })
   @requires_threads
   def test_wasmfs_fetch_backend(self, args):
-    if is_firefox() and '-sPROXY_TO_PTHREAD' not in args:
-      return self.skipTest('ff hangs on the main_thread version. browser bug?')
     create_file('data.dat', 'hello, fetch')
     create_file('small.dat', 'hello')
     create_file('test.txt', 'fetch 2')
@@ -5354,7 +5355,8 @@ Module["preRun"].push(function () {
     create_file('subdir/backendfile', 'file 1')
     create_file('subdir/backendfile2', 'file 2')
     self.btest_exit(test_file('wasmfs/wasmfs_fetch.c'),
-                    args=['-sWASMFS', '-sUSE_PTHREADS', '--js-library', test_file('wasmfs/wasmfs_fetch.js')] + args)
+                    args=['-sWASMFS', '-sUSE_PTHREADS', '-sPROXY_TO_PTHREAD', '-sINITIAL_MEMORY=32MB',
+                          '--js-library', test_file('wasmfs/wasmfs_fetch.js')] + args)
 
   @requires_threads
   @no_firefox('no OPFS support yet')
