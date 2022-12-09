@@ -18,8 +18,32 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.28 (in development)
+3.1.29 (in development)
 -----------------------
+
+3.1.28 - 12/08/22
+-----------------
+- `LLD_REPORT_UNDEFINED` is now enabled by default.  This makes undefined symbol
+  errors more precise by including the name of the object that references the
+  undefined symbol. The old behaviour (of allowing all undefined symbols at
+  wasm-ld time and reporting them later when processing JS library files) is
+  still available using `-sLLD_REPORT_UNDEFINED=0`. (#16003)
+- musl libc updated from v1.2.2 to v1.2.3. (#18270)
+- The default emscripten config file no longer contains `EMSCRIPTEN_ROOT`.  This
+  setting has long been completely ignored by emscripten itself. For
+  applications that wish to know where emscripten is installed looking for
+  `emcc` in the `PATH` has long been the recommended method (i.e. `which emcc`).
+  (#18279)
+- More accurate synchronisation of `emscripten_get_now` clocks between main
+  thread and pthreads.
+  This also changes the absolute value returned by the function, but it shouldn't
+  affect correct usages as the function has always returned different values on
+  different platforms, and is clearly documented as "only meaningful in
+  comparison to other calls to this function". (#18267)
+- Emscripten will now search your PATH for binaryen, llvm, and node if the
+  corresponding config file settings (`BINARYEN_ROOT`, `LLVM_ROOT`, `NODE_JS`)
+  are not set.  Allows emscripten to run with an empty config file given the
+  right tools in the PATH. (#18289)
 
 3.1.27 - 11/29/22
 -----------------

@@ -234,7 +234,6 @@ class other(RunnerCore):
         self.run_process([compiler, '--generate-config'])
         self.assertExists(config_path)
         config_contents = read_file(config_path)
-        self.assertContained('EMSCRIPTEN_ROOT', config_contents)
         self.assertContained('LLVM_ROOT', config_contents)
         os.remove(config_path)
 
@@ -890,6 +889,13 @@ f.close()
     for package, version in packages:
         out = self.run_process([emmake, 'pkg-config', '--modversion', package], stdout=PIPE).stdout
         self.assertContained(version, out)
+
+  def test_cmake_check_type_size(self):
+    self.run_process([EMCMAKE, 'cmake', test_file('cmake/check_type_size')])
+
+    # Verify that this test works without needing to run node.  We do this by breaking node
+    # execution.
+    self.run_process([EMCMAKE, 'cmake', '-DCMAKE_CROSSCOMPILING_EMULATOR=/missing_binary', test_file('cmake/check_type_size')])
 
   def test_system_include_paths(self):
     # Verify that all default include paths are within `emscripten/system`
@@ -2161,8 +2167,8 @@ int f() {
         print(proc.stderr)
         if value or action is None:
           # The default is that we error in undefined symbols
-          self.assertContained('error: undefined symbol: something', proc.stderr)
-          self.assertContained('error: undefined symbol: elsey', proc.stderr)
+          self.assertContained('undefined symbol: something', proc.stderr)
+          self.assertContained('undefined symbol: elsey', proc.stderr)
           check_success = False
         elif action == 'ERROR' and not value:
           # Error disables, should only warn
@@ -3542,7 +3548,7 @@ EMSCRIPTEN_KEEPALIVE int myreadSeekEnd() {
   def test_js_lib_quoted_key(self):
     create_file('lib.js', r'''
 mergeInto(LibraryManager.library, {
-   __internal_data:{
+  __internal_data:{
     '<' : 0,
     'white space' : 1
   },
@@ -6585,7 +6591,7 @@ int main() {
     err = self.expect_fail([EMCC, test_file('hello_world.c'),
                             '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=alGetError',
                             '-sEXPORTED_FUNCTIONS=_main,_alGet'])
-    self.assertContained('undefined exported symbol: "_alGet"', err)
+    self.assertContained('error: undefined exported symbol: "_alGet" [-Wundefined] [-Werror]', err)
 
   def test_musl_syscalls(self):
     self.run_process([EMCC, test_file('hello_world.c')])
@@ -7287,7 +7293,7 @@ int main() {
     create_file('test.c', r'''
 #include <stdio.h>
 
-void foo() {
+static void foo() {
   printf("foo\n");
 }
 
@@ -7297,17 +7303,11 @@ int main() {
 }
 ''')
 
-    # Without the 'INLINING_LIMIT', -O2 inlines foo()
-    cmd = [EMCC, '-c', 'test.c', '-O2', '-o', 'test.o', '-sINLINING_LIMIT', '-flto']
+    # Without the 'INLINING_LIMIT', -O2 inlines foo() and then DCEs it because it has
+    # no callers and is static
+    cmd = [EMCC, 'test.c', '-O2', '-o', 'test.o', '-c', '-sINLINING_LIMIT']
     self.run_process(cmd)
-    # If foo() had been wrongly inlined above, internalizing foo and running
-    # global DCE makes foo DCE'd
-    opts = ['-internalize', '-internalize-public-api-list=main', '-globaldce']
-    self.run_process([shared.LLVM_OPT] + opts + ['test.o', '-o', 'test2.o'])
-
-    # To this test to be successful, foo() shouldn't have been inlined above and
-    # foo() should be in the function list
-    output = self.run_process([shared.EM_NM, 'test2.o'], stdout=PIPE).stdout
+    output = self.run_process([common.LLVM_OBJDUMP, '-t', 'test.o'], stdout=PIPE).stdout
     self.assertContained('foo', output)
 
   def test_output_eol(self):
@@ -7851,12 +7851,12 @@ int main() {
   def test_wasm_target_and_STANDALONE_WASM(self):
     # STANDALONE_WASM means we never minify imports and exports.
     for opts, potentially_expect_minified_exports_and_imports in (
-      ([],                               False),
+      ([],                           False),
       (['-sSTANDALONE_WASM'],        False),
-      (['-O2'],                          False),
-      (['-O3'],                          True),
+      (['-O2'],                      False),
+      (['-O3'],                      True),
       (['-O3', '-sSTANDALONE_WASM'], False),
-      (['-Os'],                          True),
+      (['-Os'],                      True),
     ):
       # targeting .wasm (without .js) means we enable STANDALONE_WASM automatically, and don't minify imports/exports
       for target in ('out.js', 'out.wasm'):
@@ -7878,11 +7878,11 @@ int main() {
         print('  exports', exports)
         print('  imports', imports)
         if expect_minified_exports_and_imports:
-          assert 'a' in exports_and_imports
+          self.assertContained('a', exports_and_imports)
         else:
-          assert 'a' not in exports_and_imports
+          self.assertNotContained('a', exports_and_imports)
         if standalone:
-          assert 'fd_write' in exports_and_imports, 'standalone mode preserves import names for WASI APIs'
+          self.assertContained('fd_write', exports_and_imports, 'standalone mode preserves import names for WASI APIs')
         # verify the wasm runs with the JS
         if target.endswith('.js'):
           self.assertContained('hello, world!', self.run_js('out.js'))
@@ -8361,7 +8361,7 @@ end
   def test_full_js_library_undefined(self):
     create_file('main.c', 'void foo(); int main() { foo(); return 0; }')
     err = self.expect_fail([EMCC, 'main.c', '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY'])
-    self.assertContained('error: undefined symbol: foo', err)
+    self.assertContained('undefined symbol: foo', err)
 
   def test_full_js_library_except(self):
     self.set_setting('INCLUDE_FULL_LIBRARY', 1)
@@ -9017,19 +9017,20 @@ console.error('JSLIB: none of the above');
 
     err = self.run_process([EMCC, test_file('hello_world.c'), '--js-library', 'lib.js'], stderr=PIPE).stderr
     self.assertContained('JSLIB: none of the above', err)
-    self.assertEqual(err.count('JSLIB'), 1)
+    self.assertNotContained('JSLIB: MAIN_MODULE', err)
+    self.assertNotContained('JSLIB: EXIT_RUNTIME', err)
 
     err = self.run_process([EMCC, test_file('hello_world.c'), '--js-library', 'lib.js', '-sMAIN_MODULE'], stderr=PIPE).stderr
     self.assertContained('JSLIB: MAIN_MODULE=1', err)
-    self.assertEqual(err.count('JSLIB'), 1)
+    self.assertNotContained('JSLIB: EXIT_RUNTIME', err)
 
     err = self.run_process([EMCC, test_file('hello_world.c'), '--js-library', 'lib.js', '-sMAIN_MODULE=2'], stderr=PIPE).stderr
     self.assertContained('JSLIB: MAIN_MODULE=2', err)
-    self.assertEqual(err.count('JSLIB'), 1)
+    self.assertNotContained('JSLIB: EXIT_RUNTIME', err)
 
     err = self.run_process([EMCC, test_file('hello_world.c'), '--js-library', 'lib.js', '-sEXIT_RUNTIME'], stderr=PIPE).stderr
     self.assertContained('JSLIB: EXIT_RUNTIME', err)
-    self.assertEqual(err.count('JSLIB'), 1)
+    self.assertNotContained('JSLIB: MAIN_MODULE', err)
 
   def test_html_preprocess(self):
     src_file = test_file('module/test_stdin.c')
@@ -9202,14 +9203,13 @@ _d
       # stray slash
       ('EXPORTED_FUNCTIONS=["_a", "_b",\\ "_c", "_d"]', 'undefined exported symbol: "\\\\ "_c"'),
       # missing comma
-      ('EXPORTED_FUNCTIONS=["_a", "_b" "_c", "_d"]', 'undefined exported symbol: "_b" "_c"'),
+      ('EXPORTED_FUNCTIONS=["_a", "_b" "_c", "_d"]', 'emcc: error: undefined exported symbol: "_b" "_c" [-Wundefined] [-Werror]'),
     ]:
       print(export_arg)
       proc = self.run_process([EMCC, 'src.c', '-s', export_arg], stdout=PIPE, stderr=PIPE, check=not expected)
       print(proc.stderr)
       if not expected:
-        self.assertFalse(proc.stderr)
-        js = open('a.out.js').read()
+        js = read_file('a.out.js')
         for sym in ('_a', '_b', '_c', '_d'):
           self.assertContained(f'var {sym} = ', js)
       else:
@@ -10887,20 +10887,20 @@ Aborted(Module.arguments has been replaced with plain arguments_ (the initial va
     self.expect_fail([EMCC, '-Wl,--fatal-warnings', 'a.c', 'b.c'])
     self.expect_fail([EMCC, '-sSTRICT', 'a.c', 'b.c'])
 
+  # TODO(sbc): Remove these tests once we remove the LLD_REPORT_UNDEFINED
   def test_lld_report_undefined(self):
     create_file('main.c', 'void foo(); int main() { foo(); return 0; }')
-    stderr = self.expect_fail([EMCC, '-sLLD_REPORT_UNDEFINED', 'main.c'])
-    self.assertContained('wasm-ld: error:', stderr)
-    self.assertContained('main_0.o: undefined symbol: foo', stderr)
+    stderr = self.expect_fail([EMCC, '-sLLD_REPORT_UNDEFINED=0', 'main.c'])
+    self.assertContained('error: undefined symbol: foo (referenced by top-level compiled C/C++ code)', stderr)
 
   def test_lld_report_undefined_reverse_deps(self):
-    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED', '-sREVERSE_DEPS=all', test_file('hello_world.c')])
+    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED=0', '-sREVERSE_DEPS=all', test_file('hello_world.c')])
 
   def test_lld_report_undefined_exceptions(self):
-    self.run_process([EMXX, '-sLLD_REPORT_UNDEFINED', '-fwasm-exceptions', test_file('hello_libcxx.cpp')])
+    self.run_process([EMXX, '-sLLD_REPORT_UNDEFINED=0', '-fwasm-exceptions', test_file('hello_libcxx.cpp')])
 
   def test_lld_report_undefined_main_module(self):
-    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED', '-sMAIN_MODULE=2', test_file('hello_world.c')])
+    self.run_process([EMCC, '-sLLD_REPORT_UNDEFINED=0', '-sMAIN_MODULE=2', test_file('hello_world.c')])
 
   # Verifies that warning messages that Closure outputs are recorded to console
   def test_closure_warnings(self):
@@ -11038,14 +11038,12 @@ Aborted(Module.arguments has been replaced with plain arguments_ (the initial va
   def test_chained_js_error_diagnostics(self):
     err = self.expect_fail([EMCC, test_file('test_chained_js_error_diagnostics.c'), '--js-library', test_file('test_chained_js_error_diagnostics.js')])
     self.assertContained("error: undefined symbol: nonexistent_function (referenced by bar__deps: ['nonexistent_function'], referenced by foo__deps: ['bar'], referenced by top-level compiled C/C++ code)", err)
-    # Check that we don't recommend LLD_REPORT_UNDEFINED for chained dependencies.
-    self.assertNotContained('LLD_REPORT_UNDEFINED', err)
 
-    # Test without chaining.  In this case we don't include the JS library at all resulting in `foo`
-    # being undefined in the native code and in this case we recommend LLD_REPORT_UNDEFINED.
+    # Test without chaining.  In this case we don't include the JS library at
+    # all resulting in `foo` being undefined in the native code.
     err = self.expect_fail([EMCC, test_file('test_chained_js_error_diagnostics.c')])
-    self.assertContained('error: undefined symbol: foo (referenced by top-level compiled C/C++ code)', err)
-    self.assertContained('Link with `-sLLD_REPORT_UNDEFINED` to get more information on undefined symbols', err)
+    self.assertContained('undefined symbol: foo', err)
+    self.assertNotContained('referenced by top-level compiled C/C++ code', err)
 
   def test_xclang_flag(self):
     create_file('foo.h', ' ')
@@ -11602,6 +11600,7 @@ exec "$@"
         cmd.append('-sASYNCIFY')
       if function.startswith('emscripten_webgl_') or 'offscreencanvas' in function:
         cmd.append('-sOFFSCREENCANVAS_SUPPORT')
+        cmd.append('-sUSE_PTHREADS')
       if function.startswith('wgpu'):
         cmd.append('-sUSE_WEBGPU')
       if function.startswith('__cxa_'):
@@ -11846,7 +11845,7 @@ EMSCRIPTEN_KEEPALIVE
 void foo() {}
 ''')
     err = self.expect_fail([EMCC, 'lib.cpp', '-pthread', '-sPROXY_TO_PTHREAD'])
-    self.assertContained('error: PROXY_TO_PTHREAD proxies main() for you, but no main exists', err)
+    self.assertContained('crt1_proxy_main.o: undefined symbol: main', err)
 
   def test_archive_bad_extension(self):
     # Regression test for https://github.com/emscripten-core/emscripten/issues/14012
@@ -11888,7 +11887,7 @@ void foo() {}
     cmd = [EMCC, 'main.c', '-sASSERTIONS'] + args
     if args:
       err = self.expect_fail(cmd)
-      self.assertContained('error: undefined symbol: __syscall_mincore', err)
+      self.assertContained('libc-debug.a(mincore.o): undefined symbol: __syscall_mincore', err)
     else:
       self.run_process(cmd)
       err = self.run_js('a.out.js')
@@ -12205,10 +12204,12 @@ Module['postRun'] = function() {{
 
   @wasmfs_all_backends
   def test_wasmfs_readfile(self):
+    self.set_setting('FORCE_FILESYSTEM')
     self.do_run_in_out_file_test(test_file('wasmfs/wasmfs_readfile.c'))
 
   @wasmfs_all_backends
   def test_wasmfs_readfile_bigint(self):
+    self.set_setting('FORCE_FILESYSTEM')
     self.set_setting('WASM_BIGINT')
     self.node_args += shared.node_bigint_flags()
     self.do_run_in_out_file_test(test_file('wasmfs/wasmfs_readfile.c'))

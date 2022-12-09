@@ -9,11 +9,12 @@
 {{{ GL_POOL_TEMP_BUFFERS_SIZE = 2*9*16 }}} // = 288
 
 {{{
-  global.isCurrentContextWebGL2 = function isCurrentContextWebGL2() {
+  global.isCurrentContextWebGL2 = () => {
     if (MIN_WEBGL_VERSION >= 2) return 'true';
     if (MAX_WEBGL_VERSION <= 1) return 'false';
     return 'GL.currentContext.version >= 2';
   }
+  null;
 }}}
 
 var LibraryGL = {
@@ -149,6 +150,9 @@ var LibraryGL = {
 #if GL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS
   // If GL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS is enabled, GL.initExtensions() will call to initialize these.
   $GL__deps: [
+#if USE_PTHREADS
+    'malloc', // Needed by registerContext
+#endif
 #if MIN_WEBGL_VERSION == 1
     '_webgl_enable_ANGLE_instanced_arrays',
     '_webgl_enable_OES_vertex_array_object',

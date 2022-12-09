@@ -3295,10 +3295,6 @@ Module["preRun"].push(function () {
     self.btest('cocos2d_hello.cpp', reference='cocos2d_hello.png', reference_slack=1,
                args=['-sUSE_COCOS2D=3', '-sERROR_ON_UNDEFINED_SYMBOLS=0',
                      '-Wno-js-compiler',
-                     # cocos2d uses std::binary_function which was removing in C++17.
-                     # We could pass `-std=c++14` here but that doesn't currently work for btest
-                     # since we compile a C file (report_result.c) in the same command.
-                     '-D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION',
                      '--preload-file', preload_file, '--use-preload-plugins',
                      '-Wno-inconsistent-missing-override',
                      '-Wno-deprecated-declarations'])
@@ -4080,7 +4076,7 @@ Module["preRun"].push(function () {
         self.btest(test_file('gauge_available_memory.cpp'), expected='1', args=['-sABORTING_MALLOC=0'] + args + opts)
 
   # Test that the proxying operations of user code from pthreads to main thread work
-  @no_chrome('https://github.com/emscripten-core/emscripten/issues/18210')
+  @disabled('https://github.com/emscripten-core/emscripten/issues/18210')
   @requires_threads
   def test_pthread_run_on_main_thread(self):
     self.btest_exit(test_file('pthread/test_pthread_run_on_main_thread.cpp'), args=['-O3', '-sUSE_PTHREADS', '-sPTHREAD_POOL_SIZE'])
@@ -4098,9 +4094,10 @@ Module["preRun"].push(function () {
   # Test that it is possible to synchronously call a JavaScript function on the main thread and get a return value back.
   @requires_threads
   def test_pthread_call_sync_on_main_thread(self):
+    self.set_setting('EXPORTED_FUNCTIONS', '_main,_malloc')
     self.btest_exit(test_file('pthread/call_sync_on_main_thread.c'), args=['-O3', '-sUSE_PTHREADS', '-sPROXY_TO_PTHREAD', '-DPROXY_TO_PTHREAD=1', '--js-library', test_file('pthread/call_sync_on_main_thread.js')])
     self.btest_exit(test_file('pthread/call_sync_on_main_thread.c'), args=['-O3', '-sUSE_PTHREADS', '-DPROXY_TO_PTHREAD=0', '--js-library', test_file('pthread/call_sync_on_main_thread.js')])
-    self.btest_exit(test_file('pthread/call_sync_on_main_thread.c'), args=['-Oz', '-DPROXY_TO_PTHREAD=0', '--js-library', test_file('pthread/call_sync_on_main_thread.js'), '-sEXPORTED_FUNCTIONS=_main,_malloc'])
+    self.btest_exit(test_file('pthread/call_sync_on_main_thread.c'), args=['-Oz', '-DPROXY_TO_PTHREAD=0', '--js-library', test_file('pthread/call_sync_on_main_thread.js')])
 
   # Test that it is possible to asynchronously call a JavaScript function on the main thread.
   @requires_threads

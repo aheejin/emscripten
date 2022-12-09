@@ -1241,9 +1241,7 @@ mergeInto(LibraryManager.library, {
 #if SUPPORT_LONGJMP == 'emscripten'
   _emscripten_throw_longjmp__sig: 'v',
   _emscripten_throw_longjmp: function() { throw Infinity; },
-#endif
-
-#if !SUPPORT_LONGJMP
+#elif !SUPPORT_LONGJMP
 #if !INCLUDE_FULL_LIBRARY
   // These are in order to print helpful error messages when either longjmp of
   // setjmp is used.
@@ -1258,17 +1256,19 @@ mergeInto(LibraryManager.library, {
   // built with SUPPORT_LONGJMP=1, the object file contains references of not
   // longjmp but _emscripten_throw_longjmp, which is called from
   // emscripten_longjmp.
-  _emscripten_throw_longjmp: function() { error('longjmp support was disabled (SUPPORT_LONGJMP=0), but it is required by the code (either set SUPPORT_LONGJMP=1, or remove uses of it in the project)'); },
   get _emscripten_throw_longjmp__deps() {
     return this.longjmp__deps;
   },
 #endif
+  _emscripten_throw_longjmp: function() {
+    error('longjmp support was disabled (SUPPORT_LONGJMP=0), but it is required by the code (either set SUPPORT_LONGJMP=1, or remove uses of it in the project)');
+  },
   // will never be emitted, as the dep errors at compile time
   longjmp: function(env, value) {
-    abort('longjmp not supported');
+    abort('longjmp not supported (build with -s SUPPORT_LONGJMP)');
   },
-  setjmp: function(env, value) {
-    abort('setjmp not supported');
+  setjmp: function(env) {
+    abort('setjmp not supported (build with -s SUPPORT_LONGJMP)');
   },
 #endif
 
@@ -2328,12 +2328,10 @@ mergeInto(LibraryManager.library, {
                                "} else " +
 #endif
 #if USE_PTHREADS
-// Pthreads need their clocks synchronized to the execution of the main thread, so give them a special form of the function.
-// N.b. Wasm workers do not provide this kind of clock synchronization.
-                               "if (ENVIRONMENT_IS_PTHREAD) {\n" +
-                               "  _emscripten_get_now = () => performance.now() - Module['__performance_now_clock_drift'];\n" +
-                               "} else " +
-#endif
+// Pthreads need their clocks synchronized to the execution of the main thread, so, when using them,
+// make sure to adjust all timings to the respective time origins.
+                               "_emscripten_get_now = () => performance.timeOrigin + performance.now();\n",
+#else
 #if ENVIRONMENT_MAY_BE_SHELL
                                "if (typeof dateNow != 'undefined') {\n" +
                                "  _emscripten_get_now = dateNow;\n" +
@@ -2349,6 +2347,7 @@ mergeInto(LibraryManager.library, {
                                // Modern environment where performance.now() is supported:
                                // N.B. a shorter form "_emscripten_get_now = return performance.now;" is unfortunately not allowed even in current browsers (e.g. FF Nightly 75).
                                "_emscripten_get_now = () => performance.now();\n",
+#endif
 #endif
 
   emscripten_get_now_res: function() { // return resolution of get_now, in nanoseconds

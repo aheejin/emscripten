@@ -404,6 +404,7 @@ var LibraryPThread = {
 
     // Creates a new web Worker and places it in the unused worker pool to wait for its use.
     allocateUnusedWorker: function() {
+      var worker;
 #if MINIMAL_RUNTIME
       var pthreadMainJs = Module['worker'];
 #else
@@ -424,12 +425,11 @@ var LibraryPThread = {
               }
             }
           );
-          PThread.unusedWorkers.push(new Worker(p.createScriptURL('ignored')));
+          worker = new Worker(p.createScriptURL('ignored'));
         } else
 #endif
-        PThread.unusedWorkers.push(new Worker(new URL('{{{ PTHREAD_WORKER_FILE }}}', import.meta.url)));
-        return;
-      }
+        worker = new Worker(new URL('{{{ PTHREAD_WORKER_FILE }}}', import.meta.url));
+      } else {
 #endif
       // Allow HTML module to configure the location where the 'worker.js' file will be loaded from,
       // via Module.locateFile() function. If not specified, then the default URL 'worker.js' relative
@@ -443,10 +443,14 @@ var LibraryPThread = {
       // Use Trusted Types compatible wrappers.
       if (typeof trustedTypes != 'undefined' && trustedTypes.createPolicy) {
         var p = trustedTypes.createPolicy('emscripten#workerPolicy2', { createScriptURL: function(ignored) { return pthreadMainJs } });
-        PThread.unusedWorkers.push(new Worker(p.createScriptURL('ignored')));
+        worker = new Worker(p.createScriptURL('ignored'));
       } else
 #endif
-      PThread.unusedWorkers.push(new Worker(pthreadMainJs));
+      worker = new Worker(pthreadMainJs);
+#if EXPORT_ES6 && USE_ES6_IMPORT_META
+    }
+#endif
+    PThread.unusedWorkers.push(worker);
     },
 
     getNewWorker: function() {
@@ -607,7 +611,6 @@ var LibraryPThread = {
         worker.ref();
       }
 #endif
-      msg.time = performance.now();
       worker.postMessage(msg, threadParams.transferList);
       delete worker.runPthread;
     };
@@ -660,7 +663,11 @@ var LibraryPThread = {
   // allocations from __pthread_create_js we could also remove this.
   __pthread_create_js__noleakcheck: true,
   __pthread_create_js__sig: 'iiiii',
-  __pthread_create_js__deps: ['$spawnThread', 'pthread_self', '$pthreadCreateProxied'],
+  __pthread_create_js__deps: ['$spawnThread', 'pthread_self', '$pthreadCreateProxied',
+#if OFFSCREENCANVAS_SUPPORT
+    'malloc',
+#endif
+  ],
   __pthread_create_js: function(pthread_ptr, attr, startRoutine, arg) {
     if (typeof SharedArrayBuffer == 'undefined') {
       err('Current environment does not support SharedArrayBuffer, pthreads are not available!');
@@ -770,7 +777,7 @@ var LibraryPThread = {
         return {{{ cDefine('EINVAL') }}}; // Hitting this might indicate an implementation bug or some other internal error
       }
     }
-#endif
+#endif // OFFSCREENCANVAS_SUPPORT
 
     // Synchronously proxy the thread creation to main thread if possible. If we
     // need to transfer ownership of objects, then proxy asynchronously via

@@ -23,6 +23,8 @@ emcc can be influenced by a few environment variables:
 from tools.toolchain_profiler import ToolchainProfiler
 
 import base64
+import glob
+import hashlib
 import json
 import logging
 import os
@@ -39,7 +41,7 @@ from urllib.parse import quote
 
 
 import emscripten
-from tools import shared, system_libs, utils, ports
+from tools import shared, system_libs, utils, ports, filelock
 from tools import colored_logger, diagnostics, building
 from tools import mylog
 from tools.shared import unsuffixed, unsuffixed_basename, WINDOWS, safe_copy
@@ -501,31 +503,70 @@ def ensure_archive_index(archive_file):
     run_process([shared.LLVM_RANLIB, archive_file])
 
 
-@ToolchainProfiler.profile_block('JS symbol generation')
-def get_all_js_syms():
+def generate_js_symbols():
   # Runs the js compiler to generate a list of all symbols available in the JS
   # libraries.  This must be done separately for each linker invokation since the
   # list of symbols depends on what settings are used.
   # TODO(sbc): Find a way to optimize this.  Potentially we could add a super-set
   # mode of the js compiler that would generate a list of all possible symbols
   # that could be checked in.
-  old_full = settings.INCLUDE_FULL_LIBRARY
-  try:
-    # Temporarily define INCLUDE_FULL_LIBRARY since we want a full list
-    # of all available JS library functions.
-    settings.INCLUDE_FULL_LIBRARY = True
-    settings.ONLY_CALC_JS_SYMBOLS = True
-    emscripten.generate_struct_info()
-    glue, forwarded_data = emscripten.compile_settings()
-    forwarded_json = json.loads(forwarded_data)
-    library_syms = set()
-    for name in forwarded_json['librarySymbols']:
-      if shared.is_c_symbol(name):
-        name = shared.demangle_c_symbol_name(name)
-        library_syms.add(name)
-  finally:
-    settings.ONLY_CALC_JS_SYMBOLS = False
-    settings.INCLUDE_FULL_LIBRARY = old_full
+  emscripten.generate_struct_info()
+  glue, forwarded_data = emscripten.compile_javascript(symbols_only=True)
+  forwarded_json = json.loads(forwarded_data)
+  library_syms = set()
+  for name in forwarded_json:
+    if shared.is_c_symbol(name):
+      name = shared.demangle_c_symbol_name(name)
+      library_syms.add(name)
+  return library_syms
+
+
+@ToolchainProfiler.profile_block('JS symbol generation')
+def get_all_js_syms():
+  # Avoiding using the cache when generating struct info since
+  # this step is performed while the cache is locked.
+  if settings.BOOTSTRAPPING_STRUCT_INFO or config.FROZEN_CACHE:
+    return generate_js_symbols()
+
+  # We define a cache hit as when the settings and `--js-library` contents are
+  # identical.
+  input_files = [json.dumps(settings.dict(), sort_keys=True, indent=2)]
+  for jslib in sorted(glob.glob(utils.path_from_root('src') + '/library*.js')):
+    input_files.append(read_file(jslib))
+  for jslib in settings.JS_LIBRARIES:
+    if not os.path.isabs(jslib):
+      jslib = utils.path_from_root('src', jslib)
+    input_files.append(read_file(jslib))
+  content = '\n'.join(input_files)
+  content_hash = hashlib.sha1(content.encode('utf-8')).hexdigest()
+
+  def build_symbol_list(filename):
+    """Only called when there is no existing symbol list for a given content hash.
+    """
+    library_syms = generate_js_symbols()
+    write_file(filename, '\n'.join(library_syms) + '\n')
+
+  # We need to use a separate lock here for symbol lists because, unlike with system libraries,
+  # it's normally for these file to get pruned as part of normal operation.  This means that it
+  # can be deleted between the `cache.get()` then the `read_file`.
+  with filelock.FileLock(cache.get_path(cache.get_path('symbol_lists.lock'))):
+    filename = cache.get(f'symbol_lists/{content_hash}.txt', build_symbol_list)
+    library_syms = read_file(filename).splitlines()
+
+    # Limit of the overall size of the cache to 100 files.
+    # This code will get test coverage since a full test run of `other` or `core`
+    # generates ~1000 unique symbol lists.
+    cache_limit = 100
+    root = cache.get_path('symbol_lists')
+    if len(os.listdir(root)) > cache_limit:
+      files = []
+      for f in os.listdir(root):
+        f = os.path.join(root, f)
+        files.append((f, os.path.getmtime(f)))
+      files.sort(key=lambda x: x[1])
+      # Delete all but the newest N files
+      for f, _ in files[:-cache_limit]:
+        delete_file(f)
 
   return library_syms
 
@@ -1698,7 +1739,8 @@ def phase_linker_setup(options, state, newargs):
                               settings.SOCKET_DEBUG or
                               settings.FETCH_DEBUG or
                               settings.EXCEPTION_DEBUG or
-                              settings.PTHREADS_DEBUG)
+                              settings.PTHREADS_DEBUG or
+                              settings.ASYNCIFY_DEBUG)
 
   if options.memory_profiler:
     settings.MEMORYPROFILER = 1
@@ -1856,10 +1898,7 @@ def phase_linker_setup(options, state, newargs):
     if not settings.PURE_WASI and '-nostdlib' not in newargs and '-nodefaultlibs' not in newargs:
       default_setting('STACK_OVERFLOW_CHECK', max(settings.ASSERTIONS, settings.STACK_OVERFLOW_CHECK))
 
-  if settings.LLD_REPORT_UNDEFINED or settings.STANDALONE_WASM:
-    # Reporting undefined symbols at wasm-ld time requires us to know if we have a `main` function
-    # or not, as does standalone wasm mode.
-    # TODO(sbc): Remove this once this becomes the default
+  if settings.STANDALONE_WASM:
     settings.IGNORE_MISSING_MAIN = 0
 
   # For users that opt out of WARN_ON_UNDEFINED_SYMBOLS we assume they also
@@ -2182,6 +2221,7 @@ def phase_linker_setup(options, state, newargs):
       settings.REQUIRED_EXPORTS += [
         '_wasmfs_write_file',
         '_wasmfs_mkdir',
+        '_wasmfs_unlink',
         '_wasmfs_chdir',
         '_wasmfs_symlink',
         '_wasmfs_chmod',
@@ -2619,10 +2659,8 @@ def phase_linker_setup(options, state, newargs):
   if settings.RELOCATABLE or \
      settings.BUILD_AS_WORKER or \
      settings.USE_WEBGPU or \
-     settings.USE_PTHREADS or \
      settings.OFFSCREENCANVAS_SUPPORT or \
      settings.LEGACY_GL_EMULATION or \
-     not settings.DISABLE_EXCEPTION_CATCHING or \
      settings.ASYNCIFY or \
      settings.WASMFS or \
      settings.DEMANGLE_SUPPORT or \
@@ -2648,6 +2686,7 @@ def phase_linker_setup(options, state, newargs):
       # setThrew(). We cannot handle this using deps_info as the invokes are not
       # emitted because of library function usage, but by codegen itself.
       'setThrew',
+      '__cxa_free_exception',
     ]
 
   if settings.ASYNCIFY:
