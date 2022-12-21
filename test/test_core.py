@@ -2294,6 +2294,12 @@ int main(int argc, char **argv) {
     self.node_args += shared.node_bigint_flags()
     self.do_core_test('test_em_js_i64.c')
 
+  def test_em_js_address_taken(self):
+    self.do_core_test('test_em_js_address_taken.c')
+    if self.check_dylink():
+      self.set_setting('MAIN_MODULE', 2)
+      self.do_core_test('test_em_js_address_taken.c')
+
   def test_runtime_stacksave(self):
     self.do_runf(test_file('core/test_runtime_stacksave.c'), 'success')
 
@@ -2764,7 +2770,6 @@ The current type of b is: 9
                                  interleaved_output=False, emcc_args=args)
 
   @node_pthreads
-  @no_wasm2js('occasionally hangs in wasm2js (#16569)')
   def test_pthread_proxying_cpp(self):
     self.set_setting('EXIT_RUNTIME')
     self.set_setting('PROXY_TO_PTHREAD')
@@ -2859,6 +2864,12 @@ The current type of b is: 9
     # after the main thread returns.  We had a regression where stdio
     # streams were locked when the main thread returned.
     self.do_runf(test_file('pthread/test_pthread_stdout_after_main.c'))
+
+  @node_pthreads
+  def test_pthread_proxy_to_pthread(self):
+    self.set_setting('PROXY_TO_PTHREAD')
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test(test_file('pthread/test_pthread_proxy_to_pthread.c'))
 
   def test_tcgetattr(self):
     self.do_runf(test_file('termios/test_tcgetattr.c'), 'success')
@@ -3096,7 +3107,7 @@ The current type of b is: 9
     if self.js_engines == [config.V8_ENGINE]:
       expected = "error: Could not load dynamic lib: libfoo.so\nError: Error reading file"
     else:
-      expected = "error: Could not load dynamic lib: libfoo.so\nError: ENOENT: no such file or directory, open 'libfoo.so'"
+      expected = "error: Could not load dynamic lib: libfoo.so\nError: ENOENT: no such file or directory"
     self.do_run(src, expected)
 
   @needs_dylink
@@ -4065,6 +4076,7 @@ ok
 
   def dylink_testf(self, main, side=None, expected=None, force_c=False, main_emcc_args=None,
                    main_module=2,
+                   so_dir='',
                    so_name='liblib.so',
                    need_reverse=True, **kwargs):
     main_emcc_args = main_emcc_args or []
@@ -4088,13 +4100,13 @@ ok
       self.run_process([EMCC] + side + self.get_emcc_args() + ['-o', out_file])
     else:
       out_file = self.build(side, js_outfile=(side_suffix == 'js'))
-    shutil.move(out_file, so_name)
+    shutil.move(out_file, os.path.join(so_dir, so_name))
 
     # main settings
     self.set_setting('MAIN_MODULE', main_module)
     self.clear_setting('SIDE_MODULE')
     self.emcc_args += main_emcc_args
-    self.emcc_args.append(so_name)
+    self.emcc_args.append(os.path.join(so_dir, so_name))
 
     if force_c:
       self.emcc_args.append('-nostdlib++')
@@ -4114,7 +4126,7 @@ ok
       # Test the reverse as well.  There we flip the role of the side module and main module.
       # - We add --no-entry since the side module doesn't have a `main`
       self.dylink_testf(side, main, expected, force_c, main_emcc_args + ['--no-entry'],
-                        need_reverse=False, **kwargs)
+                        main_module, so_dir, so_name, need_reverse=False, **kwargs)
 
   def do_basic_dylink_test(self, **kwargs):
     self.dylink_test(r'''
@@ -4170,6 +4182,22 @@ ok
   def test_dylink_safe_heap(self):
     self.set_setting('SAFE_HEAP')
     self.do_basic_dylink_test()
+
+  @needs_dylink
+  def test_dylink_locate_file(self):
+    so_dir = 'so_dir'
+    so_name = 'liblib.so'
+    os.mkdir(so_dir)
+    create_file('pre.js', '''
+    Module['locateFile'] = function(f) {
+      if (f === '%s') {
+        return '%s/' + f;
+      } else {
+        return f;
+      }
+    };
+    ''' % (so_name, so_dir))
+    self.do_basic_dylink_test(so_dir=so_dir, so_name=so_name, main_emcc_args=['--pre-js', 'pre.js'])
 
   @needs_dylink
   def test_dylink_function_pointer_equality(self):
@@ -7712,6 +7740,16 @@ void* operator new(size_t size) {
     expected = test_file('webidl/output_%s.txt' % mode)
     self.do_run_from_file(test_file('webidl/test.cpp'), expected, includes=['.'])
 
+  # Test that we can perform fully-synchronous initialization when combining WASM_ASYNC_COMPILATION=0 + PTHREAD_POOL_DELAY_LOAD=1.
+  # Also checks that PTHREAD_POOL_DELAY_LOAD=1 adds a pthreadPoolReady promise that users can wait on for pthread initialization.
+  @node_pthreads
+  def test_embind_sync_if_pthread_delayed(self):
+    self.set_setting('WASM_ASYNC_COMPILATION', 0)
+    self.set_setting('PTHREAD_POOL_DELAY_LOAD', 1)
+    self.set_setting('PTHREAD_POOL_SIZE', 1)
+    self.emcc_args += ['--bind', '--post-js=' + test_file('core/pthread/test_embind_sync_if_pthread_delayed.post.js')]
+    self.do_run_in_out_file_test(test_file('core/pthread/test_embind_sync_if_pthread_delayed.cpp'))
+
   ### Tests for tools
 
   @no_wasm2js('TODO: source maps in wasm2js')
@@ -8216,9 +8254,9 @@ Module['onRuntimeInitialized'] = function() {
     self.do_runf(test_file('test_fibers.cpp'), '*leaf-0-100-1-101-1-102-2-103-3-104-5-105-8-106-13-107-21-108-34-109-*')
 
   @no_wasm64('TODO: asyncify for wasm64')
+  @with_asyncify_and_stack_switching
   def test_asyncify_unused(self):
     # test a program not using asyncify, but the pref is set
-    self.set_setting('ASYNCIFY')
     self.do_core_test('test_hello_world.c')
 
   @parameterized({
@@ -8336,8 +8374,8 @@ Module['onRuntimeInitialized'] = function() {
   @no_lsan('undefined symbol __global_base')
   @no_wasm2js('dynamic linking support in wasm2js')
   @no_wasm64('TODO: asyncify for wasm64')
+  @with_asyncify_and_stack_switching
   def test_asyncify_main_module(self):
-    self.set_setting('ASYNCIFY', 1)
     self.set_setting('MAIN_MODULE', 2)
     self.do_core_test('test_hello_world.c')
 
@@ -9110,18 +9148,28 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.emcc_args.append('-fPIC')
     self.do_core_test('test_hello_world.c')
 
+  # Marked as impure since we don't have a wasi-threads is still
+  # a WIP.
+  # Test is disabled on standalone because of flakes, see
+  # https://github.com/emscripten-core/emscripten/issues/18405
+  # @also_with_standalone_wasm(impure=True)
   @node_pthreads
   def test_pthread_create(self):
-    self.set_setting('EXIT_RUNTIME')
+    if not self.get_setting('STANDALONE_WASM'):
+      self.set_setting('EXIT_RUNTIME')
     # test that the node environment can be specified by itself, and that still
     # works with pthreads (even though we did not specify 'node,worker')
     self.set_setting('ENVIRONMENT', 'node')
     self.do_run_in_out_file_test('core/pthread/create.cpp')
 
   @node_pthreads
-  def test_pthread_c11_threads(self):
-    self.set_setting('PROXY_TO_PTHREAD')
-    self.set_setting('EXIT_RUNTIME')
+  @parameterized({
+    '': ([],),
+    'pooled': (['-sPTHREAD_POOL_SIZE=1'],),
+    'proxied': (['-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
+  })
+  def test_pthread_c11_threads(self, args):
+    self.emcc_args += args
     self.set_setting('PTHREADS_DEBUG')
     if not self.has_changed_setting('INITIAL_MEMORY'):
       self.set_setting('INITIAL_MEMORY', '64mb')
@@ -9130,13 +9178,21 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.do_run_in_out_file_test('pthread/test_pthread_c11_threads.c')
 
   @node_pthreads
-  def test_pthread_cxx_threads(self):
-    self.set_setting('PTHREAD_POOL_SIZE', 1)
+  @parameterized({
+    '': (0,),
+    'pooled': (1,),
+  })
+  def test_pthread_cxx_threads(self, pthread_pool_size):
+    self.set_setting('PTHREAD_POOL_SIZE', pthread_pool_size)
     self.do_run_in_out_file_test('pthread/test_pthread_cxx_threads.cpp')
 
   @node_pthreads
-  def test_pthread_busy_wait(self):
-    self.set_setting('PTHREAD_POOL_SIZE', 1)
+  @parameterized({
+    '': (0,),
+    'pooled': (1,),
+  })
+  def test_pthread_busy_wait(self, pthread_pool_size):
+    self.set_setting('PTHREAD_POOL_SIZE', pthread_pool_size)
     self.do_run_in_out_file_test('pthread/test_pthread_busy_wait.cpp')
 
   @node_pthreads
@@ -9583,6 +9639,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_main_reads_args(self):
     self.run_process([EMCC, '-c', test_file('core/test_main_reads_args_real.c'), '-o', 'real.o'] + self.get_emcc_args(ldflags=False))
     self.do_core_test('test_main_reads_args.c', emcc_args=['real.o', '-sEXIT_RUNTIME'], regex=True)
+
+  @requires_node
+  def test_native_promise(self):
+    self.do_core_test('test_native_promise.c')
 
 
 # Generate tests for everything

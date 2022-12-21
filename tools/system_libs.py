@@ -299,7 +299,7 @@ class Library:
   # extra code size. The -fno-unroll-loops flags was added here when loop
   # unrolling landed upstream in LLVM to avoid changing behavior but was not
   # specifically evaluated.
-  cflags = ['-O2', '-Werror', '-fno-unroll-loops']
+  cflags = ['-O2', '-Wall', '-Werror', '-fno-unroll-loops']
 
   # A list of directories to put in the include path when building.
   # This is a list of tuples of path components.
@@ -874,6 +874,12 @@ class libc(MuslInternalLibrary,
              '-Wno-macro-redefined',
              '-Wno-shift-op-parentheses',
              '-Wno-string-plus-int',
+             '-Wno-missing-braces',
+             '-Wno-logical-op-parentheses',
+             '-Wno-bitwise-op-parentheses',
+             '-Wno-unused-but-set-variable',
+             '-Wno-unused-variable',
+             '-Wno-unused-label',
              '-Wno-pointer-sign']
 
   def __init__(self, **kwargs):
@@ -1487,7 +1493,7 @@ class libunwind(NoExceptLibrary, MTLibrary):
 class libmalloc(MTLibrary):
   name = 'libmalloc'
 
-  cflags = ['-fno-builtin']
+  cflags = ['-fno-builtin', '-Wno-unused-function', '-Wno-unused-but-set-variable', '-Wno-unused-variable']
   # malloc/free/calloc are runtime functions and can be generated during LTO
   # Therefor they cannot themselves be part of LTO.
   force_object_files = True
