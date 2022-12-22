@@ -478,17 +478,10 @@ function ${name}(${args}) {
     itemsDict.globalVariablePostSet = itemsDict.globalVariablePostSet.concat(orderedPostSets);
 
     const shellFile = MINIMAL_RUNTIME ? 'shell_minimal.js' : 'shell.js';
+    print(processMacros(preprocess(read(shellFile), shellFile)));
 
-    const shellParts = read(shellFile).split('{{BODY}}');
-    print(processMacros(preprocess(shellParts[0], shellFile)));
-    let pre;
-    if (MINIMAL_RUNTIME) {
-      pre = processMacros(preprocess(read('preamble_minimal.js'), 'preamble_minimal.js'));
-    } else {
-      pre = processMacros(preprocess(read('support.js'), 'support.js')) +
-            processMacros(preprocess(read('preamble.js'), 'preamble.js'));
-    }
-    print(pre);
+    const preFile = MINIMAL_RUNTIME ? 'preamble_minimal.js' : 'preamble.js';
+    print(processMacros(preprocess(read(preFile), preFile)));
 
     const generated = itemsDict.functionStub.concat(itemsDict.globalVariablePostSet);
     generated.forEach((item) => print(indentify(item.JS || '', 2)));
@@ -531,10 +524,7 @@ function ${name}(${args}) {
     }
 
     const postFile = MINIMAL_RUNTIME ? 'postamble_minimal.js' : 'postamble.js';
-    const post = processMacros(preprocess(read(postFile), postFile));
-    print(post);
-
-    print(processMacros(preprocess(shellParts[1], shellFile, shellParts[0].match(/\n/g).length)));
+    print(processMacros(preprocess(read(postFile), postFile)));
 
     print('\n//FORWARDED_DATA:' + JSON.stringify({
       librarySymbols: librarySymbols,
