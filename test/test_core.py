@@ -264,7 +264,6 @@ def with_asyncify_and_stack_switching(f):
       self.require_v8()
       # enable stack switching and other relevant features (like reference types
       # for the return value of externref)
-      self.v8_args.append('--wasm-staging')
       self.v8_args.append('--experimental-wasm-stack-switching')
       if not self.is_wasm():
         self.skipTest('wasm2js does not support WebAssembly.Suspender yet')
@@ -2483,6 +2482,7 @@ int main(int argc, char **argv) {
 
   @no_wasm2js('massive switches can break js engines')
   def test_bigswitch(self):
+    self.set_setting('USE_SDL')
     self.do_runf(test_file('bigswitch.cpp'), '''34962: GL_ARRAY_BUFFER (0x8892)
 26214: what?
 35040: GL_STREAM_DRAW (0x88E0)
@@ -6003,6 +6003,16 @@ Module['onRuntimeInitialized'] = function() {
     self.set_setting('FORCE_FILESYSTEM')
     self.do_runf(test_file('fs/test_llseek.c'), 'success')
 
+  @also_with_noderawfs
+  def test_fs_readv(self):
+    self.set_setting('FORCE_FILESYSTEM')
+    self.do_runf(test_file('fs/test_readv.c'), 'success')
+
+  @also_with_noderawfs
+  def test_fs_writev(self):
+    self.set_setting('FORCE_FILESYSTEM')
+    self.do_runf(test_file('fs/test_writev.c'), 'success')
+
   def test_fs_64bit(self):
     self.do_runf(test_file('fs/test_64bit.c'), 'success')
 
@@ -6338,7 +6348,7 @@ PORT: 3979
     self.emcc_args += ['--js-library', 'mylib1.js', '--js-library', 'mylib2.js']
     self.do_runf('main.cpp', 'hello from lib!\n*32*\n')
 
-  @with_env_modify({'LC_CTYPE': 'latin-1', 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0'})
+  @with_env_modify({'LC_ALL': 'latin-1', 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0'})
   def test_unicode_js_library(self):
     create_file('main.c', '''
       #include <stdio.h>
@@ -9409,7 +9419,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   def test_Module_dynamicLibraries_pthreads(self):
     # test that Module.dynamicLibraries works with pthreads
     self.emcc_args += ['-pthread', '-Wno-experimental']
-    self.emcc_args += ['--extern-pre-js', 'pre.js']
+    self.emcc_args += ['--pre-js', 'pre.js']
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('EXIT_RUNTIME')
     # This test is for setting dynamicLibraries at runtime so we don't
@@ -9418,14 +9428,12 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('NO_AUTOLOAD_DYLIBS')
 
     create_file('pre.js', '''
-      if (!global.Module) {
-        // This is the initial load (not a worker)
-        // Define the initial state of Module as we would
-        // in the html shell file.
-        // Use var to escape the scope of the if statement
-        var Module = {
-          dynamicLibraries: ['liblib.so']
-        };
+      if (typeof importScripts == 'undefined') { // !ENVIRONMENT_IS_WORKER
+        // Load liblib.so by default on non-workers
+        Module['dynamicLibraries'] = ['liblib.so'];
+      } else {
+        // Verify whether the main thread passes Module.dynamicLibraries to the worker
+        assert(Module['dynamicLibraries'].includes('liblib.so'));
       }
     ''')
 
@@ -9646,7 +9654,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
 
 # Generate tests for everything
-def make_run(name, emcc_args, settings=None, env=None, node_args=None, require_v8=False, v8_args=None):
+def make_run(name, emcc_args, settings=None, env=None,
+             require_v8=False, v8_args=None,
+             require_node=False, node_args=None,
+             require_wasm64=False):
   if env is None:
     env = {}
   if settings is None:
@@ -9688,6 +9699,11 @@ def make_run(name, emcc_args, settings=None, env=None, node_args=None, require_v
 
     if require_v8:
       self.require_v8()
+    elif require_node:
+      self.require_node()
+
+    if require_wasm64:
+      self.require_wasm64()
 
   TT.setUp = setUp
 
@@ -9712,8 +9728,9 @@ corez = make_run('corez', emcc_args=['-Oz'])
 
 # MEMORY64=1
 wasm64 = make_run('wasm64', emcc_args=['-Wno-experimental', '--profiling-funcs'],
-                  settings={'MEMORY64': 1},
-                  require_v8=True, v8_args=['--experimental-wasm-memory64'])
+                  settings={'MEMORY64': 1}, require_wasm64=True, require_node=True)
+wasm64_v8 = make_run('wasm64_v8', emcc_args=['-Wno-experimental', '--profiling-funcs'],
+                     settings={'MEMORY64': 1}, require_wasm64=True, require_v8=True)
 # MEMORY64=2, or "lowered"
 wasm64l = make_run('wasm64l', emcc_args=['-Wno-experimental', '--profiling-funcs'],
                    settings={'MEMORY64': 2},

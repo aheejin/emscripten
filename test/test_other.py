@@ -33,7 +33,7 @@ from tools.shared import CLANG_CC, CLANG_CXX, LLVM_AR, LLVM_DWARFDUMP, LLVM_DWP,
 from common import RunnerCore, path_from_root, is_slow_test, ensure_dir, disabled, make_executable
 from common import env_modify, no_mac, no_windows, requires_native_clang, with_env_modify
 from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
-from common import compiler_for, EMBUILDER, requires_v8, requires_node
+from common import compiler_for, EMBUILDER, requires_v8, requires_node, requires_wasm64
 from common import also_with_minimal_runtime, also_with_wasm_bigint, EMTEST_BUILD_VERBOSE, PYTHON
 from tools import shared, building, utils, deps_info, response_file, cache
 from tools.utils import read_file, write_file, delete_file, read_binary
@@ -1970,8 +1970,21 @@ int f() {
     self.run_process([EMXX, 'main.cpp', '--pre-js', 'before.js', '--post-js', 'after.js', '-sWASM_ASYNC_COMPILATION=0'])
     self.assertContained('hello from main\nhello from js\n', self.run_js('a.out.js'))
 
+  def test_sdl_none(self):
+    create_file('main.c', r'''
+      #include <stdio.h>
+      #include <SDL.h>
+
+      int main() {
+        return 0;
+      }
+    ''')
+    err = self.expect_fail([EMCC, 'main.c'])
+    self.assertContained('SDL.h:1:2: error: "To use the emscripten port of SDL use -sUSE_SDL or -sUSE_SDL=2"', err)
+    self.run_process([EMCC, 'main.c', '-sUSE_SDL'])
+
   def test_sdl_endianness(self):
-    create_file('main.cpp', r'''
+    create_file('main.c', r'''
       #include <stdio.h>
       #include <SDL/SDL.h>
 
@@ -1980,11 +1993,10 @@ int f() {
         return 0;
       }
     ''')
-    self.run_process([EMXX, 'main.cpp'])
-    self.assertContained('1234, 1234, 4321\n', self.run_js('a.out.js'))
+    self.do_runf('main.c', '1234, 1234, 4321\n')
 
   def test_sdl_scan_code_from_key(self):
-    create_file('main.cpp', r'''
+    create_file('main.c', r'''
       #include <stdio.h>
       #include <SDL/SDL_keyboard.h>
 
@@ -1993,7 +2005,7 @@ int f() {
         return 0;
       }
     ''')
-    self.do_runf('main.cpp', '204\n')
+    self.do_runf('main.c', '204\n')
 
   def test_sdl2_mixer_wav(self):
     self.emcc(test_file('browser/test_sdl2_mixer_wav.c'), ['-sUSE_SDL_MIXER=2'], output_filename='a.out.js')
@@ -2168,7 +2180,7 @@ int f() {
         delete_file('a.out.js')
         print('checking "%s" %s' % (args, value))
         extra = ['-s', action + '_ON_UNDEFINED_SYMBOLS=%d' % value] if action else []
-        proc = self.run_process([EMXX, 'main.cpp'] + extra + args, stderr=PIPE, check=False)
+        proc = self.run_process([EMXX, '-sUSE_SDL', 'main.cpp'] + extra + args, stderr=PIPE, check=False)
         print(proc.stderr)
         if value or action is None:
           # The default is that we error in undefined symbols
@@ -8154,7 +8166,7 @@ int main() {
     # everything it needs.
     directories = {'': []}
     for elem in os.listdir(path_from_root('system/include')):
-      if elem == 'compat':
+      if elem in ('compat', 'fakesdl'):
         continue
       full = path_from_root('system/include', elem)
       if os.path.isdir(full):
@@ -12465,7 +12477,7 @@ Module['postRun'] = function() {{
 
   @requires_v8
   def test_extended_const(self):
-    self.v8_args = ['--experimental-wasm-extended-const']
+    self.v8_args += ['--experimental-wasm-extended-const']
     # Export at least one global so that we exercise the parsing of the global section.
     self.do_runf(test_file('hello_world.c'), emcc_args=['-sEXPORTED_FUNCTIONS=_main,___stdout_used', '-mextended-const', '-sMAIN_MODULE=2'])
     wat = self.get_wasm_text('hello_world.wasm')
@@ -12476,9 +12488,8 @@ Module['postRun'] = function() {{
 
   # Smoketest for MEMORY64 setting.  Most of the testing of MEMORY64 is by way of the wasm64
   # variant of the core test suite.
-  @requires_v8
+  @requires_wasm64
   def test_memory64(self):
-    self.v8_args += ['--experimental-wasm-memory64']
     for opt in ['-O0', '-O1', '-O2', '-O3']:
       self.do_runf(test_file('hello_world.c'), 'hello, world', emcc_args=['-sMEMORY64', '-Wno-experimental', opt])
 
@@ -12526,7 +12537,6 @@ Module['postRun'] = function() {{
 
     # enable stack switching and other relevant features (like reference types
     # for the return value of externref)
-    self.v8_args.append('--wasm-staging')
     self.v8_args.append('--experimental-wasm-stack-switching')
 
     self.assertContained(expected, self.run_js('a.out.js'))
@@ -12753,31 +12763,25 @@ foo/version.txt
     response = response.replace(root, '<root>')
     self.assertTextDataIdentical(expected, response)
 
+  def test_min_browser_version(self):
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Werror', '-sWASM_BIGINT', '-sMIN_SAFARI_VERSION=120000'])
+    self.assertContained('emcc: error: MIN_SAFARI_VERSION=120000 is not compatible with WASM_BIGINT (150000 or above required)', err)
+
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Werror', '-pthread', '-sMIN_CHROME_VERSION=73'])
+    self.assertContained('emcc: error: MIN_CHROME_VERSION=73 is not compatible with pthreads (74 or above required)', err)
+
   def test_signext_lowering(self):
-    cmd = [EMCC, test_file('other/test_signext_lowering.c'), '-sWASM_BIGINT']
+    # Use `-v` to show the sub-commands being run by emcc.
+    cmd = [EMCC, test_file('other/test_signext_lowering.c'), '-v']
 
-    # We expect ERROR_ON_WASM_CHANGES_AFTER_LINK to fail due lowering of sign-ext being
-    # required for safari 12.
-    output = self.expect_fail(cmd + ['-sERROR_ON_WASM_CHANGES_AFTER_LINK', '-sMIN_SAFARI_VERSION=120000'])
-    self.assertContained('error: changes to the wasm are required after link, but disallowed by ERROR_ON_WASM_CHANGES_AFTER_LINK', output)
-    self.assertContained('--signext-lowering', output)
+    # By default we don't expect the lowering pass to be run.
+    err = self.run_process(cmd, stderr=subprocess.PIPE).stderr
+    self.assertNotContained('--signext-lowering', err)
 
-    # Same for firefox
-    output = self.expect_fail(cmd + ['-sERROR_ON_WASM_CHANGES_AFTER_LINK', '-sMIN_FIREFOX_VERSION=61'])
-    self.assertContained('error: changes to the wasm are required after link, but disallowed by ERROR_ON_WASM_CHANGES_AFTER_LINK', output)
-    self.assertContained('--signext-lowering', output)
-
-    # Same for chrome
-    output = self.expect_fail(cmd + ['-sERROR_ON_WASM_CHANGES_AFTER_LINK', '-sMIN_CHROME_VERSION=73'])
-    self.assertContained('error: changes to the wasm are required after link, but disallowed by ERROR_ON_WASM_CHANGES_AFTER_LINK', output)
-    self.assertContained('--signext-lowering', output)
-
-    # Running the same command with safari 14.1 should succeed because no lowering
-    # is required.
-    self.run_process(cmd + ['-sERROR_ON_WASM_CHANGES_AFTER_LINK', '-sMIN_SAFARI_VERSION=140100'])
-    self.assertEqual('1\n', self.run_js('a.out.js'))
-
-    # Running without ERROR_ON_WASM_CHANGES_AFTER_LINK but with safari 12
-    # should successfully lower sign-ext.
-    self.run_process(cmd + ['-sMIN_SAFARI_VERSION=120000', '-o', 'lowered.js'])
-    self.assertEqual('1\n', self.run_js('lowered.js'))
+    # Specifying an older browser version should trigger the lowering pass
+    err = self.run_process(cmd + ['-sMIN_SAFARI_VERSION=120000'], stderr=subprocess.PIPE).stderr
+    self.assertContained('--signext-lowering', err)
+    err = self.run_process(cmd + ['-sMIN_FIREFOX_VERSION=61'], stderr=subprocess.PIPE).stderr
+    self.assertContained('--signext-lowering', err)
+    err = self.run_process(cmd + ['-sMIN_CHROME_VERSION=73'], stderr=subprocess.PIPE).stderr
+    self.assertContained('--signext-lowering', err)
