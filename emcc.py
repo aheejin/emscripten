@@ -1628,6 +1628,8 @@ def setup_pthreads(target):
   if settings.ALLOW_MEMORY_GROWTH:
     diagnostics.warning('pthreads-mem-growth', 'USE_PTHREADS + ALLOW_MEMORY_GROWTH may run non-wasm code slowly, see https://github.com/WebAssembly/design/issues/1271')
 
+  default_setting('DEFAULT_PTHREAD_STACK_SIZE', settings.STACK_SIZE)
+
   # Functions needs to be exported from the module since they are used in worker.js
   settings.REQUIRED_EXPORTS += [
     'emscripten_dispatch_to_thread_',
@@ -3768,9 +3770,13 @@ def modularize():
   if not settings.EXPORT_READY_PROMISE:
     return_value = '{}'
 
+  # TODO: Remove when https://bugs.webkit.org/show_bug.cgi?id=223533 is resolved.
+  if async_emit != '' and settings.EXPORT_NAME == 'config':
+    diagnostics.warning('emcc', 'EXPORT_NAME should not be named "config" when targeting Safari')
+
   src = '''
-%(maybe_async)sfunction(%(EXPORT_NAME)s) {
-  %(EXPORT_NAME)s = %(EXPORT_NAME)s || {};
+%(maybe_async)sfunction(config) {
+  var %(EXPORT_NAME)s = config || {};
 
 %(src)s
 

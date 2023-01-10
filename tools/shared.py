@@ -8,7 +8,6 @@ from .toolchain_profiler import ToolchainProfiler
 from functools import wraps
 from subprocess import PIPE
 import atexit
-import binascii
 import json
 import logging
 import os
@@ -302,7 +301,7 @@ def get_clang_targets():
     exit_with_error('clang executable not found at `%s`' % CLANG_CC)
   try:
     target_info = run_process([CLANG_CC, '-print-targets'], stdout=PIPE).stdout
-  except subprocess.CalldProcessError:
+  except subprocess.CalledProcessError:
     exit_with_error('error running `clang -print-targets`.  Check your llvm installation (%s)' % CLANG_CC)
   if 'Registered Targets:' not in target_info:
     exit_with_error('error parsing output of `clang -print-targets`.  Check your llvm installation (%s)' % CLANG_CC)
@@ -389,14 +388,7 @@ def set_version_globals():
 
 
 def generate_sanity():
-  sanity_file_content = f'{EMSCRIPTEN_VERSION}|{config.LLVM_ROOT}|{get_clang_version()}'
-  if os.path.exists(config.EM_CONFIG):
-    config_data = utils.read_file(config.EM_CONFIG)
-  else:
-    config_data = ''
-  checksum = binascii.crc32(config_data.encode())
-  sanity_file_content += '|%#x\n' % checksum
-  return sanity_file_content
+  return f'{EMSCRIPTEN_VERSION}|{config.LLVM_ROOT}|{get_clang_version()}'
 
 
 def perform_sanity_checks():
