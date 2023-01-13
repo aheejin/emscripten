@@ -529,7 +529,7 @@ class benchmark(common.RunnerCore):
 
   # Also interesting to test it without the printfs which allow checking the output. Without
   # printf, code size is dominated by the runtime itself (the compiled code is just a few lines).
-  def test_primes_nocheck(self):
+  def zzz_test_primes_nocheck(self):
     self.test_primes(check=False)
 
   def test_memops(self):
