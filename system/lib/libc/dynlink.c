@@ -47,8 +47,79 @@ void _emscripten_dlopen_js(struct dso* handle,
 void __dl_vseterr(const char*, va_list);
 
 static struct dso * _Atomic head, * _Atomic tail;
+
+#ifdef _REENTRANT
 static thread_local struct dso* thread_local_tail;
-static pthread_rwlock_t lock;
+static pthread_mutex_t write_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void dlsync() {
+  if (!thread_local_tail) {
+    thread_local_tail = head;
+  }
+  if (!thread_local_tail->next) {
+    return;
+  }
+  dbg("dlsync: catching up %p %p", thread_local_tail, tail);
+  while (thread_local_tail->next) {
+    struct dso* p = thread_local_tail->next;
+    dbg("dlsync: %s mem_addr=%p "
+        "mem_size=%zu table_addr=%p table_size=%zu",
+        p->name,
+        p->mem_addr,
+        p->mem_size,
+        p->table_addr,
+        p->table_size);
+    void* success = _dlopen_js(p);
+    if (!success) {
+      // If any on the libraries fails to load here then we give up.
+      // TODO(sbc): Ideally this would never happen and we could/should
+      // abort, but on the main thread (where we don't have sync xhr) its
+      // often not possible to syncronously load side module.
+      _emscripten_errf("_dlopen_js failed: %s", dlerror());
+      break;
+    }
+    thread_local_tail = p;
+  }
+  dbg("dlsync: done");
+}
+
+// This function is called from emscripten_yield which itself is called whenever
+// we block on a futex.  We need to check to avoid infinite recursion when
+// taking the lock below.
+static thread_local bool skip_dlsync = false;
+
+static void ensure_init();
+
+void _emscripten_thread_sync_code() {
+  if (skip_dlsync) {
+    return;
+  }
+  ensure_init();
+  if (!thread_local_tail) {
+    thread_local_tail = head;
+  }
+  if (thread_local_tail != tail) {
+    skip_dlsync = true;
+    dlsync();
+    skip_dlsync = false;
+  }
+}
+
+static void do_write_lock() {
+  // Once we have the lock we want to avoid automatic code sync as that would
+  // result in a deadlock.
+  skip_dlsync = true;
+  pthread_mutex_lock(&write_lock);
+}
+
+static void do_write_unlock() {
+  pthread_mutex_unlock(&write_lock);
+  skip_dlsync = false;
+}
+#else
+#define do_write_lock()
+#define do_write_unlock()
+#endif
 
 static void error(const char* fmt, ...) {
   va_list ap;
@@ -80,13 +151,16 @@ static void load_library_done(struct dso* p) {
       p->table_addr,
       p->table_size);
 
+#ifdef _REENTRANT
+  thread_local_tail = p;
+#endif
+
   // insert into linked list
   p->prev = tail;
   if (tail) {
     tail->next = p;
   }
   tail = p;
-  thread_local_tail = p;
 
   if (!head) {
     head = p;
@@ -114,14 +188,14 @@ static void dlopen_js_onsuccess(struct dso* dso, struct async_data* data) {
       dso->mem_addr,
       dso->mem_size);
   load_library_done(dso);
-  pthread_rwlock_unlock(&lock);
+  do_write_lock();
   data->onsuccess(data->user_data, dso);
   free(data);
 }
 
 static void dlopen_js_onerror(struct dso* dso, struct async_data* data) {
   dbg("dlopen_js_onerror: dso=%p", dso);
-  pthread_rwlock_unlock(&lock);
+  do_write_unlock();
   data->onerror(data->user_data);
   free(dso);
   free(data);
@@ -134,7 +208,7 @@ static void ensure_init() {
     return;
   }
   // Initialize the dso list.  This happens on first run.
-  pthread_rwlock_wrlock(&lock);
+  do_write_lock();
   if (!head) {
     // Flags are not important since the main module is already loaded.
     struct dso* p = load_library_start("__main__", RTLD_NOW|RTLD_GLOBAL);
@@ -143,7 +217,7 @@ static void ensure_init() {
     load_library_done(p);
     assert(head);
   }
-  pthread_rwlock_unlock(&lock);
+  do_write_unlock();
 }
 
 void* dlopen(const char* file, int flags) {
@@ -156,7 +230,11 @@ void* dlopen(const char* file, int flags) {
   struct dso* p;
   int cs;
   pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
-  pthread_rwlock_wrlock(&lock);
+  do_write_lock();
+#ifdef _REENTRANT
+  // Make sure we are in sync before loading any new DSOs.
+  dlsync();
+#endif
 
   /* Search for the name to see if it's already loaded */
   for (p = head; p; p = p->next) {
@@ -180,8 +258,9 @@ void* dlopen(const char* file, int flags) {
   dbg("dlopen_js: success: %p", p);
   load_library_done(p);
 end:
-  pthread_rwlock_unlock(&lock);
+  do_write_unlock();
   pthread_setcancelstate(cs, 0);
+  dbg("dlopen: %s done", file);
   return p;
 }
 
@@ -192,10 +271,10 @@ void emscripten_dlopen(const char* filename, int flags, void* user_data,
     onsuccess(user_data, head);
     return;
   }
-  pthread_rwlock_wrlock(&lock);
+  do_write_lock();
   struct dso* p = load_library_start(filename, flags);
   if (!p) {
-    pthread_rwlock_unlock(&lock);
+    do_write_unlock();
     onerror(user_data);
     return;
   }
@@ -217,9 +296,8 @@ void* __dlsym(void* restrict p, const char* restrict s, void* restrict ra) {
     return 0;
   }
   void* res;
-  pthread_rwlock_rdlock(&lock);
   res = _dlsym_js(p, s);
-  pthread_rwlock_unlock(&lock);
+  dbg("__dlsym done dso:%p res:%p", p, res);
   return res;
 }
 
@@ -232,50 +310,3 @@ int dladdr(const void* addr, Dl_info* info) {
   info->dli_saddr = NULL;
   return 1;
 }
-
-#ifdef _REENTRANT
-void _emscripten_thread_sync_code() {
-  // This function is called from emscripten_yeild which itself is called
-  // whenever we block on a futex.  We need to check to avoid infinite
-  // recursion when taking the lock below.
-  static thread_local bool syncing = false;
-  if (syncing) {
-    return;
-  }
-  syncing = true;
-  ensure_init();
-  if (thread_local_tail == tail) {
-    dbg("emscripten_thread_sync_code: already in sync");
-    goto done;
-  }
-  pthread_rwlock_rdlock(&lock);
-  if (!thread_local_tail) {
-    thread_local_tail = head;
-  }
-  while (thread_local_tail->next) {
-    struct dso* p = thread_local_tail->next;
-    dbg("emscripten_thread_sync_code: %s mem_addr=%p "
-        "mem_size=%zu table_addr=%p table_size=%zu",
-        p->name,
-        p->mem_addr,
-        p->mem_size,
-        p->table_addr,
-        p->table_size);
-    void* success = _dlopen_js(p);
-    if (!success) {
-      // If any on the libraries fails to load here then we give up.
-      // TODO(sbc): Ideally this would never happen and we could/should
-      // abort, but on the main thread (where we don't have sync xhr) its
-      // often not possible to syncronously load side module.
-      _emscripten_errf("emscripten_thread_sync_code failed: %s", dlerror());
-      break;
-    }
-    thread_local_tail = p;
-  }
-  pthread_rwlock_unlock(&lock);
-  dbg("emscripten_thread_sync_code done");
-
-done:
-  syncing = false;
-}
-#endif

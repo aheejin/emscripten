@@ -18,20 +18,20 @@ var LibraryDylink = {
     if (direct) {
       // First look for the orig$ symbol which is the symbols without
       // any legalization performed.
-      sym = asmLibraryArg['orig$' + symName];
+      sym = wasmImports['orig$' + symName];
     }
 #endif
     if (!sym) {
-      sym = asmLibraryArg[symName];
+      sym = wasmImports[symName];
       // Ignore 'stub' symbols that are auto-generated as part of the original
-      // `asmLibraryArg` used to instantate the main module.
+      // `wasmImports` used to instantate the main module.
       if (sym && sym.stub) sym = undefined;
     }
 
     // Check for the symbol on the Module object.  This is the only
     // way to dynamically access JS library symbols that were not
     // referenced by the main module (and therefore not part of the
-    // initial set of symbols included in asmLibraryArg when it
+    // initial set of symbols included in wasmImports when it
     // was declared.
     if (!sym) {
       sym = Module[asmjsMangle(symName)];
@@ -469,12 +469,12 @@ var LibraryDylink = {
       //
       // We should copy the symbols (which include methods and variables) from SIDE_MODULE to MAIN_MODULE.
 
-      if (!asmLibraryArg.hasOwnProperty(sym)) {
-        asmLibraryArg[sym] = exports[sym];
+      if (!wasmImports.hasOwnProperty(sym)) {
+        wasmImports[sym] = exports[sym];
       }
 #if ASSERTIONS == 2
       else {
-        var curr = asmLibraryArg[sym], next = exports[sym];
+        var curr = wasmImports[sym], next = exports[sym];
         // don't warn on functions - might be odr, linkonce_odr, etc.
         if (!(typeof curr == 'function' && typeof next == 'function')) {
           err("warning: symbol '" + sym + "' from '" + libName + "' already exists (duplicate symbol? or weak linking, which isn't supported yet?)"); // + [curr, ' vs ', next]);
@@ -538,7 +538,7 @@ var LibraryDylink = {
         // alignments are powers of 2
         var memAlign = Math.pow(2, metadata.memoryAlign);
         // finalize alignments and verify them
-        memAlign = Math.max(memAlign, STACK_ALIGN); // we at least need stack alignment
+        memAlign = Math.max(memAlign, {{{ STACK_ALIGN }}}); // we at least need stack alignment
         // prepare memory
         var memoryBase = metadata.memorySize ? alignMemory(getMemory(metadata.memorySize + memAlign), memAlign) : 0; // TODO: add to cleanups
         var tableBase = metadata.tableSize ? wasmTable.length : 0;
@@ -613,9 +613,9 @@ var LibraryDylink = {
               return tableBase;
 #endif
           }
-          if (prop in asmLibraryArg) {
+          if (prop in wasmImports) {
             // No stub needed, symbol already exists in symbol table
-            return asmLibraryArg[prop];
+            return wasmImports[prop];
           }
           // Return a stub function that will resolve the symbol
           // when first called.
@@ -802,14 +802,13 @@ var LibraryDylink = {
   // Once a library becomes "global" or "nodelete", it cannot be removed or unloaded.
   $loadDynamicLibrary__deps: ['$LDSO', '$loadWebAssemblyModule', '$asmjsMangle', '$isInternalSym', '$mergeLibSymbols'],
   $loadDynamicLibrary__docs: '/** @param {number=} handle */',
-  $loadDynamicLibrary: function(lib, flags, handle) {
+  $loadDynamicLibrary: function(lib, flags = {global: true, nodelete: true}, handle = 0) {
 #if DYLINK_DEBUG
     dbg('loadDynamicLibrary: ' + lib + ' handle:' + handle);
     dbg('existing: ' + Object.keys(LDSO.loadedLibsByName));
 #endif
     // when loadDynamicLibrary did not have flags, libraries were loaded
     // globally & permanently
-    flags = flags || {global: true, nodelete: true}
 
     var dso = LDSO.loadedLibsByName[lib];
     if (dso) {

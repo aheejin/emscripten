@@ -108,10 +108,6 @@ def align_memory(addr):
   return (addr + 15) & -16
 
 
-def to_nice_ident(ident): # limited version of the JS function toNiceIdent
-  return ident.replace('%', '$').replace('@', '_').replace('.', '_')
-
-
 def get_weak_imports(main_wasm):
   dylink_sec = webassembly.parse_dylink_section(main_wasm)
   for symbols in dylink_sec.import_info.values():
@@ -128,7 +124,7 @@ def update_settings_glue(wasm_file, metadata):
     # we don't need any JS library contents in side modules
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE = []
   else:
-    syms = settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE + [to_nice_ident(d) for d in metadata.imports]
+    syms = settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE + metadata.imports
     syms = set(syms).difference(metadata.exports)
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE = sorted(syms)
     if settings.MAIN_MODULE:
@@ -140,6 +136,8 @@ def update_settings_glue(wasm_file, metadata):
   # Store function exports so that Closure and metadce can track these even in
   # -sDECLARE_ASM_MODULE_EXPORTS=0 builds.
   settings.WASM_FUNCTION_EXPORTS = metadata.exports
+
+  settings.HAVE_EM_ASM = bool(settings.MAIN_MODULE or len(metadata.asmConsts) != 0)
 
   # start with the MVP features, and add any detected features.
   settings.BINARYEN_FEATURES = ['--mvp-features'] + metadata.features
@@ -412,11 +410,15 @@ def emscript(in_wasm, out_wasm, outfile_js, memfile):
   asm_consts = create_asm_consts(metadata)
   em_js_funcs = create_em_js(metadata)
   asm_const_pairs = ['%s: %s' % (key, value) for key, value in asm_consts]
-  asm_const_map = 'var ASM_CONSTS = {\n  ' + ',  \n '.join(asm_const_pairs) + '\n};\n'
-  pre = pre.replace(
-    '// === Body ===',
-    ('// === Body ===\n\n' + asm_const_map +
-     '\n'.join(em_js_funcs) + '\n'))
+  extra_code = ''
+  if asm_const_pairs or settings.MAIN_MODULE:
+    extra_code += 'var ASM_CONSTS = {\n  ' + ',  \n '.join(asm_const_pairs) + '\n};\n'
+  if em_js_funcs:
+    extra_code += '\n'.join(em_js_funcs) + '\n'
+  if extra_code:
+    pre = pre.replace(
+      '// === Body ===\n',
+      '// === Body ===\n\n' + extra_code + '\n')
 
   with open(outfile_js, 'w', encoding='utf-8') as out:
     out.write(normalize_line_endings(pre))
@@ -673,12 +675,13 @@ def create_sending(invoke_funcs, metadata):
   # Map of wasm imports to mangled/external/JS names
   send_items_map = {}
 
-  for name in metadata.emJsFuncs:
-    send_items_map[name] = name
   for name in invoke_funcs:
     send_items_map[name] = name
   for name in metadata.imports:
-    send_items_map[name] = asmjs_mangle(name)
+    if name in metadata.emJsFuncs:
+      send_items_map[name] = name
+    else:
+      send_items_map[name] = asmjs_mangle(name)
 
   add_standard_wasm_imports(send_items_map)
 
@@ -770,12 +773,12 @@ def create_module(sending, receiving, invoke_funcs, metadata):
   receiving += create_named_globals(metadata)
   module = []
 
-  module.append('var asmLibraryArg = %s;\n' % sending)
+  module.append('var wasmImports = %s;\n' % sending)
   if settings.ASYNCIFY and (settings.ASSERTIONS or settings.ASYNCIFY == 2):
     # instrumenting imports is used in asyncify in two ways: to add assertions
     # that check for proper import use, and for ASYNCIFY=2 we use them to set up
     # the Promise API on the import side.
-    module.append('Asyncify.instrumentWasmImports(asmLibraryArg);\n')
+    module.append('Asyncify.instrumentWasmImports(wasmImports);\n')
 
   if not settings.MINIMAL_RUNTIME:
     module.append("var asm = createWasm();\n")

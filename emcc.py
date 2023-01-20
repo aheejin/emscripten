@@ -525,7 +525,11 @@ def get_all_js_syms():
 
   # We define a cache hit as when the settings and `--js-library` contents are
   # identical.
-  input_files = [json.dumps(settings.external_dict(), sort_keys=True, indent=2)]
+  # Ignore certain settings that can are no relevant to library deps.  Here we
+  # skip PRE_JS_FILES/POST_JS_FILES which don't effect the library symbol list
+  # and can contain full paths to temporary files.
+  skip_settings = {'PRE_JS_FILES', 'POST_JS_FILES'}
+  input_files = [json.dumps(settings.external_dict(skip_keys=skip_settings), sort_keys=True, indent=2)]
   for jslib in sorted(glob.glob(utils.path_from_root('src') + '/library*.js')):
     input_files.append(read_file(jslib))
   for jslib in settings.JS_LIBRARIES:
@@ -1091,7 +1095,7 @@ def get_subresource_location(path, data_uri=None):
 def package_files(options, target):
   rtn = []
   logger.debug('setting up files')
-  file_args = ['--from-emcc', '--export-name=' + settings.EXPORT_NAME]
+  file_args = ['--from-emcc']
   if options.preload_files:
     file_args.append('--preload')
     file_args += options.preload_files
@@ -1120,7 +1124,7 @@ def package_files(options, target):
   if options.preload_files:
     # Preloading files uses --pre-js code that runs before the module is loaded.
     file_code = shared.check_call(cmd, stdout=PIPE).stdout
-    options.pre_js = js_manipulation.add_files_pre_js(options.pre_js, file_code)
+    js_manipulation.add_files_pre_js(options.pre_js, file_code)
   else:
     # Otherwise, we are embedding files, which does not require --pre-js code,
     # and instead relies on a static constrcutor to populate the filesystem.
@@ -1293,6 +1297,9 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   # Embed and preload files
   if len(options.preload_files) or len(options.embed_files):
     linker_arguments += package_files(options, target)
+
+  settings.PRE_JS_FILES = [os.path.abspath(f) for f in options.pre_js]
+  settings.POST_JS_FILES = [os.path.abspath(f) for f in options.post_js]
 
   if options.oformat == OFormat.OBJECT:
     logger.debug(f'link_to_object: {linker_arguments} -> {target}')
@@ -1751,8 +1758,6 @@ def phase_linker_setup(options, state, newargs):
       exit_with_error('PTHREADS_PROFILING only works with ASSERTIONS enabled')
     options.post_js.append(utils.path_from_root('src/threadprofiler.js'))
 
-  options.pre_js = read_js_files(options.pre_js)
-  options.post_js = read_js_files(options.post_js)
   options.extern_pre_js = read_js_files(options.extern_pre_js)
   options.extern_post_js = read_js_files(options.extern_post_js)
 
@@ -3022,7 +3027,8 @@ def phase_post_link(options, state, in_wasm, wasm_target, target):
 
   phase_emscript(options, in_wasm, wasm_target, memfile)
 
-  phase_source_transforms(options)
+  if options.js_transform:
+    phase_source_transforms(options)
 
   if memfile and not settings.MINIMAL_RUNTIME:
     # MINIMAL_RUNTIME doesn't use `var memoryInitializer` but instead expects Module['mem'] to
@@ -3056,28 +3062,14 @@ def phase_emscript(options, in_wasm, wasm_target, memfile):
 
 @ToolchainProfiler.profile_block('source transforms')
 def phase_source_transforms(options):
-  global final_js
-
-  # Apply pre and postjs files
-  if final_js and (options.pre_js or options.post_js):
-    logger.debug('applying pre/postjses')
-    src = read_file(final_js)
-    final_js += '.pp.js'
-    with open(final_js, 'w', encoding='utf-8') as f:
-      # pre-js code goes right after the Module integration code (so it
-      # can use Module), we have a marker for it
-      f.write(do_replace(src, '// {{PRE_JSES}}', options.pre_js))
-      f.write(options.post_js)
-    save_intermediate('pre-post')
-
   # Apply a source code transformation, if requested
-  if options.js_transform:
-    safe_copy(final_js, final_js + '.tr.js')
-    final_js += '.tr.js'
-    posix = not shared.WINDOWS
-    logger.debug('applying transform: %s', options.js_transform)
-    shared.check_call(building.remove_quotes(shlex.split(options.js_transform, posix=posix) + [os.path.abspath(final_js)]))
-    save_intermediate('transformed')
+  global final_js
+  safe_copy(final_js, final_js + '.tr.js')
+  final_js += '.tr.js'
+  posix = not shared.WINDOWS
+  logger.debug('applying transform: %s', options.js_transform)
+  shared.check_call(building.remove_quotes(shlex.split(options.js_transform, posix=posix) + [os.path.abspath(final_js)]))
+  save_intermediate('transformed')
 
 
 @ToolchainProfiler.profile_block('memory initializer')
@@ -3087,7 +3079,7 @@ def phase_memory_initializer(memfile):
   global final_js
 
   src = read_file(final_js)
-  src = do_replace(src, '// {{MEM_INITIALIZER}}', 'var memoryInitializer = "%s";' % os.path.basename(memfile))
+  src = do_replace(src, '<<< MEM_INITIALIZER >>>', '"%s"' % os.path.basename(memfile))
   write_file(final_js + '.mem.js', src)
   final_js += '.mem.js'
 
@@ -3775,8 +3767,7 @@ def modularize():
     diagnostics.warning('emcc', 'EXPORT_NAME should not be named "config" when targeting Safari')
 
   src = '''
-%(maybe_async)sfunction(config) {
-  var %(EXPORT_NAME)s = config || {};
+%(maybe_async)sfunction(%(EXPORT_NAME)s = {})  {
 
 %(src)s
 
