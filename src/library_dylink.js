@@ -10,43 +10,52 @@ var dlopenMissingError = "'To use dlopen, you need enable dynamic linking, see h
 
 var LibraryDylink = {
 #if RELOCATABLE
+  $isSymbolDefined: function(symName) {
+    // Ignore 'stub' symbols that are auto-generated as part of the original
+    // `wasmImports` used to instantate the main module.
+    var existing = wasmImports[symName];
+    if (!existing || existing.stub) {
+      return false;
+    }
+#if ASYNCIFY
+    // Even if a symbol exists in wasmImports, and is not itself a stub, it
+    // could be an ASYNCIFY wrapper function that wraps a stub function.
+    if (symName in asyncifyStubs && !asyncifyStubs[symName]) {
+      return false;
+    }
+#endif
+    return true;
+  },
+
+  // Resolve a global symbol by name.  This is used during module loading to
+  // resolve imports, and by `dlsym` when used with `RTLD_DEFAULT`.
+  // Returns both the resolved symbol (i.e. a function or a global) along with
+  // the canonical name of the symbol (in some cases is modify the symbol as
+  // part of the loop process, so that actual symbol looked up has a different
+  // name).
+  $resolveGlobalSymbol__deps: ['$isSymbolDefined'],
   $resolveGlobalSymbol__internal: true,
-  $resolveGlobalSymbol__deps: ['$asmjsMangle'],
-  $resolveGlobalSymbol: function(symName, direct) {
+  $resolveGlobalSymbol: function(symName, direct = false) {
     var sym;
 #if !WASM_BIGINT
-    if (direct) {
-      // First look for the orig$ symbol which is the symbols without
-      // any legalization performed.
-      sym = wasmImports['orig$' + symName];
+    // First look for the orig$ symbol which is the symbol without i64
+    // legalization performed.
+    if (direct && ('orig$' + symName in wasmImports)) {
+      symName = 'orig$' + symName;
     }
 #endif
-    if (!sym) {
-      sym = wasmImports[symName];
-      // Ignore 'stub' symbols that are auto-generated as part of the original
-      // `wasmImports` used to instantate the main module.
-      if (sym && sym.stub) sym = undefined;
-    }
-
-    // Check for the symbol on the Module object.  This is the only
-    // way to dynamically access JS library symbols that were not
-    // referenced by the main module (and therefore not part of the
-    // initial set of symbols included in wasmImports when it
-    // was declared.
-    if (!sym) {
-      sym = Module[asmjsMangle(symName)];
-    }
-
-    if (!sym && symName.startsWith('invoke_')) {
-      sym = createInvokeFunction(symName.split('_')[1]);
-    }
-
 #if !DISABLE_EXCEPTION_CATCHING
-    if (!sym && symName.startsWith("__cxa_find_matching_catch")) {
-      sym = Module["___cxa_find_matching_catch"];
+    if (symName.startsWith('__cxa_find_matching_catch_')) {
+      symName = '__cxa_find_matching_catch';
     }
 #endif
-    return sym;
+    if (isSymbolDefined(symName)) {
+      sym = wasmImports[symName];
+    } else if (symName.startsWith('invoke_')) {
+      // Create (and cache) new invoke_ functions on demand.
+      sym = wasmImports[symName] = createInvokeFunction(symName.split('_')[1]);
+    }
+    return {sym: sym, name: symName};
   },
 
   $GOT: {},
@@ -100,7 +109,7 @@ var LibraryDylink = {
   },
 
   $updateGOT__internal: true,
-  $updateGOT__deps: ['$GOT', '$isInternalSym', '$addFunction'],
+  $updateGOT__deps: ['$GOT', '$isInternalSym', '$addFunction', '$getFunctionAddress'],
   $updateGOT: function(exports, replace) {
 #if DYLINK_DEBUG
     dbg("updateGOT: adding " + Object.keys(exports).length + " symbols");
@@ -188,7 +197,7 @@ var LibraryDylink = {
 #endif
     for (var symName in GOT) {
       if (GOT[symName].value == 0) {
-        var value = resolveGlobalSymbol(symName, true)
+        var value = resolveGlobalSymbol(symName, true).sym;
         if (!value && !GOT[symName].required) {
           // Ignore undefined symbols that are imported as weak.
 #if DYLINK_DEBUG
@@ -230,19 +239,24 @@ var LibraryDylink = {
   _dlopen_js__deps: [function() { error(dlopenMissingError); }],
   _emscripten_dlopen_js__deps: [function() { error(dlopenMissingError); }],
   _dlsym_js__deps: [function() { error(dlopenMissingError); }],
+  _dlsym_catchup_js__deps: [function() { error(dlopenMissingError); }],
 #else
   $dlopenMissingError: `= ${dlopenMissingError}`,
   _dlopen_js__deps: ['$dlopenMissingError'],
   _emscripten_dlopen_js__deps: ['$dlopenMissingError'],
   _dlsym_js__deps: ['$dlopenMissingError'],
+  _dlsym_catchup_js__deps: ['$dlopenMissingError'],
 #endif
-  _dlopen_js: function(filename, flag) {
+  _dlopen_js: function(handle) {
     abort(dlopenMissingError);
   },
   _emscripten_dlopen_js: function(handle, onsuccess, onerror, user_data) {
     abort(dlopenMissingError);
   },
   _dlsym_js: function(handle, symbol) {
+    abort(dlopenMissingError);
+  },
+  _dlsym_catchup_js: function(handle, symbolIndex) {
     abort(dlopenMissingError);
   },
   _dlinit: function(main_dso_handle) {},
@@ -256,8 +270,11 @@ var LibraryDylink = {
   },
 
   $dlSetError__internal: true,
-  $dlSetError__deps: ['__dl_seterr', '$allocateUTF8OnStack'],
+  $dlSetError__deps: ['__dl_seterr', '$allocateUTF8OnStack', '$withStackSave'],
   $dlSetError: function(msg) {
+#if DYLINK_DEBUG
+    dbg('dlSetError: ' + msg);
+#endif
     withStackSave(function() {
       var cmsg = allocateUTF8OnStack(msg);
       ___dl_seterr(cmsg, 0);
@@ -456,24 +473,15 @@ var LibraryDylink = {
   },
 
   // Module.symbols <- libModule.symbols (flags.global handler)
-  $mergeLibSymbols__deps: ['$asmjsMangle'],
+  $mergeLibSymbols__deps: ['$asmjsMangle', '$isSymbolDefined'],
   $mergeLibSymbols: function(exports, libName) {
     // add symbols into global namespace TODO: weak linking etc.
     for (var sym in exports) {
       if (!exports.hasOwnProperty(sym)) {
         continue;
       }
-
-      // When RTLD_GLOBAL is enable, the symbols defined by this shared object will be made
-      // available for symbol resolution of subsequently loaded shared objects.
-      //
-      // We should copy the symbols (which include methods and variables) from SIDE_MODULE to MAIN_MODULE.
-
-      if (!wasmImports.hasOwnProperty(sym)) {
-        wasmImports[sym] = exports[sym];
-      }
 #if ASSERTIONS == 2
-      else {
+      if (isSymbolDefined(sym)) {
         var curr = wasmImports[sym], next = exports[sym];
         // don't warn on functions - might be odr, linkonce_odr, etc.
         if (!(typeof curr == 'function' && typeof next == 'function')) {
@@ -482,19 +490,40 @@ var LibraryDylink = {
       }
 #endif
 
-      // Export native export on the Module object.
-      // TODO(sbc): Do all users want this?  Should we skip this by default?
-      var module_sym = asmjsMangle(sym);
-      if (!Module.hasOwnProperty(module_sym)) {
-        Module[module_sym] = exports[sym];
+      // When RTLD_GLOBAL is enabled, the symbols defined by this shared object
+      // will be made available for symbol resolution of subsequently loaded
+      // shared objects.
+      //
+      // We should copy the symbols (which include methods and variables) from
+      // SIDE_MODULE to MAIN_MODULE.
+      const setImport = (target) => {
+#if ASYNCIFY
+        if (target in asyncifyStubs) {
+          asyncifyStubs[target] = exports[sym]
+        }
+#endif
+        if (!isSymbolDefined(target)) {
+          wasmImports[target] = exports[sym];
+        }
       }
+      setImport(sym);
+
 #if !hasExportedSymbol('main')
-      // If the main module doesn't define main it could be defined in one of
-      // the side modules, and we need to handle the mangled named.
-      if (sym == '__main_argc_argv') {
-        Module['_main'] = exports[sym];
+      // Special case for handling of main symbol:  If a side module exports
+      // `main` that also acts a definition for `__main_argc_argv` and vice
+      // versa.
+      const main_alias = '__main_argc_argv';
+      if (sym == 'main') {
+        setImport(main_alias)
+      }
+      if (sym == main_alias) {
+        setImport('main')
       }
 #endif
+
+      if (sym.startsWith('dynCall_') && !Module.hasOwnProperty(sym)) {
+        Module[sym] = exports[sym];
+      }
     }
   },
 
@@ -575,7 +604,7 @@ var LibraryDylink = {
       var moduleExports;
 
       function resolveSymbol(sym) {
-        var resolved = resolveGlobalSymbol(sym, false);
+        var resolved = resolveGlobalSymbol(sym).sym;
         if (!resolved) {
           resolved = moduleExports[sym];
         }
@@ -613,7 +642,7 @@ var LibraryDylink = {
               return tableBase;
 #endif
           }
-          if (prop in wasmImports) {
+          if (prop in wasmImports && !wasmImports[prop].stub) {
             // No stub needed, symbol already exists in symbol table
             return wasmImports[prop];
           }
@@ -800,7 +829,7 @@ var LibraryDylink = {
   // If a library was already loaded, it is not loaded a second time. However
   // flags.global and flags.nodelete are handled every time a load request is made.
   // Once a library becomes "global" or "nodelete", it cannot be removed or unloaded.
-  $loadDynamicLibrary__deps: ['$LDSO', '$loadWebAssemblyModule', '$asmjsMangle', '$isInternalSym', '$mergeLibSymbols'],
+  $loadDynamicLibrary__deps: ['$LDSO', '$loadWebAssemblyModule', '$isInternalSym', '$mergeLibSymbols'],
   $loadDynamicLibrary__docs: '/** @param {number=} handle */',
   $loadDynamicLibrary: function(lib, flags = {global: true, nodelete: true}, handle = 0) {
 #if DYLINK_DEBUG
@@ -1045,21 +1074,46 @@ var LibraryDylink = {
     }
   },
 
+  _dlsym_catchup_js__sig: 'ppp',
+  _dlsym_catchup_js: function(handle, symbolIndex) {
+#if DYLINK_DEBUG
+    dbg("_dlsym_catchup: handle=" + ptrToString(handle) + " symbolIndex=" + symbolIndex);
+#endif
+    var symDict = wasmImports;
+    if (handle != {{{ cDefine('RTLD_DEFAULT') }}}) {
+      var lib = LDSO.loadedLibsByHandle[handle];
+      symDict = lib.module;
+    }
+    var symName = Object.keys(symDict)[symbolIndex];
+    var sym = symDict[symName];
+    var result = addFunction(sym, sym.sig);
+#if DYLINK_DEBUG
+    dbg('_dlsym_catchup: result=' + result);
+#endif
+    return result;
+  },
+
   // void* dlsym(void* handle, const char* symbol);
-  _dlsym_js__deps: ['$dlSetError'],
+  _dlsym_js__deps: ['$dlSetError', '$getFunctionAddress', '$addFunction'],
   _dlsym_js__sig: 'ppp',
-  _dlsym_js: function(handle, symbol) {
+  _dlsym_js: function(handle, symbol, symbolIndex) {
     // void *dlsym(void *restrict handle, const char *restrict name);
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/dlsym.html
     symbol = UTF8ToString(symbol);
+#if DYLINK_DEBUG
+    dbg('dlsym_js: ' + symbol);
+#endif
     var result;
+    var newSymIndex;
 
     if (handle == {{{ cDefine('RTLD_DEFAULT') }}}) {
-      result = resolveGlobalSymbol(symbol, true);
+      var resolved = resolveGlobalSymbol(symbol, true);
+      result = resolved.sym;
       if (!result) {
         dlSetError('Tried to lookup unknown symbol "' + symbol + '" in dynamic lib: RTLD_DEFAULT');
         return 0;
       }
+      newSymIndex = Object.keys(wasmImports).indexOf(resolved.name);
     } else {
       var lib = LDSO.loadedLibsByHandle[handle];
 #if ASSERTIONS
@@ -1069,16 +1123,21 @@ var LibraryDylink = {
         dlSetError('Tried to lookup unknown symbol "' + symbol + '" in dynamic lib: ' + lib.name)
         return 0;
       }
+      newSymIndex = Object.keys(lib.module).indexOf(symbol);
 #if !WASM_BIGINT
-      result = lib.module['orig$' + symbol];
-      if (!result)
+      var origSym = 'orig$' + symbol;
+      result = lib.module[origSym];
+      if (result) {
+        newSymIndex = Object.keys(lib.module).indexOf(origSym);
+      }
+      else
 #endif
       result = lib.module[symbol];
     }
 
     if (typeof result == 'function') {
 #if DYLINK_DEBUG
-      dbg('dlsym: ' + symbol + ' getting table slot for: ' + result);
+      dbg('dlsym_js: ' + symbol + ' getting table slot for: ' + result);
 #endif
 
 #if ASYNCIFY
@@ -1087,14 +1146,26 @@ var LibraryDylink = {
         result = result.orig;
       }
 #endif
-      // Insert the function into the wasm table.  If its a direct wasm function
-      // the second argument will not be needed.  If its a JS function we rely
-      // on the `sig` attribute being set based on the `<func>__sig` specified
-      // in library JS file.
-      result = addFunction(result, result.sig);
+      var addr = getFunctionAddress(result);
+      if (addr) {
+#if DYLINK_DEBUG
+        dbg('symbol already exists in table: ' + symbol);
+#endif
+        result = addr;
+      } else {
+        // Insert the function into the wasm table.  If its a direct wasm
+        // function the second argument will not be needed.  If its a JS
+        // function we rely on the `sig` attribute being set based on the
+        // `<func>__sig` specified in library JS file.
+        result = addFunction(result, result.sig);
+#if DYLINK_DEBUG
+        dbg('adding symbol to table: ' + symbol);
+#endif
+        {{{ makeSetValue('symbolIndex', 0, 'newSymIndex', '*') }}};
+      }
     }
 #if DYLINK_DEBUG
-    dbg('dlsym: ' + symbol + ' -> ' + result);
+    dbg('dlsym_js: ' + symbol + ' -> ' + result);
 #endif
     return result;
   },

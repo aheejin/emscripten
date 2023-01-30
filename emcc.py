@@ -555,7 +555,7 @@ def get_all_js_syms():
     # Limit of the overall size of the cache to 100 files.
     # This code will get test coverage since a full test run of `other` or `core`
     # generates ~1000 unique symbol lists.
-    cache_limit = 100
+    cache_limit = 500
     root = cache.get_path('symbol_lists')
     if len(os.listdir(root)) > cache_limit:
       files = []
@@ -833,16 +833,14 @@ def process_dynamic_libs(dylibs, lib_dirs):
     # main module to avoid creating new invoke functions at runtime.
     imports = set(imports)
     imports = set(i for i in imports if not i.startswith('invoke_'))
-    weak_imports = sorted(imports.intersection(exports))
     strong_imports = sorted(imports.difference(exports))
     logger.debug('Adding symbols requirements from `%s`: %s', dylib, imports)
 
     mangled_imports = [shared.asmjs_mangle(e) for e in sorted(imports)]
     mangled_strong_imports = [shared.asmjs_mangle(e) for e in strong_imports]
     settings.SIDE_MODULE_IMPORTS.extend(mangled_imports)
-    settings.EXPORTED_FUNCTIONS.extend(mangled_strong_imports)
-    settings.EXPORT_IF_DEFINED.extend(weak_imports)
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.extend(strong_imports)
+    settings.EXPORT_IF_DEFINED.extend(sorted(imports))
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.extend(sorted(imports))
     building.user_requested_exports.update(mangled_strong_imports)
 
 
@@ -1919,8 +1917,12 @@ def phase_linker_setup(options, state, newargs):
     # Require explicit -lfoo.js flags to link with JS libraries.
     default_setting('AUTO_JS_LIBRARIES', 0)
 
+  if settings.STRICT_JS and (settings.MODULARIZE or settings.EXPORT_ES6):
+    exit_with_error("STRICT_JS doesn't work with MODULARIZE or EXPORT_ES6")
+
   if settings.STRICT:
-    default_setting('STRICT_JS', 1)
+    if not settings.MODULARIZE and not settings.EXPORT_ES6:
+      default_setting('STRICT_JS', 1)
     default_setting('AUTO_JS_LIBRARIES', 0)
     default_setting('AUTO_NATIVE_LIBRARIES', 0)
     default_setting('AUTO_ARCHIVE_INDEXES', 0)
@@ -2024,7 +2026,6 @@ def phase_linker_setup(options, state, newargs):
 
   if settings.MAIN_MODULE == 1 or settings.SIDE_MODULE == 1:
     settings.LINKABLE = 1
-    settings.EXPORT_ALL = 1
 
   if settings.LINKABLE and settings.USER_EXPORTED_FUNCTIONS:
     diagnostics.warning('unused-command-line-argument', 'EXPORTED_FUNCTIONS is not valid with LINKABLE set (normally due to SIDE_MODULE=1/MAIN_MODULE=1) since all functions are exported this mode.  To export only a subset use SIDE_MODULE=2/MAIN_MODULE=2')
@@ -2158,9 +2159,19 @@ def phase_linker_setup(options, state, newargs):
     settings.MIN_IE_VERSION = 0
     settings.MIN_EDGE_VERSION = 0
     settings.MIN_CHROME_VERSION = 0
+    settings.MIN_NODE_VERSION = 0
 
   if settings.MIN_CHROME_VERSION <= 37:
     settings.WORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG = 1
+
+  # 10.19.0 is the oldest version of node that we do any testing with.
+  # Keep this in sync with the test-node-compat in .circleci/config.yml
+  # and MINIMUM_NODE_VERSION in tools/shared.py
+  if settings.MIN_NODE_VERSION:
+    if settings.MIN_NODE_VERSION < 101900:
+      exit_with_error('targeting node older than 10.19.00 is not supported')
+    if settings.MIN_NODE_VERSION >= 150000:
+      default_setting('NODEJS_CATCH_REJECTION', 0)
 
   setup_environment_settings()
 

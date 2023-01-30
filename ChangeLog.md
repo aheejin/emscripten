@@ -18,14 +18,25 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.31 (in development)
+3.1.32 (in development)
 -----------------------
+
+3.1.31 - 01/26/23
+-----------------
+- Symbols that were previously exported from native code, but only for internal
+  reasons, are no longer exported on the `Module` object by default.  For
+  example, previously if you were using `Module._malloc` but not explicitly
+  including `_malloc` in `EXPORTED_FUNCTIONS`, it might have been exported
+  anyway due to internal use of `malloc` within the JS library code. (#18564)
 - The `STACK_SIZE`, `STACK_ALIGN`, `POINTER_SIZE`, and `ASSERTIONS` JavaScript
   globals were removed by default.  In debug builds a clear error is shown if
   you try to use these. (#18503)
 - --pre-js and --post-js files are now fed through the JS preprocesor, just
   like JS library files and the core runtime JS files.  This means they can
   now contain #if/#else/#endif blocks and {{{ }}} macro blocks. (#18525)
+- `-sEXPORT_ALL` can now be used to export symbols on the `Module` object
+  when used with `-sMINIMA_RUNTIME` and `-sMODULARIZE` together. (#17911)
+- The llvm version that emscripten uses was updated to 17.0.0 trunk.
 
 3.1.30 - 01/11/23
 -----------------
@@ -382,7 +393,7 @@ See docs/process.md for more on how version tagging works.
   binaryen optimizations are limited due to DWARF information being requested.
   Several binaryen passed are not compatible with the preservation of DWARF
   information. (#16428)
-- Use normalized mouse wheel delta for GLFW 3 in `library_glfw.js`. This changes 
+- Use normalized mouse wheel delta for GLFW 3 in `library_glfw.js`. This changes
   the vertical scroll amount for GLFW 3. (#16480)
 - The emsdk binaries for macOS now require macOS 10.14 Mojave (or above).
   Prior versions of emsdk could run on 10.11 (or above), but supporting those

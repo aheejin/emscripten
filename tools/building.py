@@ -557,6 +557,9 @@ def closure_compiler(filename, pretty, advanced=True, extra_closure_args=None):
   # should not minify these symbol names.
   CLOSURE_EXTERNS = [path_from_root('src/closure-externs/closure-externs.js')]
 
+  if settings.USE_WEBGPU:
+    CLOSURE_EXTERNS += [path_from_root('src/closure-externs/webgpu-externs.js')]
+
   # Closure compiler needs to know about all exports that come from the wasm module, because to optimize for small code size,
   # the exported symbols are added to global scope via a foreach loop in a way that evades Closure's static analysis. With an explicit
   # externs file for the exports, Closure is able to reason about the exports.
@@ -820,7 +823,10 @@ def metadce(js_file, wasm_file, minify_whitespace, debug_info):
   import_name_map = {}
   for item in graph:
     if 'import' in item:
-      import_name_map[item['name']] = 'emcc$import$' + item['import'][1]
+      name = item['import'][1]
+      import_name_map[item['name']] = 'emcc$import$' + name
+      if asmjs_mangle(name) in settings.SIDE_MODULE_IMPORTS:
+        item['root'] = True
   temp = temp_files.get('.json', prefix='emcc_dce_graph_').name
   utils.write_file(temp, json.dumps(graph, indent=2))
   # run wasm-metadce

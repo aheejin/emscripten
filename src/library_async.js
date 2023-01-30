@@ -34,7 +34,7 @@ mergeInto(LibraryManager.library, {
 #if ASYNCIFY_DEBUG
       dbg('asyncify instrumenting imports');
 #endif
-      var ASYNCIFY_IMPORTS = {{{ JSON.stringify(ASYNCIFY_IMPORTS) }}}.map((x) => x.split('.')[1]);
+      var ASYNCIFY_IMPORTS = {{{ JSON.stringify(ASYNCIFY_IMPORTS.map((x) => x.split('.')[1])) }}};
       for (var x in imports) {
         (function(x) {
           var original = imports[x];
@@ -283,7 +283,7 @@ mergeInto(LibraryManager.library, {
       // Exported functions in side modules are not listed in `Module["asm"]`,
       // So we should use `resolveGlobalSymbol` helper function, which is defined in `library_dylink.js`.
       if (!func) {
-        func = resolveGlobalSymbol(name, false);
+        func = resolveGlobalSymbol(name, false).sym;
       }
 #endif
       return func;

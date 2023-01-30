@@ -50,7 +50,7 @@ DEBUG_SAVE = DEBUG or int(os.environ.get('EMCC_DEBUG_SAVE', '0'))
 # exact requirement, but is the oldest version of node that we do any testing with.
 # This version aligns with the current Ubuuntu TLS 20.04 (Focal).
 MINIMUM_NODE_VERSION = (10, 19, 0)
-EXPECTED_LLVM_VERSION = "16.0"
+EXPECTED_LLVM_VERSION = 17
 
 # Used only when EM_PYTHON_MULTIPROCESSING=1 env. var is set.
 multiprocessing_pool = None
@@ -248,7 +248,6 @@ def run_js_tool(filename, jsargs=[], node_args=[], **kw):  # noqa: mutable defau
   This is used by emcc to run parts of the build process that are written
   implemented in javascript.
   """
-  check_node()
   command = config.NODE_JS + node_args + [filename] + jsargs
   return check_call(command, **kw).stdout
 
@@ -290,8 +289,14 @@ def get_clang_version():
 
 def check_llvm_version():
   actual = get_clang_version()
-  if EXPECTED_LLVM_VERSION in actual:
+  if actual.startswith('%d.' % EXPECTED_LLVM_VERSION):
     return True
+  # When running in CI environment we also silently allow the next major
+  # version of LLVM here so that new versions of LLVM can be rolled in
+  # without disruption.
+  if 'BUILDBOT_BUILDNUMBER' in os.environ:
+    if actual.startswith('%d.' % (EXPECTED_LLVM_VERSION + 1)):
+      return True
   diagnostics.warning('version-check', 'LLVM version for clang executable "%s" appears incorrect (seeing "%s", expected "%s")', CLANG_CC, actual, EXPECTED_LLVM_VERSION)
   return False
 
@@ -372,7 +377,6 @@ def node_pthread_flags():
 @memoize
 @ToolchainProfiler.profile()
 def check_node():
-  check_node_version()
   try:
     run_process(config.NODE_JS + ['-e', 'console.log("hello")'], stdout=PIPE)
   except Exception as e:
@@ -393,6 +397,7 @@ def generate_sanity():
 
 def perform_sanity_checks():
   # some warning, mostly not fatal checks - do them even if EM_IGNORE_SANITY is on
+  check_node_version()
   check_llvm_version()
 
   llvm_ok = check_llvm()
@@ -405,6 +410,8 @@ def perform_sanity_checks():
 
   if not llvm_ok:
     exit_with_error('failing sanity checks due to previous llvm failure')
+
+  check_node()
 
   with ToolchainProfiler.profile_block('sanity LLVM'):
     for cmd in [CLANG_CC, LLVM_AR, LLVM_NM]:

@@ -45,6 +45,8 @@ function preprocess(filename) {
       .replace(/\bimport\.meta\b/g, 'EMSCRIPTEN$IMPORT$META')
       .replace(/\bawait import\b/g, 'EMSCRIPTEN$AWAIT$IMPORT');
   }
+  // Remove windows line endings, if any
+  text = text.replace(/\r\n/g, '\n');
 
   const IGNORE = 0;
   const SHOW = 1;
@@ -65,88 +67,87 @@ function preprocess(filename) {
 
   try {
     for (let [i, line] of lines.entries()) {
-      if (line[line.length - 1] === '\r') {
-        line = line.substr(0, line.length - 1); // Windows will have '\r' left over from splitting over '\r\n'
-      }
-      if (isHtml && line.includes('<style') && !inStyle) {
-        inStyle = true;
-      }
-      if (isHtml && line.includes('</style') && inStyle) {
-        inStyle = false;
+      if (isHtml) {
+        if (line.includes('<style') && !inStyle) {
+          inStyle = true;
+        }
+        if (line.includes('</style') && inStyle) {
+          inStyle = false;
+        }
+        if (inStyle) {
+          if (showCurrentLine()) {
+            ret += line + '\n';
+          }
+          continue;
+        }
       }
 
-      if (!inStyle) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('#')) {
-          const first = trimmed.split(' ', 1)[0];
-          if (first == '#if' || first == '#ifdef' || first == '#elif') {
-            if (first == '#ifdef') {
-              warn('use of #ifdef in js library.  Use #if instead.');
-            }
-            if (first == '#elif') {
-              const curr = showStack.pop();
-              if (curr == SHOW || curr == IGNORE_ALL) {
-                // If we showed to previous block we enter the IGNORE_ALL state
-                // and stay there until endif is seen
-                showStack.push(IGNORE_ALL);
-                continue;
-              }
-            }
-            const after = trimmed.substring(trimmed.indexOf(' '));
-            const truthy = !!vm.runInThisContext(after, { filename, lineOffset: i, columnOffset: line.indexOf(after) });
-            showStack.push(truthy ? SHOW : IGNORE);
-          } else if (first === '#include') {
-            if (showCurrentLine()) {
-              let filename = line.substr(line.indexOf(' ') + 1);
-              if (filename.startsWith('"')) {
-                filename = filename.substr(1, filename.length - 2);
-              }
-              const result = preprocess(filename);
-              if (result) {
-                ret += `// include: ${filename}\n`;
-                ret += result;
-                ret += `// end include: ${filename}\n`;
-              }
-            }
-          } else if (first === '#else') {
-            assert(showStack.length > 0);
-            const curr = showStack.pop();
-            if (curr == IGNORE) {
-              showStack.push(SHOW);
-            } else {
-              showStack.push(IGNORE);
-            }
-          } else if (first === '#endif') {
-            assert(showStack.length > 0);
-            showStack.pop();
-          } else if (first === '#warning') {
-            if (showCurrentLine()) {
-              printErr(`${filename}:${i + 1}: #warning ${trimmed.substring(trimmed.indexOf(' ')).trim()}`);
-            }
-          } else if (first === '#error') {
-            if (showCurrentLine()) {
-              error(`${filename}:${i + 1}: #error ${trimmed.substring(trimmed.indexOf(' ')).trim()}`);
-            }
-          } else {
-            throw new Error(`${filename}:${i + 1}: Unknown preprocessor directive ${first}`);
+      const trimmed = line.trim();
+      if (trimmed.startsWith('#')) {
+        const first = trimmed.split(' ', 1)[0];
+        if (first == '#if' || first == '#ifdef' || first == '#elif') {
+          if (first == '#ifdef') {
+            warn('use of #ifdef in js library.  Use #if instead.');
           }
-        } else {
-          if (showCurrentLine()) {
-            // Never emit more than one empty line at a time.
-            if (emptyLine && !line) {
+          if (first == '#elif') {
+            const curr = showStack.pop();
+            if (curr == SHOW || curr == IGNORE_ALL) {
+              // If we showed to previous block we enter the IGNORE_ALL state
+              // and stay there until endif is seen
+              showStack.push(IGNORE_ALL);
               continue;
             }
-            ret += line + '\n';
-            if (!line) {
-              emptyLine = true;
-            } else {
-              emptyLine = false;
+          }
+          const after = trimmed.substring(trimmed.indexOf(' '));
+          const truthy = !!vm.runInThisContext(after, { filename, lineOffset: i, columnOffset: line.indexOf(after) });
+          showStack.push(truthy ? SHOW : IGNORE);
+        } else if (first === '#include') {
+          if (showCurrentLine()) {
+            let filename = line.substr(line.indexOf(' ') + 1);
+            if (filename.startsWith('"')) {
+              filename = filename.substr(1, filename.length - 2);
+            }
+            const result = preprocess(filename);
+            if (result) {
+              ret += `// include: ${filename}\n`;
+              ret += result;
+              ret += `// end include: ${filename}\n`;
             }
           }
+        } else if (first === '#else') {
+          assert(showStack.length > 0);
+          const curr = showStack.pop();
+          if (curr == IGNORE) {
+            showStack.push(SHOW);
+          } else {
+            showStack.push(IGNORE);
+          }
+        } else if (first === '#endif') {
+          assert(showStack.length > 0);
+          showStack.pop();
+        } else if (first === '#warning') {
+          if (showCurrentLine()) {
+            printErr(`${filename}:${i + 1}: #warning ${trimmed.substring(trimmed.indexOf(' ')).trim()}`);
+          }
+        } else if (first === '#error') {
+          if (showCurrentLine()) {
+            error(`${filename}:${i + 1}: #error ${trimmed.substring(trimmed.indexOf(' ')).trim()}`);
+          }
+        } else {
+          throw new Error(`${filename}:${i + 1}: Unknown preprocessor directive ${first}`);
         }
-      } else { // !inStyle
+      } else {
         if (showCurrentLine()) {
+          // Never emit more than one empty line at a time.
+          if (emptyLine && !line) {
+            continue;
+          }
           ret += line + '\n';
+          if (!line) {
+            emptyLine = true;
+          } else {
+            emptyLine = false;
+          }
         }
       }
     }
@@ -453,15 +454,6 @@ function makeHEAPView(which, start, end) {
   return `HEAP${which}.subarray((${start})${mod}, (${end})${mod})`;
 }
 
-// When dynamically linking, some things like dynCalls may not exist in one module and
-// be provided by a linked module, so they must be accessed indirectly using Module
-function exportedAsmFunc(func) {
-  if (!MAIN_MODULE) {
-    return func;
-  }
-  return `Module['${func}']`;
-}
-
 const TWO_TWENTY = Math.pow(2, 20);
 
 // Given two values and an operation, returns the result of that operation.
@@ -734,7 +726,7 @@ Please update to new syntax.`);
       }
     }
 
-    const dyncall = exportedAsmFunc(`dynCall_${sig}`);
+    const dyncall = `dynCall_${sig}`;
     if (sig.length > 1) {
       return `((${args}) => ${dyncall}.apply(null, [${funcPtr}, ${callArgs}]))`;
     }
@@ -1107,6 +1099,25 @@ function getUnsharedTextDecoderView(heap, start, end) {
   // Otherwise, generate a runtime type check: must do a .slice() if looking at a SAB,
   // or can use .subarray() otherwise.
   return `${heap}.buffer instanceof SharedArrayBuffer ? ${shared} : ${unshared}`;
+}
+
+function getEntryFunction() {
+  var entryFunction = 'main';
+  if (STANDALONE_WASM) {
+    if (EXPECT_MAIN) {
+      entryFunction = '_start';
+    } else {
+      entryFunction = '_initialize';
+    }
+  } else if (PROXY_TO_PTHREAD) {
+    // User requested the PROXY_TO_PTHREAD option, so call a stub main which pthread_create()s a new thread
+    // that will call the user's real main() for the application.
+    entryFunction = '_emscripten_proxy_main';
+  }
+  if (MAIN_MODULE) {
+    return `resolveGlobalSymbol('${entryFunction}').sym;`
+  }
+  return '_' + entryFunction;
 }
 
 function preJS() {

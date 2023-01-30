@@ -214,7 +214,7 @@ class other(RunnerCore):
       # from clang would be flushed to stderr first.
       self.assertContained('emcc (Emscripten gcc/clang-like replacement', proc.stderr)
       self.assertTrue(proc.stderr.startswith('emcc (Emscripten gcc/clang-like replacement'))
-      self.assertContained('clang version %s' % shared.EXPECTED_LLVM_VERSION, proc.stderr)
+      self.assertContained('clang version ', proc.stderr)
       self.assertContained('GNU', proc.stderr)
       self.assertContained('Target: wasm32-unknown-emscripten', proc.stderr)
       self.assertNotContained('this is dangerous', proc.stderr)
@@ -1306,6 +1306,42 @@ int f() {
     # libc when `--whole-archive` is used.
     self.emcc('lib.c', ['-Oz', '-sEXPORT_ALL', '-sLINKABLE', '--pre-js', 'main.js'], output_filename='a.out.js')
     self.assertContained('libf1\nlibf2\n', self.run_js('a.out.js'))
+
+  def test_minimal_runtime_export_all_modularize(self):
+    """This test ensures that MODULARIZE and EXPORT_ALL work simultaneously.
+
+    In addition, it ensures that EXPORT_ALL is honored while using MINIMAL_RUNTIME.
+    """
+
+    create_file('main.c', r'''
+      #include <stdio.h>
+      #include <emscripten.h>
+      EMSCRIPTEN_KEEPALIVE void libf1() { printf("libf1\n"); }
+      EMSCRIPTEN_KEEPALIVE void libf2() { printf("libf2\n"); }
+    ''')
+
+    self.emcc('main.c', ['-sMODULARIZE=1', '-sMINIMAL_RUNTIME=2', '-sEXPORT_ALL', '-sEXPORT_ES6'], output_filename='test.mjs')
+
+    # We must expose __dirname and require globally because emscripten
+    # uses those under the hood.
+    create_file('main.mjs', '''
+      import { dirname } from 'path';
+      import { createRequire } from 'module';
+      import { fileURLToPath } from 'url';
+
+      // `fileURLToPath` is used to get a valid path on Windows.
+      globalThis.__dirname = dirname(fileURLToPath(import.meta.url));
+      globalThis.require = createRequire(import.meta.url);
+
+      import Test from './test.mjs';
+      async function main() {
+        const mod = await Test();
+        mod._libf1();
+        mod._libf2();
+      }
+      main();
+    ''')
+    self.assertContained('libf1\nlibf2\n', self.run_js('main.mjs'))
 
   def test_export_all_and_exported_functions(self):
     # EXPORT_ALL should not export library functions by default.
@@ -5649,6 +5685,11 @@ int main(void) {
     self.assertFalse(output.stderr)
     self.assertEqual(output.stdout, 'hello, world!\nhello, world!\n')
 
+  def test_modularize_strict(self):
+    self.run_process([EMCC, test_file('hello_world.c'), '-sMODULARIZE', '-sSTRICT'])
+    stdout = self.run_process(config.NODE_JS + ['-e', 'var m = require("./a.out.js"); m();'], stdout=PIPE, stderr=PIPE).stdout
+    self.assertEqual(stdout, 'hello, world!\n')
+
   @node_pthreads
   def test_pthread_print_override_modularize(self):
     self.set_setting('EXPORT_NAME', 'Test')
@@ -7703,8 +7744,7 @@ int main() {
     # we don't metadce with linkable code! other modules may want stuff
     # TODO(sbc): Investivate why the number of exports is order of magnitude
     # larger for wasm backend.
-    # Disabled while llvm change rolls in
-    #'main_module_2': (['-O3', '-sMAIN_MODULE=2'], [], []), # noqa
+    'dylink': (['-O3', '-sMAIN_MODULE=2'], [], []), # noqa
   })
   def test_metadce_hello(self, *args):
     self.run_metadce_test('hello_world.cpp', *args)
@@ -12032,18 +12072,19 @@ void foo() {}
     # exit code and log the stack trace correctly.
     self.run_process([EMCC, '--pre-js=pre.js', '-sNODEJS_CATCH_REJECTION', 'main.c'])
     output = self.run_js('a.out.js', assert_returncode=NON_ZERO)
+    self.assertContained('unhandledRejection', read_file('a.out.js'))
     self.assertContained('ReferenceError: missing is not defined', output)
     self.assertContained('at foo (', output)
-
-    version = self.run_process(config.NODE_JS + ['--version'], stdout=PIPE).stdout.strip()
-    version = [int(v) for v in version.replace('v', '').replace('-pre', '').split('.')]
-    if version[0] >= 15:
-      self.skipTest('old behaviour of node JS cannot be tested on node v15 or above')
 
     # Without NODEJS_CATCH_REJECTION we expect node to log the unhandled rejection
     # but return 0.
     self.node_args = [a for a in self.node_args if '--unhandled-rejections' not in a]
     self.run_process([EMCC, '--pre-js=pre.js', '-sNODEJS_CATCH_REJECTION=0', 'main.c'])
+    self.assertNotContained('unhandledRejection', read_file('a.out.js'))
+
+    if shared.check_node_version()[0] >= 15:
+      self.skipTest('old behaviour of node JS cannot be tested on node v15 or above')
+
     output = self.run_js('a.out.js')
     self.assertContained('ReferenceError: missing is not defined', output)
     self.assertContained('at foo (', output)
@@ -12414,8 +12455,9 @@ int main() {
     # In strict mode the library function is not even available, so we get a build time error
     self.set_setting('STRICT')
     self.clear_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE')
-    err = self.expect_fail([EMCC, test_file('other/test_legacy_runtime.c')] + self.get_emcc_args())
-    self.assertContained('warning: invalid item in EXPORTED_RUNTIME_METHODS: allocate', err)
+    for opt in ['-O0', '-O3']:
+      err = self.expect_fail([EMCC, test_file('other/test_legacy_runtime.c'), opt] + self.get_emcc_args())
+      self.assertContained('warning: invalid item in EXPORTED_RUNTIME_METHODS: allocate', err)
 
   def test_fetch_settings(self):
     create_file('pre.js', '''
@@ -12815,3 +12857,27 @@ foo/version.txt
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('EXIT_RUNTIME')
     self.do_other_test('test_itimer.c')
+
+  @node_pthreads
+  def test_dbg(self):
+    create_file('pre.js', '''
+    dbg('start');
+    Module.onRuntimeInitialized = () => dbg('done init');
+    ''')
+    expected = '''\
+start
+w:0,t:0x[0-9a-fA-F]+: done init
+hello, world!
+w:0,t:0x[0-9a-fA-F]+: native dbg message
+w:0,t:0x[0-9a-fA-F]+: formatted: 42
+'''
+    self.emcc_args.append('--pre-js=pre.js')
+    # Verify that, after initialization, dbg() messages are prefixed with
+    # worker and thread ID.
+    self.do_runf(test_file('other/test_dbg.c'), expected, regex=True)
+
+    # When assertions are disabled `dbg` function is not defined
+    self.do_runf(test_file('other/test_dbg.c'),
+                 'ReferenceError: dbg is not defined',
+                 emcc_args=['-DNDEBUG', '-sASSERTIONS=0'],
+                 assert_returncode=NON_ZERO)
