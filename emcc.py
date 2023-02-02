@@ -105,7 +105,7 @@ DEFAULT_ASYNCIFY_IMPORTS = [
   'emscripten_idb_store', 'emscripten_idb_delete', 'emscripten_idb_exists',
   'emscripten_idb_load_blob', 'emscripten_idb_store_blob', 'SDL_Delay',
   'emscripten_scan_registers', 'emscripten_lazy_load_code',
-  'emscripten_fiber_swap',
+  'emscripten_fiber_swap', '__load_secondary_module',
   'wasi_snapshot_preview1.fd_sync', '__wasi_fd_sync', '_emval_await',
   '_dlopen_js', '__asyncjs__*'
 ]
@@ -707,6 +707,9 @@ def get_binaryen_passes():
     passes += ['--jspi']
     passes += ['--pass-arg=jspi-imports@%s' % ','.join(settings.ASYNCIFY_IMPORTS)]
     passes += ['--pass-arg=jspi-exports@%s' % ','.join(settings.ASYNCIFY_EXPORTS)]
+    if settings.SPLIT_MODULE:
+      passes += ['--pass-arg=jspi-split-module']
+
   if settings.BINARYEN_IGNORE_IMPLICIT_TRAPS:
     passes += ['--ignore-implicit-traps']
   # normally we can assume the memory, if imported, has not been modified
@@ -752,9 +755,12 @@ def make_js_executable(script):
     pass # can fail if e.g. writing the executable to /dev/null
 
 
-def do_split_module(wasm_file):
+def do_split_module(wasm_file, options):
   os.rename(wasm_file, wasm_file + '.orig')
   args = ['--instrument']
+  if options.requested_debug:
+    # Tell wasm-split to preserve function names.
+    args += ['-g']
   building.run_binaryen_command('wasm-split', wasm_file + '.orig', outfile=wasm_file, args=args)
 
 
@@ -1590,6 +1596,8 @@ def phase_setup(options, state, newargs):
       exit_with_error('DISABLE_EXCEPTION_CATCHING is not compatible with -fwasm-exceptions')
     if 'DISABLE_EXCEPTION_THROWING' in user_settings:
       exit_with_error('DISABLE_EXCEPTION_THROWING is not compatible with -fwasm-exceptions')
+    if 'ASYNCIFY' in user_settings and user_settings['ASYNCIFY'] == '1':
+      diagnostics.warning('emcc', 'ASYNCIFY=1 is not compatible with -fwasm-exceptions. Parts of the program that mix ASYNCIFY and exceptions will not compile.')
     settings.DISABLE_EXCEPTION_CATCHING = 1
     settings.DISABLE_EXCEPTION_THROWING = 1
 
@@ -2528,6 +2536,9 @@ def phase_linker_setup(options, state, newargs):
   if settings.LEGALIZE_JS_FFI:
     settings.REQUIRED_EXPORTS += ['__get_temp_ret', '__set_temp_ret']
 
+  if settings.SPLIT_MODULE and settings.ASYNCIFY == 2:
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['_load_secondary_module']
+
   # wasm side modules have suffix .wasm
   if settings.SIDE_MODULE and shared.suffix(target) == '.js':
     diagnostics.warning('emcc', 'output suffix .js requested, but wasm side modules are just wasm files; emitting only a .wasm, no .js')
@@ -2786,9 +2797,13 @@ def phase_linker_setup(options, state, newargs):
   if settings.WASM_EXCEPTIONS:
     settings.REQUIRED_EXPORTS += ['__trap']
 
-  # When ASSERTIONS is set, we include stack traces in Wasm exception objects
-  # using the JS API, which needs this C++ tag exported.
-  if settings.ASSERTIONS and settings.WASM_EXCEPTIONS:
+  # When ASSERTIONS or EXCEPTION_STACK_TRACES is set, we include stack traces in
+  # Wasm exception objects using the JS API, which needs this C++ tag exported.
+  if settings.ASSERTIONS:
+    if 'EXCEPTION_STACK_TRACES' in user_settings and not settings.EXCEPTION_STACK_TRACES:
+      exit_with_error('EXCEPTION_STACK_TRACES cannot be disabled when ASSERTIONS are enabled')
+    default_setting('EXCEPTION_STACK_TRACES', 1)
+  if settings.EXCEPTION_STACK_TRACES and settings.WASM_EXCEPTIONS:
     settings.EXPORTED_FUNCTIONS += ['___cpp_exception']
     settings.EXPORT_EXCEPTION_HANDLING_HELPERS = True
 
@@ -3193,7 +3208,7 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
 
   if settings.SPLIT_MODULE:
     diagnostics.warning('experimental', 'The SPLIT_MODULE setting is experimental and subject to change')
-    do_split_module(wasm_target)
+    do_split_module(wasm_target, options)
 
   for f in generated_text_files_with_native_eols:
     tools.line_endings.convert_line_endings_in_file(f, os.linesep, options.output_eol)

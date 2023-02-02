@@ -1128,7 +1128,6 @@ class libc(MuslInternalLibrary,
     libc_files += files_in_path(
         path='system/lib/libc',
         filenames=[
-          'dynlink.c',
           'emscripten_console.c',
           'emscripten_fiber.c',
           'emscripten_get_heap_size.c',
@@ -1145,6 +1144,9 @@ class libc(MuslInternalLibrary,
           'sigtimedwait.c',
           'wasi-helpers.c',
         ])
+
+    if settings.RELOCATABLE:
+      libc_files += files_in_path(path='system/lib/libc', filenames=['dynlink.c'])
 
     libc_files += files_in_path(
         path='system/lib/pthread',
@@ -1376,6 +1378,15 @@ class libcxxabi(NoExceptLibrary, MTLibrary, DebugLibrary):
       '-std=c++20',
     ]
   includes = ['system/lib/libcxx/src']
+
+  def __init__(self, **kwargs):
+    super().__init__(**kwargs)
+    # TODO EXCEPTION_STACK_TRACES currently requires the debug version of
+    # libc++abi, causing the debug version of libc++abi to be linked, which
+    # increases code size. libc++abi is not a big library to begin with, but if
+    # this becomes a problem, consider making EXCEPTION_STACK_TRACES work with
+    # the non-debug version of libc++abi.
+    self.is_debug |= settings.EXCEPTION_STACK_TRACES
 
   def get_cflags(self):
     cflags = super().get_cflags()
