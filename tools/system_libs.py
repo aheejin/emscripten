@@ -632,7 +632,7 @@ class MTLibrary(Library):
   def get_cflags(self):
     cflags = super().get_cflags()
     if self.is_mt:
-      cflags += ['-sUSE_PTHREADS', '-sWASM_WORKERS']
+      cflags += ['-pthread', '-sWASM_WORKERS']
     if self.is_ww:
       cflags += ['-sWASM_WORKERS']
     return cflags
@@ -651,7 +651,7 @@ class MTLibrary(Library):
 
   @classmethod
   def get_default_variation(cls, **kwargs):
-    return super().get_default_variation(is_mt=settings.USE_PTHREADS, is_ww=settings.WASM_WORKERS and not settings.USE_PTHREADS, **kwargs)
+    return super().get_default_variation(is_mt=settings.PTHREADS, is_ww=settings.WASM_WORKERS and not settings.PTHREADS, **kwargs)
 
   @classmethod
   def variations(cls):
@@ -1000,6 +1000,7 @@ class libc(MuslInternalLibrary,
           'library_pthread.c',
           'em_task_queue.c',
           'proxying.c',
+          'thread_mailbox.c',
           'pthread_create.c',
           'pthread_kill.c',
           'emscripten_thread_init.c',
@@ -1015,7 +1016,21 @@ class libc(MuslInternalLibrary,
         filenames=[
           'pthread_self.c',
           'pthread_cleanup_push.c',
+          'pthread_attr_destroy.c',
           'pthread_attr_get.c',
+          'pthread_attr_setdetachstate.c',
+          'pthread_attr_setguardsize.c',
+          'pthread_attr_setinheritsched.c',
+          'pthread_attr_setschedparam.c',
+          'pthread_attr_setschedpolicy.c',
+          'pthread_attr_setscope.c',
+          'pthread_attr_setstack.c',
+          'pthread_attr_setstacksize.c',
+          'pthread_getconcurrency.c',
+          'pthread_getcpuclockid.c',
+          'pthread_getschedparam.c',
+          'pthread_setschedprio.c',
+          'pthread_setconcurrency.c',
           # C11 thread library functions
           'call_once.c',
           'tss_create.c',
@@ -1137,6 +1152,8 @@ class libc(MuslInternalLibrary,
           'emscripten_mmap.c',
           'emscripten_scan_stack.c',
           'emscripten_time.c',
+          'mktime.c',
+          'tzset.c',
           'kill.c',
           'pthread_sigmask.c',
           'raise.c',
@@ -1354,7 +1371,7 @@ class crt1_proxy_main(MuslInternalLibrary):
 
 class crtbegin(MuslInternalLibrary):
   name = 'crtbegin'
-  cflags = ['-sUSE_PTHREADS']
+  cflags = ['-pthread']
   src_dir = 'system/lib/pthread'
   src_files = ['emscripten_tls_init.c']
 

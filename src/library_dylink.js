@@ -10,6 +10,7 @@ var dlopenMissingError = "'To use dlopen, you need enable dynamic linking, see h
 
 var LibraryDylink = {
 #if RELOCATABLE
+
   $isSymbolDefined: function(symName) {
     // Ignore 'stub' symbols that are auto-generated as part of the original
     // `wasmImports` used to instantate the main module.
@@ -63,12 +64,12 @@ var LibraryDylink = {
   },
 
   $GOT: {},
-  $CurrentModuleWeakSymbols: '=new Set({{{ JSON.stringify(Array.from(WEAK_IMPORTS)) }}})',
+  $currentModuleWeakSymbols: '=new Set({{{ JSON.stringify(Array.from(WEAK_IMPORTS)) }}})',
 
   // Create globals to each imported symbol.  These are all initialized to zero
   // and get assigned later in `updateGOT`
   $GOTHandler__internal: true,
-  $GOTHandler__deps: ['$GOT', '$CurrentModuleWeakSymbols'],
+  $GOTHandler__deps: ['$GOT', '$currentModuleWeakSymbols'],
   $GOTHandler: {
     'get': function(obj, symName) {
       var rtn = GOT[symName];
@@ -78,7 +79,7 @@ var LibraryDylink = {
         dbg("new GOT entry: " + symName);
 #endif
       }
-      if (!CurrentModuleWeakSymbols.has(symName)) {
+      if (!currentModuleWeakSymbols.has(symName)) {
         // Any non-weak reference to a symbol marks it as `required`, which
         // enabled `reportUndefinedSymbols` to report undefeind symbol errors
         // correctly.
@@ -247,6 +248,7 @@ var LibraryDylink = {
   dlopen__deps: [function() { error(dlopenMissingError); }],
   _emscripten_dlopen__deps: [function() { error(dlopenMissingError); }],
   __dlsym__deps: [function() { error(dlopenMissingError); }],
+  dladdr__deps: [function() { error(dlopenMissingError); }],
 #else
   $dlopenMissingError: `= ${dlopenMissingError}`,
   _dlopen_js__deps: ['$dlopenMissingError'],
@@ -256,6 +258,7 @@ var LibraryDylink = {
   dlopen__deps: ['$dlopenMissingError'],
   _emscripten_dlopen__deps: ['$dlopenMissingError'],
   __dlsym__deps: ['$dlopenMissingError'],
+  dladdr__deps: ['$dlopenMissingError'],
 #endif
   _dlopen_js: function(handle) {
     abort(dlopenMissingError);
@@ -276,6 +279,9 @@ var LibraryDylink = {
     abort(dlopenMissingError);
   },
   __dlsym: function(handle, symbol) {
+    abort(dlopenMissingError);
+  },
+  dladdr: function() {
     abort(dlopenMissingError);
   },
 #else // MAIN_MODULE != 0
@@ -502,7 +508,7 @@ var LibraryDylink = {
   },
 
   // Module.symbols <- libModule.symbols (flags.global handler)
-  $mergeLibSymbols__deps: ['$asmjsMangle', '$isSymbolDefined'],
+  $mergeLibSymbols__deps: ['$isSymbolDefined'],
   $mergeLibSymbols: function(exports, libName) {
     // add symbols into global namespace TODO: weak linking etc.
     for (var sym in exports) {
@@ -565,21 +571,25 @@ var LibraryDylink = {
 
   // Loads a side module from binary data or compiled Module. Returns the module's exports or a
   // promise that resolves to its exports if the loadAsync flag is set.
-  $loadWebAssemblyModule__docs: '/** @param {number=} handle */',
+  $loadWebAssemblyModule__docs: `
+   /**
+    * @param {Object=} localScope
+    * @param {number=} handle
+    */`,
   $loadWebAssemblyModule__deps: [
     '$loadDynamicLibrary', '$getMemory',
     '$relocateExports', '$resolveGlobalSymbol', '$GOTHandler',
     '$getDylinkMetadata', '$alignMemory', '$zeroMemory',
     '$alignMemory', '$zeroMemory',
-    '$CurrentModuleWeakSymbols', '$alignMemory', '$zeroMemory',
+    '$currentModuleWeakSymbols', '$alignMemory', '$zeroMemory',
     '$updateTableMap',
 #if !DISABLE_EXCEPTION_CATCHING || SUPPORT_LONGJMP == 'emscripten'
     '$createInvokeFunction',
 #endif
   ],
-  $loadWebAssemblyModule: function(binary, flags, handle) {
+  $loadWebAssemblyModule: function(binary, flags, localScope, handle) {
     var metadata = getDylinkMetadata(binary);
-    CurrentModuleWeakSymbols = metadata.weakImports;
+    currentModuleWeakSymbols = metadata.weakImports;
 #if ASSERTIONS
     var originalTable = wasmTable;
 #endif
@@ -630,13 +640,15 @@ var LibraryDylink = {
       // This is the export map that we ultimately return.  We declare it here
       // so it can be used within resolveSymbol.  We resolve symbols against
       // this local symbol map in the case there they are not present on the
-      // global Module object.  We need this fallback because:
-      // a) Modules sometime need to import their own symbols
-      // b) Symbols from side modules are not always added to the global namespace.
+      // global Module object.  We need this fallback because Modules sometime
+      // need to import their own symbols
       var moduleExports;
 
       function resolveSymbol(sym) {
         var resolved = resolveGlobalSymbol(sym).sym;
+        if (!resolved && localScope) {
+          resolved = localScope[sym];
+        }
         if (!resolved) {
           resolved = moduleExports[sym];
         }
@@ -714,7 +726,7 @@ var LibraryDylink = {
         }
 #if STACK_OVERFLOW_CHECK >= 2
         if (moduleExports['__set_stack_limits']) {
-#if USE_PTHREADS
+#if PTHREADS
           // When we are on an uninitialized pthread we delay calling
           // __set_stack_limits until $setDylinkStackLimits.
           if (!ENVIRONMENT_IS_PTHREAD || runtimeInitialized)
@@ -757,7 +769,7 @@ var LibraryDylink = {
 #endif
 
         // initialize the module
-#if USE_PTHREADS
+#if PTHREADS
         // Only one thread should call __wasm_call_ctors, but all threads need
         // to call _emscripten_tls_init
         registerTLSInit(moduleExports['_emscripten_tls_init'], instance.exports, metadata)
@@ -783,7 +795,7 @@ var LibraryDylink = {
               __ATINIT__.push(init);
             }
           }
-#if USE_PTHREADS
+#if PTHREADS
         }
 #endif
         return moduleExports;
@@ -816,13 +828,13 @@ var LibraryDylink = {
     }
 
     metadata.neededDynlibs.forEach(function(dynNeeded) {
-      loadDynamicLibrary(dynNeeded, flags);
+      loadDynamicLibrary(dynNeeded, flags, localScope);
     });
     return loadModule();
   },
 
-#if STACK_OVERFLOW_CHECK >= 2 && USE_PTHREADS
-  // With USE_PTHREADS we load libraries before we are running a pthread and
+#if STACK_OVERFLOW_CHECK >= 2 && PTHREADS
+  // With PTHREADS we load libraries before we are running a pthread and
   // therefore before we have a stack.  Instead we delay calling
   // `__set_stack_limits` until we start running a thread.  We also need to call
   // this again for each new thread that the runs on a worker (since each thread
@@ -876,8 +888,12 @@ var LibraryDylink = {
   // flags.global and flags.nodelete are handled every time a load request is made.
   // Once a library becomes "global" or "nodelete", it cannot be removed or unloaded.
   $loadDynamicLibrary__deps: ['$LDSO', '$loadWebAssemblyModule', '$isInternalSym', '$mergeLibSymbols', '$newDSO'],
-  $loadDynamicLibrary__docs: '/** @param {number=} handle */',
-  $loadDynamicLibrary: function(lib, flags = {global: true, nodelete: true}, handle) {
+  $loadDynamicLibrary__docs: `
+    /**
+     * @param {number=} handle
+     * @param {Object=} localScope
+     */`,
+  $loadDynamicLibrary: function(lib, flags = {global: true, nodelete: true}, localScope, handle) {
 #if DYLINK_DEBUG
     dbg('loadDynamicLibrary: ' + lib + ' handle:' + handle);
     dbg('existing: ' + Object.keys(LDSO.loadedLibsByName));
@@ -950,17 +966,19 @@ var LibraryDylink = {
       // module not preloaded - load lib data and create new module from it
       if (flags.loadAsync) {
         return loadLibData(lib).then(function(libData) {
-          return loadWebAssemblyModule(libData, flags, handle);
+          return loadWebAssemblyModule(libData, flags, localScope, handle);
         });
       }
 
-      return loadWebAssemblyModule(loadLibData(lib), flags, handle);
+      return loadWebAssemblyModule(loadLibData(lib), flags, localScope, handle);
     }
 
     // module for lib is loaded - update the dso & global namespace
     function moduleLoaded(libModule) {
       if (dso.global) {
         mergeLibSymbols(libModule, lib);
+      } else if (localScope) {
+        Object.assign(localScope, libModule);
       }
       dso.module = libModule;
     }
@@ -1044,20 +1062,23 @@ var LibraryDylink = {
       }
     }
 
+    var global = Boolean(flags & {{{ cDefine('RTLD_GLOBAL') }}});
+    var localScope = global ? null : {};
+
     // We don't care about RTLD_NOW and RTLD_LAZY.
     var combinedFlags = {
-      global:    Boolean(flags & {{{ cDefine('RTLD_GLOBAL') }}}),
+      global,
       nodelete:  Boolean(flags & {{{ cDefine('RTLD_NODELETE') }}}),
       loadAsync: jsflags.loadAsync,
       fs:        jsflags.fs,
     }
 
     if (jsflags.loadAsync) {
-      return loadDynamicLibrary(filename, combinedFlags, handle);
+      return loadDynamicLibrary(filename, combinedFlags, localScope, handle);
     }
 
     try {
-      return loadDynamicLibrary(filename, combinedFlags, handle)
+      return loadDynamicLibrary(filename, combinedFlags, localScope, handle)
     } catch (e) {
 #if ASSERTIONS
       err('Error in loading dynamic library ' + filename + ": " + e);
@@ -1146,7 +1167,7 @@ var LibraryDylink = {
 #if ASSERTIONS
     assert(lib, 'Tried to dlsym() from an unopened handle: ' + handle);
 #endif
-    if (!lib.module.hasOwnProperty(symbol)) {
+    if (!lib.module.hasOwnProperty(symbol) || lib.module[symbol].stub) {
       dlSetError('Tried to lookup unknown symbol "' + symbol + '" in dynamic lib: ' + lib.name)
       return 0;
     }
