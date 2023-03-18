@@ -1483,7 +1483,7 @@ def phase_setup(options, state, newargs):
                '-isysroot', '-imultilib', '-A', '-isystem', '-iquote',
                '-install_name', '-compatibility_version',
                '-current_version', '-I', '-L', '-include-pch',
-               '-Xlinker', '-Xclang'):
+               '-Xlinker', '-Xclang', '-z'):
       skip = True
 
     if not arg.startswith('-'):
@@ -1518,6 +1518,14 @@ def phase_setup(options, state, newargs):
       newargs[i] = ''
     elif arg.startswith('-l'):
       add_link_flag(state, i, arg)
+      newargs[i] = ''
+    elif arg == '-z':
+      add_link_flag(state, i, newargs[i])
+      add_link_flag(state, i + 1, newargs[i + 1])
+      newargs[i] = ''
+      newargs[i + 1] = ''
+    elif arg.startswith('-z'):
+      add_link_flag(state, i, newargs[i])
       newargs[i] = ''
     elif arg.startswith('-Wl,'):
       # Multiple comma separated link flags can be specified. Create fake
