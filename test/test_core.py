@@ -1108,6 +1108,7 @@ base align: 0, 0, 0, 0'''])
   def test_regex(self):
     self.do_core_test('test_regex.c')
 
+  @crossplatform
   @also_with_standalone_wasm(wasm2c=True, impure=True)
   def test_longjmp_standalone(self):
     self.do_core_test('test_longjmp.c')
@@ -6036,13 +6037,14 @@ Module = {
     self.do_run_in_out_file_test('fs/test_trackingdelegate.c')
 
   @also_with_noderawfs
+  @also_with_wasmfs_js
   def test_fs_writeFile(self):
     self.do_run_in_out_file_test('fs/test_writeFile.cpp')
 
-  def test_fs_writeFile_wasmfs(self):
+  def test_fs_open_wasmfs(self):
     self.emcc_args += ['-sWASMFS']
     self.emcc_args += ['-sFORCE_FILESYSTEM']
-    self.do_run_in_out_file_test('fs/test_writeFile.cpp')
+    self.do_runf(test_file('fs/test_open_wasmfs.c'), 'success')
 
   def test_fs_write(self):
     self.do_run_in_out_file_test('fs/test_write.cpp')
@@ -6867,6 +6869,7 @@ void* operator new(size_t size) {
     self.do_runf(test_file('third_party/libiberty/cp-demangle.c'), '*d_demangle(char const*, int, unsigned int*)*', args=['_ZL10d_demanglePKciPj'])
 
   @needs_make('make')
+  @crossplatform
   def test_lua(self):
     self.emcc_args.remove('-Werror')
     env_init = {

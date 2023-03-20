@@ -292,7 +292,7 @@ var LibraryDylink = {
     loadedLibsByName: {},
     // handle  -> dso; Used by dlsym
     loadedLibsByHandle: {},
-    init: () => newDSO('__main__', {{{ cDefine('RTLD_DEFAULT') }}}, wasmImports),
+    init: () => newDSO('__main__', {{{ cDefs.RTLD_DEFAULT }}}, wasmImports),
   },
 
   $dlSetError__internal: true,
@@ -1060,13 +1060,13 @@ var LibraryDylink = {
       }
     }
 
-    var global = Boolean(flags & {{{ cDefine('RTLD_GLOBAL') }}});
+    var global = Boolean(flags & {{{ cDefs.RTLD_GLOBAL }}});
     var localScope = global ? null : {};
 
     // We don't care about RTLD_NOW and RTLD_LAZY.
     var combinedFlags = {
       global,
-      nodelete:  Boolean(flags & {{{ cDefine('RTLD_NODELETE') }}}),
+      nodelete:  Boolean(flags & {{{ cDefs.RTLD_NODELETE }}}),
       loadAsync: jsflags.loadAsync,
       fs:        jsflags.fs,
     }
@@ -1132,7 +1132,7 @@ var LibraryDylink = {
     }
   },
 
-  _dlsym_catchup_js__sig: 'ppp',
+  _dlsym_catchup_js__sig: 'ppi',
   _dlsym_catchup_js: function(handle, symbolIndex) {
 #if DYLINK_DEBUG
     dbg("_dlsym_catchup: handle=" + ptrToString(handle) + " symbolIndex=" + symbolIndex);

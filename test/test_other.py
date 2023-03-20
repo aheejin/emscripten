@@ -9295,21 +9295,6 @@ console.error('JSLIB: none of the above');
     self.assertContained('JSLIB: EXIT_RUNTIME', err)
     self.assertNotContained('JSLIB: MAIN_MODULE', err)
 
-  def test_js_preprocess_pre_post(self):
-    create_file('pre.js', '''
-    #if ASSERTIONS
-    console.log('assertions enabled')
-    #else
-    console.log('assertions disabled')
-    #endif
-    ''')
-    create_file('post.js', '''
-    console.log({{{ POINTER_SIZE }}});
-    ''')
-    self.emcc_args += ['--pre-js', 'pre.js', '--post-js', 'post.js']
-    self.do_runf(test_file('hello_world.c'), 'assertions enabled\n4')
-    self.do_runf(test_file('hello_world.c'), 'assertions disabled\n4', emcc_args=['-sASSERTIONS=0'])
-
   def test_html_preprocess(self):
     src_file = test_file('module/test_stdin.c')
     output_file = 'test_stdin.html'
@@ -13267,3 +13252,16 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     # See https://github.com/llvm/llvm-project/commit/c800391fb974cdaaa62bd74435f76408c2e5ceae
     err = self.expect_fail([EMCC, '-pthreads', '-c', test_file('hello_world.c')])
     self.assertContained('emcc: error: unrecognized command-line option `-pthreads`; did you mean `-pthread`?', err)
+
+  def test_missing_struct_info(self):
+    create_file('lib.js', '''
+      {{{ C_STRUCTS.Foo }}}
+    ''')
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '--js-library=lib.js'])
+    self.assertContained('Error: Missing C struct Foo! If you just added it to struct_info.json, you need to ./emcc --clear-cache', err)
+
+    create_file('lib.js', '''
+      {{{ C_DEFINES.Foo }}}
+    ''')
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '--js-library=lib.js'])
+    self.assertContained('Error: Missing C define Foo! If you just added it to struct_info.json, you need to ./emcc --clear-cache', err)
