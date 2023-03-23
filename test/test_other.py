@@ -33,7 +33,7 @@ from common import RunnerCore, path_from_root, is_slow_test, ensure_dir, disable
 from common import env_modify, no_mac, no_windows, requires_native_clang, with_env_modify
 from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
 from common import compiler_for, EMBUILDER, requires_v8, requires_node, requires_wasm64
-from common import requires_wasm_eh, crossplatform
+from common import requires_wasm_eh, crossplatform, with_both_sjlj
 from common import also_with_minimal_runtime, also_with_wasm_bigint, EMTEST_BUILD_VERBOSE, PYTHON
 from tools import shared, building, utils, deps_info, response_file, cache
 from tools.utils import read_file, write_file, delete_file, read_binary
@@ -2205,6 +2205,7 @@ int f() {
     self.do_runf(test_file('bzip2_test.c'), 'usage: unzcrash filename',
                  emcc_args=['-sUSE_BZIP2', '-Wno-pointer-sign'])
 
+  @with_both_sjlj
   def test_freetype(self):
     # copy the Liberation Sans Bold truetype file located in the
     # <emscripten_root>/test/freetype to the compilation folder
@@ -3739,7 +3740,7 @@ EMSCRIPTEN_KEEPALIVE int myreadSeekEnd() {
 
     self.emcc_args += ['--js-library', 'duplicated_func_1.js', '--js-library', 'duplicated_func_2.js']
     err = self.expect_fail([EMCC, 'duplicated_func.c'] + self.get_emcc_args())
-    self.assertContained('error: Symbol re-definition in JavaScript library: duplicatedFunc. Do not use noOverride if this is intended', err)
+    self.assertContained('duplicated_func_2.js: Symbol re-definition in JavaScript library: duplicatedFunc. Do not use noOverride if this is intended', err)
 
   def test_override_stub(self):
     self.do_run_from_file(test_file('other/test_override_stub.c'), test_file('other/test_override_stub.out'))
@@ -3766,7 +3767,7 @@ EMSCRIPTEN_KEEPALIVE int myreadSeekEnd() {
 
     self.emcc_args += ['--js-library', 'some_func.js']
     err = self.expect_fail([EMCC, 'some_func.c'] + self.get_emcc_args())
-    self.assertContained('error: __sig is missing for function: someFunc. Do not use checkSig if this is intended', err)
+    self.assertContained('some_func.js: __sig is missing for function: someFunc. Do not use checkSig if this is intended', err)
 
   def test_js_lib_quoted_key(self):
     create_file('lib.js', r'''
@@ -3838,15 +3839,55 @@ mergeInto(LibraryManager.library, {
   },
 });
 ''')
-    create_file('src.cpp', r'''
+    create_file('src.c', r'''
 #include <stdio.h>
-extern "C" int jslibfunc();
+int jslibfunc();
 int main() {
   printf("c calling: %d\n", jslibfunc());
 }
 ''')
-    err = self.run_process([EMXX, 'src.cpp', '--js-library', 'lib.js'], stderr=PIPE).stderr
+    err = self.run_process([EMCC, 'src.c', '--js-library', 'lib.js'], stderr=PIPE).stderr
     self.assertContained("warning: user library symbol 'jslibfunc' depends on internal symbol '$callRuntimeCallbacks'", err)
+
+  def test_js_lib_sig_mismatch(self):
+    create_file('lib.js', r'''
+mergeInto(LibraryManager.library, {
+  jslibfunc__sig: 'ii',
+  jslibfunc: function(x) {},
+});
+
+mergeInto(LibraryManager.library, {
+  jslibfunc__sig: 'dd',
+  jslibfunc: function(x) {},
+});
+
+''')
+    create_file('src.c', r'''
+#include <stdio.h>
+int jslibfunc();
+int main() {
+  printf("c calling: %d\n", jslibfunc());
+}
+''')
+    err = self.expect_fail([EMCC, 'src.c', '--js-library', 'lib.js'])
+    self.assertContained('lib.js: Signature redefinition for: jslibfunc__sig. (old=ii vs new=dd)', err)
+
+  def test_js_lib_invalid_deps(self):
+    create_file('lib.js', r'''
+mergeInto(LibraryManager.library, {
+  jslibfunc__deps: 'hello',
+  jslibfunc: function(x) {},
+});
+''')
+    create_file('src.c', r'''
+#include <stdio.h>
+int jslibfunc();
+int main() {
+  printf("c calling: %d\n", jslibfunc());
+}
+''')
+    err = self.expect_fail([EMCC, 'src.c', '--js-library', 'lib.js'])
+    self.assertContained('lib.js: JS library directive jslibfunc__deps=hello is of type string, but it should be an array', err)
 
   def test_EMCC_BUILD_DIR(self):
     # EMCC_BUILD_DIR env var contains the dir we were building in, when running the js compiler (e.g. when
@@ -8637,11 +8678,13 @@ end
   def test_full_js_library_minimal_runtime(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sMINIMAL_RUNTIME'])
 
+  @crossplatform
   @parameterized({
     '': [[]],
     # bigint support is interesting to test here because it changes which
     # binaryen tools get run, which can affect how debug info is kept around
     'bigint': [['-sWASM_BIGINT']],
+    'pthread': [['-pthread', '-Wno-experimental']],
   })
   def test_closure_full_js_library(self, args):
     # Test for closure errors and warnings in the entire JS library.
@@ -11591,7 +11634,7 @@ exec "$@"
       #endif
       ''')
     proc = self.run_process([EMCC, test_file('hello_world.c'), '--js-library=lib.js'], stderr=PIPE)
-    self.assertContained('warning: use of #ifdef in js library.  Use #if instead.', proc.stderr)
+    self.assertContained('lib.js: use of #ifdef in js library.  Use #if instead.', proc.stderr)
 
   def test_jslib_mangling(self):
     create_file('lib.js', '''
@@ -11802,13 +11845,26 @@ exec "$@"
     self.assertIn('Hello from main!', result)
     self.assertIn('Hello from lib!', result)
 
+  @crossplatform
   def test_gen_struct_info(self):
-    # This tests is fragile and will need updating any time any of the referenced
-    # structs or defines change.   However its easy to rebaseline with
-    # --rebaseline and it prevents regressions or unintended changes
-    # to the output json.
+    # This test will start failing whenever the struct info changes (e.g. offset or defines
+    # change).  However it's easy to rebaseline with --rebaseline.
     self.run_process([PYTHON, path_from_root('tools/gen_struct_info.py'), '-o', 'out.json'])
-    self.assertFileContents(test_file('reference_struct_info.json'), read_file('out.json'))
+    self.assertFileContents(path_from_root('src/generated_struct_info32.json'), read_file('out.json'))
+
+    # Same again for wasm64
+    node_version = shared.check_node_version()
+    if node_version and node_version >= (14, 0, 0):
+      self.run_process([PYTHON, path_from_root('tools/gen_struct_info.py'), '--wasm64', '-o', 'out.json'])
+      self.assertFileContents(path_from_root('src/generated_struct_info64.json'), read_file('out.json'))
+
+  @crossplatform
+  def test_gen_sig_info(self):
+    # This tests is fragile and will need updating any time a JS library
+    # function is added or its signature changed.  However it's easy to
+    # rebaseline with --rebaseline.
+    self.run_process([PYTHON, path_from_root('tools/gen_sig_info.py'), '-o', 'out.js'])
+    self.assertFileContents(path_from_root('src/library_sigs.js'), read_file('out.js'))
 
   def test_gen_struct_info_env(self):
     # gen_struct_info.py builds C code in a very specific and low level way.  We don't want
@@ -13258,10 +13314,10 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
       {{{ C_STRUCTS.Foo }}}
     ''')
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '--js-library=lib.js'])
-    self.assertContained('Error: Missing C struct Foo! If you just added it to struct_info.json, you need to ./emcc --clear-cache', err)
+    self.assertContained('Error: Missing C struct Foo! If you just added it to struct_info.json, you need to run ./tools/gen_struct_info.py', err)
 
     create_file('lib.js', '''
       {{{ C_DEFINES.Foo }}}
     ''')
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '--js-library=lib.js'])
-    self.assertContained('Error: Missing C define Foo! If you just added it to struct_info.json, you need to ./emcc --clear-cache', err)
+    self.assertContained('Error: Missing C define Foo! If you just added it to struct_info.json, you need to run ./tools/gen_struct_info.py', err)

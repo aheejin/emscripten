@@ -809,6 +809,7 @@ class MuslInternalLibrary(Library):
   includes = [
     'system/lib/libc/musl/src/internal',
     'system/lib/libc/musl/src/include',
+    'system/lib/libc',
     'system/lib/pthread',
   ]
 
@@ -854,6 +855,7 @@ class libcompiler_rt(MTLibrary, SjLjLibrary):
 
   cflags = ['-fno-builtin']
   src_dir = 'system/lib/compiler-rt/lib/builtins'
+  includes = ['system/lib/libc']
   # gcc_personality_v0.c depends on libunwind, which don't include by default.
   src_files = glob_in_path(src_dir, '*.c', excludes=['gcc_personality_v0.c', 'truncdfbf2.c', 'truncsfbf2.c'])
   src_files += files_in_path(
@@ -1839,7 +1841,8 @@ class libsanitizer_common_rt(CompilerRTLibrary, MTLibrary):
   name = 'libsanitizer_common_rt'
   # TODO(sbc): We should not need musl-internal headers here.
   includes = ['system/lib/libc/musl/src/internal',
-              'system/lib/compiler-rt/lib']
+              'system/lib/compiler-rt/lib',
+              'system/lib/libc']
   never_force = True
 
   src_dir = 'system/lib/compiler-rt/lib/sanitizer_common'

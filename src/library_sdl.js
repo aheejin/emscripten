@@ -1351,7 +1351,7 @@ var LibrarySDL = {
   SDL_Init__deps: ['$zeroMemory', 'malloc', 'free', 'memcpy'],
   SDL_Init__proxy: 'sync',
   SDL_Init__sig: 'ii',
-  SDL_Init__docs: '/** @param{number=} initFlags */', 
+  SDL_Init__docs: '/** @param{number} initFlags */',
   SDL_Init: function(initFlags) {
     SDL.startTime = Date.now();
     SDL.initFlags = initFlags;
@@ -1401,7 +1401,7 @@ var LibrarySDL = {
   SDL_WasInit__sig: 'ii',
   SDL_WasInit: function(flags) {
     if (SDL.startTime === null) {
-      _SDL_Init();
+      _SDL_Init(0);
     }
     return 1;
   },
@@ -1760,7 +1760,7 @@ var LibrarySDL = {
 
   SDL_GetKeyboardState__proxy: 'sync',
   SDL_GetKeyboardState__sig: 'pp',
-  SDL_GetKeyboardState__docs: '/** @param {number=} numKeys */',
+  SDL_GetKeyboardState__docs: '/** @param {number} numKeys */',
   SDL_GetKeyboardState: function(numKeys) {
     if (numKeys) {
       {{{ makeSetValue('numKeys', 0, 0x10000, 'i32') }}};
@@ -1770,7 +1770,7 @@ var LibrarySDL = {
 
   SDL_GetKeyState__deps: ['SDL_GetKeyboardState'],
   SDL_GetKeyState: function() {
-    return _SDL_GetKeyboardState();
+    return _SDL_GetKeyboardState(0);
   },
 
   SDL_GetKeyName__proxy: 'sync',
@@ -1843,7 +1843,7 @@ var LibrarySDL = {
     return SDL.errorMessage;
   },
 
-  SDL_SetError: function() {},
+  SDL_SetError: function(fmt, varargs) {},
 
   SDL_CreateRGBSurface__deps: ['malloc', 'free'],
   SDL_CreateRGBSurface__proxy: 'sync',
@@ -1884,7 +1884,7 @@ var LibrarySDL = {
 
   SDL_ConvertSurface__proxy: 'sync',
   SDL_ConvertSurface__sig: 'pppi',
-  SDL_ConvertSurface__docs: '/** @param {number=} format @param {number=} flags */',
+  SDL_ConvertSurface__docs: '/** @param {number} format @param {number} flags */',
   SDL_ConvertSurface: function(surf, format, flags) {
     if  (format) {
       SDL.checkPixelFormat(format);
@@ -1902,7 +1902,7 @@ var LibrarySDL = {
 
   SDL_DisplayFormatAlpha__deps: ['SDL_ConvertSurface'],
   SDL_DisplayFormatAlpha: function(surf) {
-    return _SDL_ConvertSurface(surf);
+    return _SDL_ConvertSurface(surf, 0, 0);
   },
 
   SDL_FreeSurface__proxy: 'sync',
@@ -2382,7 +2382,7 @@ var LibrarySDL = {
   IMG_Load__proxy: 'sync',
   IMG_Load__sig: 'pp',
   IMG_Load: function(filename){
-    var rwops = _SDL_RWFromFile(filename);
+    var rwops = _SDL_RWFromFile(filename, 0);
     var result = _IMG_Load_RW(rwops, 1);
     return result;
   },
@@ -2657,14 +2657,14 @@ var LibrarySDL = {
   SDL_UnlockAudio: function() {},
 
   SDL_CreateMutex: function() { return 0 },
-  SDL_mutexP: function() { return 0 },
-  SDL_mutexV: function() { return 0 },
-  SDL_DestroyMutex: function() {},
+  SDL_mutexP: function(mutex) { return 0 },
+  SDL_mutexV: function(mutex) { return 0 },
+  SDL_DestroyMutex: function(mutex) {},
 
   SDL_CreateCond: function() { return 0 },
-  SDL_CondSignal: function() {},
-  SDL_CondWait: function() {},
-  SDL_DestroyCond: function() {},
+  SDL_CondSignal: function(cond) {},
+  SDL_CondWait: function(cond, mutex) {},
+  SDL_DestroyCond: function(cond) {},
 
   SDL_StartTextInput__proxy: 'sync',
   SDL_StartTextInput__sig: 'v',
@@ -2746,7 +2746,7 @@ var LibrarySDL = {
   Mix_LoadWAV_RW__deps: ['$PATH_FS', 'fileno'],
   Mix_LoadWAV_RW__proxy: 'sync',
   Mix_LoadWAV_RW__sig: 'ppi',
-  Mix_LoadWAV_RW__docs: '/** @param {number|boolean=} freesrc */',
+  Mix_LoadWAV_RW__docs: '/** @param {number} freesrc */',
   Mix_LoadWAV_RW: function(rwopsID, freesrc) {
     var rwops = SDL.rwops[rwopsID];
 
@@ -2854,8 +2854,8 @@ var LibrarySDL = {
   Mix_LoadWAV__proxy: 'sync',
   Mix_LoadWAV__sig: 'pp',
   Mix_LoadWAV: function(filename) {
-    var rwops = _SDL_RWFromFile(filename);
-    var result = _Mix_LoadWAV_RW(rwops);
+    var rwops = _SDL_RWFromFile(filename, 0);
+    var result = _Mix_LoadWAV_RW(rwops, 0);
     _SDL_FreeRW(rwops);
     return result;
   },
@@ -3000,15 +3000,15 @@ var LibrarySDL = {
     return SDL.setGetVolume(SDL.music, volume);
   },
 
-  Mix_LoadMUS_RW__docs: '/** @param {number|boolean=} a1 */',
+  Mix_LoadMUS_RW__docs: '/** @param {number} a1 */',
   Mix_LoadMUS_RW: 'Mix_LoadWAV_RW',
 
   Mix_LoadMUS__deps: ['Mix_LoadMUS_RW', 'SDL_RWFromFile', 'SDL_FreeRW'],
   Mix_LoadMUS__proxy: 'sync',
   Mix_LoadMUS__sig: 'pp',
   Mix_LoadMUS: function(filename) {
-    var rwops = _SDL_RWFromFile(filename);
-    var result = _Mix_LoadMUS_RW(rwops);
+    var rwops = _SDL_RWFromFile(filename, 0);
+    var result = _Mix_LoadMUS_RW(rwops, 0);
     _SDL_FreeRW(rwops);
     return result;
   },
@@ -3664,7 +3664,7 @@ var LibrarySDL = {
 
   SDL_RWFromFile__proxy: 'sync',
   SDL_RWFromFile__sig: 'ppp',
-  SDL_RWFromFile__docs: '/** @param {number=} mode */',
+  SDL_RWFromFile__docs: '/** @param {number} mode */',
   SDL_RWFromFile: function(_name, mode) {
     var id = SDL.rwops.length; // TODO: recycle ids when they are null
     var name = UTF8ToString(_name);
@@ -3716,30 +3716,30 @@ var LibrarySDL = {
   },
 
   // TODO:
-  SDL_CreateThread: function() {
+  SDL_CreateThread: function(fs, data, pfnBeginThread, pfnEndThread) {
     throw 'SDL threads cannot be supported in the web platform because they assume shared state. See emscripten_create_worker etc. for a message-passing concurrency model that does let you run code in another thread.'
   },
 
-  SDL_WaitThread: function() { throw 'SDL_WaitThread' },
-  SDL_GetThreadID: function() { throw 'SDL_GetThreadID' },
+  SDL_WaitThread: function(thread, status) { throw 'SDL_WaitThread' },
+  SDL_GetThreadID: function(thread) { throw 'SDL_GetThreadID' },
   SDL_ThreadID: function() { return 0; },
   SDL_AllocRW: function() { throw 'SDL_AllocRW: TODO' },
-  SDL_CondBroadcast: function() { throw 'SDL_CondBroadcast: TODO' },
-  SDL_CondWaitTimeout: function() { throw 'SDL_CondWaitTimeout: TODO' },
+  SDL_CondBroadcast: function(cond) { throw 'SDL_CondBroadcast: TODO' },
+  SDL_CondWaitTimeout: function(cond, mutex, ms) { throw 'SDL_CondWaitTimeout: TODO' },
   SDL_WM_IconifyWindow: function() { throw 'SDL_WM_IconifyWindow TODO' },
 
-  Mix_SetPostMix: function() { warnOnce('Mix_SetPostMix: TODO') },
+  Mix_SetPostMix: function(func, arg) { warnOnce('Mix_SetPostMix: TODO') },
 
   Mix_VolumeChunk: function(chunk, volume) { throw 'Mix_VolumeChunk: TODO' },
   Mix_SetPosition: function(channel, angle, distance) { throw 'Mix_SetPosition: TODO' },
-  Mix_QuerySpec: function() { throw 'Mix_QuerySpec: TODO' },
-  Mix_FadeInChannelTimed: function() { throw 'Mix_FadeInChannelTimed' },
+  Mix_QuerySpec: function(frequency, format, channels) { throw 'Mix_QuerySpec: TODO' },
+  Mix_FadeInChannelTimed: function(channel, chunk, loop, ms, ticks) { throw 'Mix_FadeInChannelTimed' },
   Mix_FadeOutChannel: function() { throw 'Mix_FadeOutChannel' },
 
   Mix_Linked_Version: function() { throw 'Mix_Linked_Version: TODO' },
-  SDL_SaveBMP_RW: function() { throw 'SDL_SaveBMP_RW: TODO' },
+  SDL_SaveBMP_RW: function(surface, dst, freedst) { throw 'SDL_SaveBMP_RW: TODO' },
 
-  SDL_WM_SetIcon: function() { /* This function would set the application window icon surface, which doesn't apply for web canvases, so a no-op. */ },
+  SDL_WM_SetIcon: function(icon, mask) { /* This function would set the application window icon surface, which doesn't apply for web canvases, so a no-op. */ },
   SDL_HasRDTSC: function() { return 0; },
   SDL_HasMMX: function() { return 0; },
   SDL_HasMMXExt: function() { return 0; },
