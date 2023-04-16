@@ -102,13 +102,7 @@ UNSUPPORTED_LLD_FLAGS = {
 }
 
 DEFAULT_ASYNCIFY_IMPORTS = [
-  'emscripten_wget', 'emscripten_wget_data', 'emscripten_idb_load',
-  'emscripten_idb_store', 'emscripten_idb_delete', 'emscripten_idb_exists',
-  'emscripten_idb_load_blob', 'emscripten_idb_store_blob', 'SDL_Delay',
-  'emscripten_scan_registers', 'emscripten_lazy_load_code',
-  'emscripten_fiber_swap', '__load_secondary_module',
-  'wasi_snapshot_preview1.fd_sync', '__wasi_fd_sync', '_emval_await',
-  '_dlopen_js', '__asyncjs__*'
+  'wasi_snapshot_preview1.fd_sync', '__wasi_fd_sync', '__asyncjs__*'
 ]
 
 DEFAULT_ASYNCIFY_EXPORTS = [
@@ -1138,7 +1132,7 @@ def package_files(options, target):
   if options.preload_files:
     # Preloading files uses --pre-js code that runs before the module is loaded.
     file_code = shared.check_call(cmd, stdout=PIPE).stdout
-    js_manipulation.add_files_pre_js(options.pre_js, file_code)
+    js_manipulation.add_files_pre_js(settings.PRE_JS_FILES, file_code)
   else:
     # Otherwise, we are embedding files, which does not require --pre-js code,
     # and instead relies on a static constrcutor to populate the filesystem.
@@ -1311,9 +1305,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   # Embed and preload files
   if len(options.preload_files) or len(options.embed_files):
     linker_arguments += package_files(options, target)
-
-  settings.PRE_JS_FILES = [os.path.abspath(f) for f in options.pre_js]
-  settings.POST_JS_FILES = [os.path.abspath(f) for f in options.post_js]
 
   if options.oformat == OFormat.OBJECT:
     logger.debug(f'link_to_object: {linker_arguments} -> {target}')
@@ -1609,6 +1600,9 @@ def phase_setup(options, state, newargs):
     if '-mbulk-memory' not in newargs:
       newargs += ['-mbulk-memory']
 
+  if settings.SHARED_MEMORY:
+    settings.BULK_MEMORY = 1
+
   if 'DISABLE_EXCEPTION_CATCHING' in user_settings and 'EXCEPTION_CATCHING_ALLOWED' in user_settings:
     # If we get here then the user specified both DISABLE_EXCEPTION_CATCHING and EXCEPTION_CATCHING_ALLOWED
     # on the command line.  This is no longer valid so report either an error or a warning (for
@@ -1892,7 +1886,7 @@ def phase_linker_setup(options, state, newargs):
     # Requesting both Wasm and Wasm2JS support
     settings.WASM2JS = 1
 
-  if (options.oformat == OFormat.WASM or settings.PURE_WASI) and not settings.SIDE_MODULE:
+  if options.oformat == OFormat.WASM and not settings.SIDE_MODULE:
     # if the output is just a wasm file, it will normally be a standalone one,
     # as there is no JS. an exception are side modules, as we can't tell at
     # compile time whether JS will be involved or not - the main module may
@@ -1902,6 +1896,10 @@ def phase_linker_setup(options, state, newargs):
 
   if settings.LZ4:
     settings.EXPORTED_RUNTIME_METHODS += ['LZ4']
+
+  if settings.PURE_WASI:
+    settings.STANDALONE_WASM = 1
+    settings.WASM_BIGINT = 1
 
   if settings.WASM2C:
     # wasm2c only makes sense with standalone wasm - there will be no JS,
@@ -2116,7 +2114,7 @@ def phase_linker_setup(options, state, newargs):
       '__stack_pointer',
     ]
 
-    if settings.ASYNCIFY:
+    if settings.ASYNCIFY == 1:
       settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += [
         '__asyncify_state',
         '__asyncify_data'
@@ -2325,6 +2323,7 @@ def phase_linker_setup(options, state, newargs):
         '_wasmfs_mkdir',
         '_wasmfs_unlink',
         '_wasmfs_chdir',
+        '_wasmfs_rmdir',
         '_wasmfs_symlink',
         '_wasmfs_chmod',
         '_wasmfs_identify',
@@ -2332,10 +2331,6 @@ def phase_linker_setup(options, state, newargs):
         '_wasmfs_readdir_get',
         '_wasmfs_readdir_finish',
       ]
-
-  # Explicitly drop linking in a malloc implementation if program is not using any dynamic allocation calls.
-  if not settings.USES_DYNAMIC_ALLOC:
-    settings.MALLOC = 'none'
 
   if settings.FETCH and final_suffix in EXECUTABLE_ENDINGS:
     state.forced_stdlibs.append('libfetch')
@@ -2426,6 +2421,14 @@ def phase_linker_setup(options, state, newargs):
   if settings.INCLUDE_FULL_LIBRARY and not settings.DISABLE_EXCEPTION_CATCHING:
     settings.EXPORTED_FUNCTIONS += ['___get_exception_message', '_free']
 
+  if settings.MEMORY64:
+    if settings.ASYNCIFY and settings.MEMORY64 == 1:
+      exit_with_error('MEMORY64=1 is not compatible with ASYNCIFY')
+    if not settings.DISABLE_EXCEPTION_CATCHING:
+      exit_with_error('MEMORY64 is not compatible with DISABLE_EXCEPTION_CATCHING=0')
+    # Any "pointers" passed to JS will now be i64's, in both modes.
+    settings.WASM_BIGINT = 1
+
   if settings.WASM_WORKERS:
     # TODO: After #15982 is resolved, these dependencies can be declared in library_wasm_worker.js
     #       instead of having to record them here.
@@ -2438,11 +2441,19 @@ def phase_linker_setup(options, state, newargs):
       settings.WASM_WORKER_FILE = unsuffixed(os.path.basename(target)) + '.ww.js'
     settings.JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_wasm_worker.js')))
 
+  # Set min browser versions based on certain settings such as WASM_BIGINT,
+  # PTHREADS, AUDIO_WORKLET
+  # Such setting must be set before this point
+  feature_matrix.apply_min_browser_versions()
+
+  # TODO(sbc): Find make a generic way to expose the feature matrix to JS
+  # compiler rather then adding them all ad-hoc as internal settings
   settings.SUPPORTS_GLOBALTHIS = feature_matrix.caniuse(feature_matrix.Feature.GLOBALTHIS)
+  settings.SUPPORTS_PROMISE_ANY = feature_matrix.caniuse(feature_matrix.Feature.PROMISE_ANY)
+  if not settings.BULK_MEMORY:
+    settings.BULK_MEMORY = feature_matrix.caniuse(feature_matrix.Feature.BULK_MEMORY)
 
   if settings.AUDIO_WORKLET:
-    if not settings.SUPPORTS_GLOBALTHIS:
-      exit_with_error('Must target recent enough browser versions that will support globalThis in order to target Wasm Audio Worklets!')
     if settings.AUDIO_WORKLET == 1:
       settings.AUDIO_WORKLET_FILE = unsuffixed(os.path.basename(target)) + '.aw.js'
     settings.JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_webaudio.js')))
@@ -2556,14 +2567,6 @@ def phase_linker_setup(options, state, newargs):
   if settings.SHARED_MEMORY or settings.RELOCATABLE or settings.ASYNCIFY_LAZY_LOAD_CODE or settings.WASM2JS:
     settings.IMPORTED_MEMORY = 1
 
-  if settings.MEMORY64:
-    if settings.ASYNCIFY and settings.MEMORY64 == 1:
-      exit_with_error('MEMORY64=1 is not compatible with ASYNCIFY')
-    if not settings.DISABLE_EXCEPTION_CATCHING:
-      exit_with_error('MEMORY64 is not compatible with DISABLE_EXCEPTION_CATCHING=0')
-    # Any "pointers" passed to JS will now be i64's, in both modes.
-    settings.WASM_BIGINT = 1
-
   if settings.WASM_BIGINT:
     settings.LEGALIZE_JS_FFI = 0
 
@@ -2645,8 +2648,10 @@ def phase_linker_setup(options, state, newargs):
     if settings.PTHREADS:
       settings.INITIAL_MEMORY += 50 * 1024 * 1024
 
-  if settings.USE_OFFSET_CONVERTER and settings.WASM2JS:
-    exit_with_error('wasm2js is not compatible with USE_OFFSET_CONVERTER (see #14630)')
+  if settings.USE_OFFSET_CONVERTER:
+    if settings.WASM2JS:
+      exit_with_error('wasm2js is not compatible with USE_OFFSET_CONVERTER (see #14630)')
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('$UTF8ArrayToString')
 
   if sanitize & UBSAN_SANITIZERS:
     if '-fsanitize-minimal-runtime' in newargs:
@@ -2783,6 +2788,13 @@ def phase_linker_setup(options, state, newargs):
       '__cxa_is_pointer_type',
       '__cxa_can_catch',
 
+      # __cxa_begin_catch depends on this but we can't use deps info in this
+      # case because that only works for user-level code, and __cxa_begin_catch
+      # can be used by the standard library.
+      '__cxa_increment_exception_refcount',
+      # Same for __cxa_end_catch
+      '__cxa_decrement_exception_refcount',
+
       # Emscripten exception handling can generate invoke calls, and they call
       # setThrew(). We cannot handle this using deps_info as the invokes are not
       # emitted because of library function usage, but by codegen itself.
@@ -2895,8 +2907,6 @@ def phase_linker_setup(options, state, newargs):
     if settings.WASM_EXCEPTIONS:
       settings.EXPORTED_FUNCTIONS += ['___cpp_exception', '___cxa_increment_exception_refcount', '___cxa_decrement_exception_refcount', '___thrown_object_from_unwind_exception']
 
-  feature_matrix.apply_min_browser_versions()
-
   if settings.SIDE_MODULE:
     # For side modules, we ignore all REQUIRED_EXPORTS that might have been added above.
     # They all come from either libc or compiler-rt.  The exception is __wasm_call_ctors
@@ -2906,6 +2916,9 @@ def phase_linker_setup(options, state, newargs):
   if not settings.STANDALONE_WASM:
     # in standalone mode, crt1 will call the constructors from inside the wasm
     settings.REQUIRED_EXPORTS.append('__wasm_call_ctors')
+
+  settings.PRE_JS_FILES = [os.path.abspath(f) for f in options.pre_js]
+  settings.POST_JS_FILES = [os.path.abspath(f) for f in options.post_js]
 
   return target, wasm_target
 
@@ -3565,6 +3578,10 @@ def parse_args(newargs):
       settings.DISABLE_EXCEPTION_CATCHING = 1
       settings.DISABLE_EXCEPTION_THROWING = 1
       settings.WASM_EXCEPTIONS = 0
+    elif arg == '-mbulk-memory':
+      settings.BULK_MEMORY = 1
+    elif arg == '-mno-bulk-memory':
+      settings.BULK_MEMORY = 0
     elif arg == '-fexceptions':
       # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
       # exception handling by default when -fexceptions is given when wasm
@@ -3639,8 +3656,6 @@ def parse_args(newargs):
 def phase_binaryen(target, options, wasm_target):
   global final_js
   logger.debug('using binaryen')
-  if settings.GENERATE_SOURCE_MAP and not settings.SOURCE_MAP_BASE:
-    logger.warning("Wasm source map won't be usable in a browser without --source-map-base")
   # whether we need to emit -g (function name debug info) in the final wasm
   debug_info = settings.DEBUG_LEVEL >= 2 or settings.EMIT_NAME_SECTION
   # whether we need to emit -g in the intermediate binaryen invocations (but not
