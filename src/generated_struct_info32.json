@@ -220,6 +220,9 @@
         "EM_PROMISE_REJECT": 3,
         "EM_PROXIED_RESIZE_OFFSCREENCANVAS": 654311424,
         "EM_QUEUED_JS_CALL_MAX_ARGS": 20,
+        "EM_TIMING_RAF": 1,
+        "EM_TIMING_SETIMMEDIATE": 2,
+        "EM_TIMING_SETTIMEOUT": 0,
         "ENAMETOOLONG": 37,
         "ENETDOWN": 38,
         "ENETRESET": 39,
@@ -1321,12 +1324,14 @@
             "d_type": 18
         },
         "dso": {
-            "__size__": 28,
+            "__size__": 36,
+            "file_data": 28,
+            "file_data_size": 32,
             "flags": 4,
             "mem_addr": 12,
             "mem_allocated": 8,
             "mem_size": 16,
-            "name": 28,
+            "name": 36,
             "table_addr": 20,
             "table_size": 24
         },

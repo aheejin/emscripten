@@ -124,13 +124,36 @@ def also_with_wasm64(f):
   return metafunc
 
 
+def also_with_wasm2js_or_wasm64(f):
+  assert callable(f)
+
+  def metafunc(self, with_wasm2js, with_wasm64):
+    if with_wasm2js:
+      self.set_setting('WASM', 0)
+      f(self)
+    elif with_wasm64:
+      self.set_setting('MEMORY64')
+      self.emcc_args.append('-Wno-experimental')
+      f(self)
+    else:
+      f(self)
+
+  metafunc._parameterize = {'': (False, False),
+                            'wasm2js': (True, False),
+                            'wasm64': (False, True)}
+  return metafunc
+
+
 def shell_with_script(shell_file, output_file, replacement):
   shell = read_file(path_from_root('src', shell_file))
   create_file(output_file, shell.replace('{{{ SCRIPT }}}', replacement))
 
 
+CHROMIUM_BASED_BROWSERS = ['chrom', 'edge', 'opera']
+
+
 def is_chrome():
-  return EMTEST_BROWSER and 'chrom' in EMTEST_BROWSER.lower()
+  return EMTEST_BROWSER and any(pattern in EMTEST_BROWSER.lower() for pattern in CHROMIUM_BASED_BROWSERS)
 
 
 def no_chrome(note='chrome is not supported'):
@@ -2639,6 +2662,9 @@ Module["preRun"].push(function () {
       print(opts)
       self.btest_exit(test_file('test_gamepad.c'), args=[] + opts)
 
+  def test_html5_unknown_event_target(self):
+    self.btest_exit(test_file('test_html5_unknown_event_target.cpp'))
+
   @requires_graphics_hardware
   def test_html5_webgl_create_context_no_antialias(self):
     for opts in [[], ['-O2', '-g1', '--closure=1'], ['-sFULL_ES2']]:
@@ -3327,10 +3353,11 @@ Module["preRun"].push(function () {
   @parameterized({
     'asyncify': (['-sASYNCIFY=1'],),
     'jspi': (['-sASYNCIFY=2', '-Wno-experimental'],),
+    'jspi_wasm_bigint': (['-sASYNCIFY=2', '-sWASM_BIGINT', '-Wno-experimental'],),
   })
   def test_async(self, args):
     if is_jspi(args) and not is_chrome():
-      self.skipTest('only chrome supports jspi')
+      self.skipTest(f'Current browser ({EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
 
     for opts in [0, 1, 2, 3]:
       print(opts)
@@ -3392,6 +3419,7 @@ Module["preRun"].push(function () {
   # To make the test more precise we also use ASYNCIFY_IGNORE_INDIRECT here.
   @parameterized({
     'normal': (['-sASYNCIFY_IMPORTS=[sync_tunnel, sync_tunnel_bool]'],), # noqa
+    'pattern_imports': (['-sASYNCIFY_IMPORTS=[sync_tun*]'],), # noqa
     'response': (['-sASYNCIFY_IMPORTS=@filey.txt'],), # noqa
     'nothing': (['-DBAD'],), # noqa
     'empty_list': (['-DBAD', '-sASYNCIFY_IMPORTS=[]'],), # noqa
@@ -4602,7 +4630,7 @@ Module["preRun"].push(function () {
     self.btest_exit('test_preallocated_heap.cpp', args=['-sWASM=0', '-sINITIAL_MEMORY=16MB', '-sABORTING_MALLOC=0', '--shell-file', test_file('test_preallocated_heap_shell.html')])
 
   # Tests emscripten_fetch() usage to XHR data directly to memory without persisting results to IndexedDB.
-  @also_with_wasm2js
+  @also_with_wasm2js_or_wasm64
   def test_fetch_to_memory(self):
     # Test error reporting in the negative case when the file URL doesn't exist. (http 404)
     self.btest_exit('fetch/to_memory.cpp',
@@ -4626,14 +4654,14 @@ Module["preRun"].push(function () {
                     args=args + ['-pthread', '-sPROXY_TO_PTHREAD', '-sFETCH_DEBUG', '-sFETCH', '-DFILE_DOES_NOT_EXIST'],
                     also_wasm2js=True)
 
-  @also_with_wasm2js
+  @also_with_wasm2js_or_wasm64
   def test_fetch_to_indexdb(self):
     shutil.copyfile(test_file('gears.png'), 'gears.png')
     self.btest_exit('fetch/to_indexeddb.cpp',
                     args=['-sFETCH_DEBUG', '-sFETCH'])
 
   # Tests emscripten_fetch() usage to persist an XHR into IndexedDB and subsequently load up from there.
-  @also_with_wasm2js
+  @also_with_wasm2js_or_wasm64
   def test_fetch_cached_xhr(self):
     shutil.copyfile(test_file('gears.png'), 'gears.png')
     self.btest_exit('fetch/cached_xhr.cpp',
@@ -4641,14 +4669,14 @@ Module["preRun"].push(function () {
 
   # Tests that response headers get set on emscripten_fetch_t values.
   @no_firefox('https://github.com/emscripten-core/emscripten/issues/16868')
-  @also_with_wasm2js
+  @also_with_wasm2js_or_wasm64
   @requires_threads
   def test_fetch_response_headers(self):
     shutil.copyfile(test_file('gears.png'), 'gears.png')
     self.btest_exit('fetch/response_headers.cpp', args=['-sFETCH_DEBUG', '-sFETCH', '-pthread', '-sPROXY_TO_PTHREAD'])
 
   # Test emscripten_fetch() usage to stream a XHR in to memory without storing the full file in memory
-  @also_with_wasm2js
+  @also_with_wasm2js_or_wasm64
   def test_fetch_stream_file(self):
     self.skipTest('moz-chunked-arraybuffer was firefox-only and has been removed')
     # Strategy: create a large 128MB file, and compile with a small 16MB Emscripten heap, so that the tested file
@@ -4674,6 +4702,7 @@ Module["preRun"].push(function () {
   # Tests emscripten_fetch() usage in synchronous mode when used from the main
   # thread proxied to a Worker with -sPROXY_TO_PTHREAD option.
   @no_firefox('https://github.com/emscripten-core/emscripten/issues/16868')
+  @also_with_wasm64
   @requires_threads
   def test_fetch_sync_xhr(self):
     shutil.copyfile(test_file('gears.png'), 'gears.png')
@@ -4682,6 +4711,7 @@ Module["preRun"].push(function () {
   # Tests emscripten_fetch() usage when user passes none of the main 3 flags (append/replace/no_download).
   # In that case, in append is implicitly understood.
   @no_firefox('https://github.com/emscripten-core/emscripten/issues/16868')
+  @also_with_wasm64
   @requires_threads
   def test_fetch_implicit_append(self):
     shutil.copyfile(test_file('gears.png'), 'gears.png')
@@ -5414,6 +5444,7 @@ Module["preRun"].push(function () {
   @parameterized({
     '': (['-pthread', '-sPROXY_TO_PTHREAD'],),
     'jspi': (['-Wno-experimental', '-sASYNCIFY=2'],),
+    'jspi_wasm_bigint': (['-Wno-experimental', '-sASYNCIFY=2', '-sWASM_BIGINT'],),
   })
   @requires_threads
   def test_wasmfs_opfs(self, args):

@@ -69,7 +69,7 @@ mergeInto(LibraryManager.library, {
       assert(!implicit);
 #endif
 #if PTHREADS_DEBUG
-      dbg('Pthread ' + ptrToString(_pthread_self()) + ' called exit(), posting exitOnMainThread.');
+      dbg(`Pthread ${ptrToString(_pthread_self())} called exit(), posting exitOnMainThread.`);
 #endif
       // When running in a pthread we propagate the exit back to the main thread
       // where it can decide if the whole process should be shut down or not.
@@ -79,7 +79,7 @@ mergeInto(LibraryManager.library, {
       throw 'unwind';
     }
 #if PTHREADS_DEBUG
-    err('main thread called exit: keepRuntimeAlive=' + keepRuntimeAlive() + ' (counter=' + runtimeKeepaliveCounter + ')');
+    err(`main thread called exit: keepRuntimeAlive=${keepRuntimeAlive()} (counter=${runtimeKeepaliveCounter})`);
 #endif // PTHREADS_DEBUG
 #endif // PTHREADS
 
@@ -92,7 +92,7 @@ mergeInto(LibraryManager.library, {
 #if ASSERTIONS
     // if exit() was called explicitly, warn the user if the runtime isn't actually being shut down
     if (keepRuntimeAlive() && !implicit) {
-      var msg = 'program exited (with status: ' + status + '), but keepRuntimeAlive() is set (counter=' + runtimeKeepaliveCounter + ') due to an async operation, so halting execution but not exiting the runtime or preventing further async execution (you can use emscripten_force_exit, if you want to force a true shutdown)';
+      var msg = `program exited (with status: ${status}), but keepRuntimeAlive() is set (counter=${runtimeKeepaliveCounter}) due to an async operation, so halting execution but not exiting the runtime or preventing further async execution (you can use emscripten_force_exit, if you want to force a true shutdown)`;
 #if MODULARIZE
       readyPromiseReject(msg);
 #endif // MODULARIZE
@@ -136,9 +136,9 @@ mergeInto(LibraryManager.library, {
   $abortOnCannotGrowMemory: function(requestedSize) {
 #if ASSERTIONS
 #if ALLOW_MEMORY_GROWTH
-    abort('Cannot enlarge memory arrays to size ' + requestedSize + ' bytes (OOM). If you want malloc to return NULL (0) instead of this abort, do not link with -sABORTING_MALLOC (that is, the default when growth is enabled is to not abort, but you have overridden that)');
+    abort(`Cannot enlarge memory arrays to size ${requestedSize} bytes (OOM). If you want malloc to return NULL (0) instead of this abort, do not link with -sABORTING_MALLOC (that is, the default when growth is enabled is to not abort, but you have overridden that)`);
 #else // ALLOW_MEMORY_GROWTH
-    abort('Cannot enlarge memory arrays to size ' + requestedSize + ' bytes (OOM). Either (1) compile with -sINITIAL_MEMORY=X with X higher than the current value ' + HEAP8.length + ', (2) compile with -sALLOW_MEMORY_GROWTH which allows increasing the size at runtime, or (3) if you want malloc to return NULL (0) instead of this abort, compile with -sABORTING_MALLOC=0');
+    abort(`Cannot enlarge memory arrays to size ${requestedSize} bytes (OOM). Either (1) compile with -sINITIAL_MEMORY=X with X higher than the current value ${HEAP8.length}, (2) compile with -sALLOW_MEMORY_GROWTH which allows increasing the size at runtime, or (3) if you want malloc to return NULL (0) instead of this abort, compile with -sABORTING_MALLOC=0`);
 #endif // ALLOW_MEMORY_GROWTH
 #else // ASSERTIONS
     abort('OOM');
@@ -171,7 +171,7 @@ mergeInto(LibraryManager.library, {
       return 1 /*success*/;
     } catch(e) {
 #if ASSERTIONS
-      err('emscripten_realloc_buffer: Attempted to grow heap from ' + b.byteLength  + ' bytes to ' + size + ' bytes, but got error: ' + e);
+      err(`emscripten_realloc_buffer: Attempted to grow heap from ${b.byteLength} bytes to ${size} bytes, but got error: ${e}`);
 #endif
     }
     // implicit 0 return to save code size (caller will cast "undefined" into 0
@@ -239,7 +239,7 @@ mergeInto(LibraryManager.library, {
     var maxHeapSize = getHeapMax();
     if (requestedSize > maxHeapSize) {
 #if ASSERTIONS
-      err('Cannot enlarge memory, asked to go up to ' + requestedSize + ' bytes, but the limit is ' + maxHeapSize + ' bytes!');
+      err(`Cannot enlarge memory, asked to go up to ${requestedSize} bytes, but the limit is ${maxHeapSize} bytes!`);
 #endif
 #if ABORTING_MALLOC
       abortOnCannotGrowMemory(requestedSize);
@@ -248,7 +248,7 @@ mergeInto(LibraryManager.library, {
 #endif
     }
 
-    let alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
+    var alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
 
     // Loop through potential heap size increases. If we attempt a too eager
     // reservation that fails, cut down on the attempted size and reserve a
@@ -273,7 +273,7 @@ mergeInto(LibraryManager.library, {
       var replacement = emscripten_realloc_buffer(newSize);
 #if ASSERTIONS == 2
       var t1 = _emscripten_get_now();
-      out('Heap resize call from ' + oldSize + ' to ' + newSize + ' took ' + (t1 - t0) + ' msecs. Success: ' + !!replacement);
+      out(`Heap resize call from ${oldSize} to ${newSize} took ${(t1 - t0)} msecs. Success: ${!!replacement}`);
 #endif
       if (replacement) {
 #if ASSERTIONS && WASM2JS
@@ -281,7 +281,7 @@ mergeInto(LibraryManager.library, {
 #endif
 
 #if EMSCRIPTEN_TRACING
-        _emscripten_trace_js_log_message("Emscripten", "Enlarging memory arrays from " + oldSize + " to " + newSize);
+        traceLogMessage("Emscripten", `Enlarging memory arrays from ${oldSize} to ${newSize}`);
         // And now report the new layout
         _emscripten_trace_report_memory_layout();
 #endif
@@ -289,7 +289,7 @@ mergeInto(LibraryManager.library, {
       }
     }
 #if ASSERTIONS
-    err('Failed to grow the heap from ' + oldSize + ' bytes to ' + newSize + ' bytes, not enough memory!');
+    err(`Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`);
 #endif
 #if ABORTING_MALLOC
     abortOnCannotGrowMemory(requestedSize);
@@ -408,9 +408,9 @@ mergeInto(LibraryManager.library, {
   //   AppleWebKit/605.1.15 Safari/604.1 Version/13.0.4 iPhone OS 13_3 on iPhone 6s with iOS 13.3
   //   AppleWebKit/605.1.15 Version/13.0.3 Intel Mac OS X 10_15_1 on Safari 13.0.3 (15608.3.10.1.4) on macOS Catalina 10.15.1
   // Hence the support status of .copyWithin() for Safari version range [10.0.0, 10.1.0] is unknown.
-  emscripten_memcpy_big: '= Uint8Array.prototype.copyWithin\n' +
-    '  ? (dest, src, num) => HEAPU8.copyWithin(dest, src, src + num)\n' +
-    '  : (dest, src, num) => HEAPU8.set(HEAPU8.subarray(src, src+num), dest)\n',
+  emscripten_memcpy_big: `= Uint8Array.prototype.copyWithin
+    ? (dest, src, num) => HEAPU8.copyWithin(dest, src, src + num)
+    : (dest, src, num) => HEAPU8.set(HEAPU8.subarray(src, src+num), dest)`,
 #else
   emscripten_memcpy_big: function(dest, src, num) {
     HEAPU8.copyWithin(dest, src, src + num);
@@ -424,7 +424,7 @@ mergeInto(LibraryManager.library, {
   // ==========================================================================
 
   __assert_fail: function(condition, filename, line, func) {
-    abort('Assertion failed: ' + UTF8ToString(condition) + ', at: ' + [filename ? UTF8ToString(filename) : 'unknown filename', line, func ? UTF8ToString(func) : 'unknown function']);
+    abort(`Assertion failed: ${UTF8ToString(condition)}, at: ` + [filename ? UTF8ToString(filename) : 'unknown filename', line, func ? UTF8ToString(func) : 'unknown function']);
   },
 
   // ==========================================================================
@@ -1899,7 +1899,7 @@ mergeInto(LibraryManager.library, {
       {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_family, 'family', 'i32') }}};
       {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_socktype, 'type', 'i32') }}};
       {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_protocol, 'proto', 'i32') }}};
-      {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_canonname, 'canon', 'i32') }}};
+      {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_canonname, 'canon', '*') }}};
       {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_addr, 'sa', '*') }}};
       if (family === {{{ cDefs.AF_INET6 }}}) {
         {{{ makeSetValue('ai', C_STRUCTS.addrinfo.ai_addrlen, C_STRUCTS.sockaddr_in6.__size__, 'i32') }}};
@@ -2266,7 +2266,7 @@ mergeInto(LibraryManager.library, {
                         '_emscripten_timeout', 'emscripten_get_now'],
   _setitimer_js: function(which, timeout_ms) {
 #if RUNTIME_DEBUG
-    dbg('setitimer_js ' + which + ' timeout=' + timeout_ms);
+    dbg(`setitimer_js ${which} timeout=${timeout_ms}`);
 #endif
     // First, clear any existing timer.
     if (timers[which]) {
@@ -2284,7 +2284,7 @@ mergeInto(LibraryManager.library, {
 #endif
       delete timers[which];
 #if RUNTIME_DEBUG
-      dbg('itimer fired: ' + which);
+      dbg(`itimer fired: ${which}`);
 #endif
       callUserCallback(() => __emscripten_timeout(which, _emscripten_get_now()));
     }, timeout_ms);
@@ -2451,7 +2451,7 @@ mergeInto(LibraryManager.library, {
       if (typeof a == 'number' || typeof a == 'string') {
         str += a;
       } else {
-        str += '(' + typeof a + ')';
+        str += `(${typeof a}})`;
       }
     }
     str += ')';
@@ -2550,14 +2550,14 @@ mergeInto(LibraryManager.library, {
           if (flags & {{{ cDefs.EM_LOG_NO_PATHS }}}) {
             orig.source = orig.source.substring(orig.source.replace(/\\/g, "/").lastIndexOf('/')+1);
           }
-          callstack += '    at ' + symbolName + ' (' + orig.source + ':' + orig.line + ':' + orig.column + ')\n';
+          callstack += `    at ${symbolName} (${orig.source}:${orig.line}:${orig.column})\n`;
         }
       }
       if ((flags & {{{ cDefs.EM_LOG_JS_STACK }}}) || !haveSourceMap) {
         if (flags & {{{ cDefs.EM_LOG_NO_PATHS }}}) {
           file = file.substring(file.replace(/\\/g, "/").lastIndexOf('/')+1);
         }
-        callstack += (haveSourceMap ? ('     = ' + symbolName) : ('    at '+ symbolName)) + ' (' + file + ':' + lineno + ':' + column + ')\n';
+        callstack += (haveSourceMap ? (`     = ${symbolName}`) : (`    at ${symbolName}`)) + ` (${file}:${lineno}:${column})\n`;
       }
 
       // If we are still keeping track with the callstack by traversing via
@@ -2962,7 +2962,7 @@ mergeInto(LibraryManager.library, {
       // get automatically converted to int53/Double.
       validChars.push('p');
 #endif
-      assert(validChars.includes(chr), 'Invalid character ' + ch + '("' + chr + '") in readEmAsmArgs! Use only [' + validChars + '], and do not specify "v" for void return argument.');
+      assert(validChars.includes(chr), `Invalid character ${ch}("${chr}") in readEmAsmArgs! Use only [${validChars}], and do not specify "v" for void return argument.`);
 #endif
       // Floats are always passed as doubles, and doubles and int64s take up 8
       // bytes (two 32-bit slots) in memory, align reads to these:
@@ -2991,7 +2991,7 @@ mergeInto(LibraryManager.library, {
   $runEmAsmFunction: function(code, sigPtr, argbuf) {
     var args = readEmAsmArgs(sigPtr, argbuf);
 #if ASSERTIONS
-    if (!ASM_CONSTS.hasOwnProperty(code)) abort('No EM_ASM constant found at address ' + code);
+    if (!ASM_CONSTS.hasOwnProperty(code)) abort(`No EM_ASM constant found at address ${code}`);
 #endif
     return ASM_CONSTS[code].apply(null, args);
   },
@@ -3034,7 +3034,7 @@ mergeInto(LibraryManager.library, {
     }
 #endif
 #if ASSERTIONS
-    if (!ASM_CONSTS.hasOwnProperty(code)) abort('No EM_ASM constant found at address ' + code);
+    if (!ASM_CONSTS.hasOwnProperty(code)) abort(`No EM_ASM constant found at address ${code}`);
 #endif
     return ASM_CONSTS[code].apply(null, args);
   },
@@ -3131,8 +3131,8 @@ mergeInto(LibraryManager.library, {
     requested = requested >>> 0;
     var base = _emscripten_stack_get_base();
     var end = _emscripten_stack_get_end();
-    abort('stack overflow (Attempt to set SP to ' + ptrToString(requested) +
-          ', with stack limits [' + ptrToString(end) + ' - ' + ptrToString(base) +
+    abort(`stack overflow (Attempt to set SP to ${ptrToString(requested)}` +
+          `, with stack limits [${ptrToString(end)} - ${ptrToString(base)}` +
           ']). If you require more stack space build with -sSTACK_SIZE=<bytes>');
   },
 #endif
@@ -3193,9 +3193,9 @@ mergeInto(LibraryManager.library, {
 #if ASSERTIONS
 #if MINIMAL_RUNTIME
     assert(typeof dynCalls != 'undefined', 'Global dynCalls dictionary was not generated in the build! Pass -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$dynCall linker flag to include it!');
-    assert(sig in dynCalls, 'bad function pointer type - sig is not in dynCalls: \'' + sig + '\'');
+    assert(sig in dynCalls, `bad function pointer type - sig is not in dynCalls: '${sig}'`);
 #else
-    assert(('dynCall_' + sig) in Module, 'bad function pointer type - dynCall function not found for sig \'' + sig + '\'');
+    assert(('dynCall_' + sig) in Module, `bad function pointer type - dynCall function not found for sig '${sig}'`);
 #endif
     if (args && args.length) {
       // j (64-bit integer) must be passed in as two numbers [low 32, high 32].
@@ -3249,30 +3249,23 @@ mergeInto(LibraryManager.library, {
     }
 #endif
 #if ASSERTIONS
-    assert(getWasmTableEntry(ptr), 'missing table entry in dynCall: ' + ptr);
+    assert(getWasmTableEntry(ptr), `missing table entry in dynCall: ${ptr}`);
 #endif
 #if MEMORY64
-    // With MEMORY64 we have an additional step to covert `p` arguments to
+    // With MEMORY64 we have an additional step to convert `p` arguments to
     // bigint. This is the runtime equivalent of the wrappers we create for wasm
     // exports in `emscripten.py:create_wasm64_wrappers`.
-    if (sig.includes('p')) {
-      var new_args = [];
-      args.forEach((arg, index) => {
-        if (sig[index + 1] == 'p') {
-          arg = BigInt(arg);
-        }
-        new_args.push(arg);
-      });
-      args = new_args;
+    for (var i = 1; i < sig.length; ++i) {
+      if (sig[i] == 'p') args[i-1] = BigInt(args[i-1]);
     }
 #endif
     var rtn = getWasmTableEntry(ptr).apply(null, args);
 #if MEMORY64
-    if (sig[0] == 'p') {
-      rtn = Number(rtn);
-    }
-#endif
+    return sig[0] == 'p' ? Number(rtn) : rtn;
+#else
     return rtn;
+#endif
+
 #endif
   },
 
@@ -3433,7 +3426,7 @@ mergeInto(LibraryManager.library, {
     //    that wish to return to JS event loop.
     if (e instanceof ExitStatus || e == 'unwind') {
 #if RUNTIME_DEBUG
-      dbg('handleException: unwinding: EXITSTATUS=' + EXITSTATUS);
+      dbg(`handleException: unwinding: EXITSTATUS=${EXITSTATUS}`);
 #endif
       return EXITSTATUS;
     }
@@ -3441,7 +3434,7 @@ mergeInto(LibraryManager.library, {
     checkStackCookie();
     if (e instanceof WebAssembly.RuntimeError) {
       if (_emscripten_stack_get_current() <= 0) {
-        err('Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to ' + {{{ STACK_SIZE }}} + ')');
+        err('Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to {{{ STACK_SIZE }}})');
       }
     }
 #endif
@@ -3457,7 +3450,7 @@ mergeInto(LibraryManager.library, {
   $runtimeKeepalivePush: function() {
     runtimeKeepaliveCounter += 1;
 #if RUNTIME_DEBUG
-    dbg('runtimeKeepalivePush -> counter=' + runtimeKeepaliveCounter);
+    dbg(`runtimeKeepalivePush -> counter=${runtimeKeepaliveCounter}`);
 #endif
   },
 
@@ -3468,7 +3461,7 @@ mergeInto(LibraryManager.library, {
 #endif
     runtimeKeepaliveCounter -= 1;
 #if RUNTIME_DEBUG
-    dbg('runtimeKeepalivePop -> counter=' + runtimeKeepaliveCounter);
+    dbg(`runtimeKeepalivePop -> counter=${runtimeKeepaliveCounter}`);
 #endif
   },
 
@@ -3519,11 +3512,11 @@ mergeInto(LibraryManager.library, {
     }
 #endif
 #if RUNTIME_DEBUG
-    dbg('maybeExit: user callback done: runtimeKeepaliveCounter=' + runtimeKeepaliveCounter);
+    dbg(`maybeExit: user callback done: runtimeKeepaliveCounter=${runtimeKeepaliveCounter}`);
 #endif
     if (!keepRuntimeAlive()) {
 #if RUNTIME_DEBUG
-      dbg('maybeExit: calling exit() implicitly after user callback completed: ' + EXITSTATUS);
+      dbg(`maybeExit: calling exit() implicitly after user callback completed: ${EXITSTATUS}`);
 #endif
       try {
 #if PTHREADS
@@ -3564,16 +3557,16 @@ mergeInto(LibraryManager.library, {
 
   $asyncLoad__docs: '/** @param {boolean=} noRunDep */',
   $asyncLoad: function(url, onload, onerror, noRunDep) {
-    var dep = !noRunDep ? getUniqueRunDependency('al ' + url) : '';
+    var dep = !noRunDep ? getUniqueRunDependency(`al ${url}`) : '';
     readAsync(url, (arrayBuffer) => {
-      assert(arrayBuffer, 'Loading data file "' + url + '" failed (no arrayBuffer).');
+      assert(arrayBuffer, `Loading data file "${url}" failed (no arrayBuffer).`);
       onload(new Uint8Array(arrayBuffer));
       if (dep) removeRunDependency(dep);
     }, (event) => {
       if (onerror) {
         onerror();
       } else {
-        throw 'Loading data file "' + url + '" failed.';
+        throw `Loading data file "${url}" failed.`;
       }
     });
     if (dep) addRunDependency(dep);
@@ -3652,7 +3645,7 @@ mergeInto(LibraryManager.library, {
       ptr += {{{ POINTER_SIZE }}};
       var name = UTF8ToString(name_addr)
 #if RUNTIME_DEBUG
-      dbg('preloading files: ' + name);
+      dbg(`preloading files: ${name}`);
 #endif
       FS.createPath('/', PATH.dirname(name), true, true);
       // canOwn this data in the filesystem, it is a slice of wasm memory that will never change
@@ -3670,12 +3663,15 @@ mergeInto(LibraryManager.library, {
     this.freelist = [];
     this.get = function(id) {
 #if ASSERTIONS
-      assert(this.allocated[id] !== undefined, 'invalid handle: ' + id);
+      assert(this.allocated[id] !== undefined, `invalid handle: ${id}`);
 #endif
       return this.allocated[id];
     };
+    this.has = function(id) {
+      return this.allocated[id] !== undefined;
+    };
     this.allocate = function(handle) {
-      let id = this.freelist.pop() || this.allocated.length;
+      var id = this.freelist.pop() || this.allocated.length;
       this.allocated[id] = handle;
       return id;
     };
@@ -3704,12 +3700,11 @@ mergeInto(LibraryManager.library, {
 
 function autoAddDeps(object, name) {
   for (var item in object) {
-    if (item.substr(-6) != '__deps') {
+    if (!item.endsWith('__deps')) {
       if (!object[item + '__deps']) {
-        object[item + '__deps'] = [name];
-      } else {
-        object[item + '__deps'].push(name); // add to existing list
+        object[item + '__deps'] = [];
       }
+      object[item + '__deps'].push(name);
     }
   }
 }

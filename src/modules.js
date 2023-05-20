@@ -78,31 +78,36 @@ global.LibraryManager = {
     }
 
     if (FILESYSTEM) {
-      // Core filesystem libraries (always linked against, unless -sFILESYSTEM=0 is specified)
-      libraries = libraries.concat([
-        'library_fs.js',
-        'library_memfs.js',
-        'library_tty.js',
-        'library_pipefs.js', // ok to include it by default since it's only used if the syscall is used
-        'library_sockfs.js', // ok to include it by default since it's only used if the syscall is used
-      ]);
+      libraries.push('library_fs_shared.js');
+      if (WASMFS) {
+        libraries = libraries.concat([
+          'library_wasmfs.js',
+          'library_wasmfs_js_file.js',
+          'library_wasmfs_jsimpl.js',
+          'library_wasmfs_fetch.js',
+          'library_wasmfs_node.js',
+          'library_wasmfs_opfs.js',
+        ]);
+      } else {
+        // Core filesystem libraries (always linked against, unless -sFILESYSTEM=0 is specified)
+        libraries = libraries.concat([
+          'library_fs.js',
+          'library_memfs.js',
+          'library_tty.js',
+          'library_pipefs.js', // ok to include it by default since it's only used if the syscall is used
+          'library_sockfs.js', // ok to include it by default since it's only used if the syscall is used
+        ]);
 
-      if (NODERAWFS) {
-        // NODERAWFS requires NODEFS
-        if (!JS_LIBRARIES.includes('library_nodefs.js')) {
-          libraries.push('library_nodefs.js');
+        if (NODERAWFS) {
+          // NODERAWFS requires NODEFS
+          if (!JS_LIBRARIES.includes('library_nodefs.js')) {
+            libraries.push('library_nodefs.js');
+          }
+          libraries.push('library_noderawfs.js');
+          // NODERAWFS overwrites library_path.js
+          libraries.push('library_nodepath.js');
         }
-        libraries.push('library_noderawfs.js');
-        // NODERAWFS overwrites library_path.js
-        libraries.push('library_nodepath.js');
       }
-    } else if (WASMFS) {
-      libraries.push('library_wasmfs.js');
-      libraries.push('library_wasmfs_js_file.js');
-      libraries.push('library_wasmfs_jsimpl.js');
-      libraries.push('library_wasmfs_fetch.js');
-      libraries.push('library_wasmfs_node.js');
-      libraries.push('library_wasmfs_opfs.js');
     }
 
     // Additional JS libraries (without AUTO_JS_LIBRARIES, link to these explicitly via -lxxx.js)
@@ -283,10 +288,6 @@ function cDefine(key) {
   return cDefs[key];
 }
 
-function isFSPrefixed(name) {
-  return name.length > 3 && name[0] === 'F' && name[1] === 'S' && name[2] === '_';
-}
-
 function isInternalSymbol(ident) {
   return ident + '__internal' in LibraryManager.library;
 }
@@ -342,7 +343,7 @@ function exportRuntime() {
     if (EXPORTED_RUNTIME_METHODS_SET.has(name)) {
       let exported = name;
       // the exported name may differ from the internal name
-      if (isFSPrefixed(exported)) {
+      if (exported.startsWith('FS_')) {
         // this is a filesystem value, FS.x exported as FS_x
         exported = 'FS.' + exported.substr(3);
       } else if (legacyRuntimeElements.has(exported)) {
@@ -365,7 +366,6 @@ function exportRuntime() {
     'FS_createFolder',
     'FS_createPath',
     'FS_createDataFile',
-    'FS_createPreloadedFile',
     'FS_createLazyFile',
     'FS_createLink',
     'FS_createDevice',

@@ -1743,6 +1743,7 @@ int f() {
     'embed': (['--embed-file', 'somefile.txt'],),
     'embed_twice': (['--embed-file', 'somefile.txt', '--embed-file', 'somefile.txt'],),
     'preload': (['--preload-file', 'somefile.txt'],),
+    'preload_closure': (['--preload-file', 'somefile.txt', '-O2', '--closure=1'],),
     'preload_and_embed': (['--preload-file', 'somefile.txt', '--embed-file', 'hello.txt'],)
   })
   @requires_node
@@ -4584,10 +4585,8 @@ int main() {
     self.assertNotContained('new Function', src)
     delete_file('a.out.js')
 
-    # Test that -sDYNAMIC_EXECUTION and -sRELOCATABLE are not allowed together.
-    self.expect_fail([EMCC, test_file('hello_world.c'), '-O1',
-                      '-sDYNAMIC_EXECUTION=0', '-sRELOCATABLE'])
-    delete_file('a.out.js')
+    # Test that -sDYNAMIC_EXECUTION=0 and -sRELOCATABLE are allowed together.
+    self.do_runf(test_file('hello_world.c'), emcc_args=['-O1', '-sDYNAMIC_EXECUTION=0', '-sRELOCATABLE'])
 
     create_file('test.c', r'''
       #include <emscripten/emscripten.h>
@@ -4995,7 +4994,7 @@ int main() {
 }''')
     self.run_process([EMXX, 'src.cpp'])
 
-  def test_syscall_without_filesystem(self):
+  def test_syscall_no_filesystem(self):
     # a program which includes a non-trivial syscall, but disables the filesystem.
     create_file('src.c', r'''
 #include <sys/time.h>
@@ -5004,6 +5003,9 @@ int main() {
   return openat(0, "foo", 0);
 }''')
     self.run_process([EMCC, 'src.c', '-sNO_FILESYSTEM'])
+
+  def test_dylink_no_filesystem(self):
+    self.run_process([EMCC, test_file('hello_world.c'), '-sMAIN_MODULE=2', '-sNO_FILESYSTEM'])
 
   def test_dashS(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-S'])
@@ -5199,15 +5201,17 @@ int main() {
     'full_only': [{'EMCC_FORCE_STDLIBS': 'libc,libc++abi,libc++,libmalloc', 'EMCC_ONLY_FORCED_STDLIBS': '1'}, False],
   })
   def test_only_force_stdlibs(self, env, fail):
+    cmd = [EMXX, test_file('hello_libcxx.cpp')]
     with env_modify(env):
-      err = self.run_process([EMXX, test_file('hello_libcxx.cpp'), '-sWARN_ON_UNDEFINED_SYMBOLS=0'], stderr=PIPE).stderr
-      if 'EMCC_ONLY_FORCED_STDLIBS' in env:
-        self.assertContained('EMCC_ONLY_FORCED_STDLIBS is deprecated', err)
       if fail:
-        output = self.run_js('a.out.js', assert_returncode=NON_ZERO)
-        self.assertContained('missing function', output)
+        err = self.expect_fail(cmd)
+        self.assertContained('undefined symbol: malloc', err)
       else:
-        self.assertContained('hello, world!', self.run_js('a.out.js'))
+        err = self.run_process(cmd, stderr=PIPE).stderr
+        if 'EMCC_ONLY_FORCED_STDLIBS' in env:
+          self.assertContained('EMCC_ONLY_FORCED_STDLIBS is deprecated', err)
+        else:
+          self.assertContained('hello, world!', self.run_js('a.out.js'))
 
   def test_only_force_stdlibs_2(self):
     create_file('src.cpp', r'''
@@ -6372,7 +6376,13 @@ int main(int argc, char** argv) {
 
     self.assertBinaryEqual('main.wasm', 'main2.wasm')
 
-  def test_ld_library_path(self):
+  @parameterized({
+    '': ([],),
+    'pthread': (['-g', '-pthread', '-Wno-experimental', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
+  })
+  def test_ld_library_path(self, args):
+    if args:
+      self.setup_node_pthreads()
     create_file('hello1.c', r'''
 #include <stdio.h>
 
@@ -6408,10 +6418,11 @@ double hello4(double x) {
 ''')
     create_file('pre.js', r'''
 Module['preRun'] = function () {
-  ENV['LD_LIBRARY_PATH']='/lib:/usr/lib';
+  ENV['LD_LIBRARY_PATH']='/lib:/usr/lib:/usr/local/lib';
 };
 ''')
     create_file('main.c', r'''
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6423,22 +6434,30 @@ int main() {
   double (*f2)(double);
 
   h = dlopen("libhello1.wasm", RTLD_NOW);
+  assert(h);
   f = dlsym(h, "hello1");
+  assert(f);
   f();
   dlclose(h);
 
   h = dlopen("libhello2.wasm", RTLD_NOW);
+  assert(h);
   f = dlsym(h, "hello2");
+  assert(f);
   f();
   dlclose(h);
 
   h = dlopen("libhello3.wasm", RTLD_NOW);
+  assert(h);
   f = dlsym(h, "hello3");
+  assert(f);
   f();
   dlclose(h);
 
   h = dlopen("/usr/local/lib/libhello4.wasm", RTLD_NOW);
+  assert(h);
   f2 = dlsym(h, "hello4");
+  assert(f2);
   double result = f2(5.5);
   dlclose(h);
 
@@ -6448,17 +6467,17 @@ int main() {
   return 0;
 }
 ''')
-    self.run_process([EMCC, '-o', 'libhello1.wasm', 'hello1.c', '-sSIDE_MODULE'])
-    self.run_process([EMCC, '-o', 'libhello2.wasm', 'hello2.c', '-sSIDE_MODULE'])
-    self.run_process([EMCC, '-o', 'libhello3.wasm', 'hello3.c', '-sSIDE_MODULE'])
-    self.run_process([EMCC, '-o', 'libhello4.wasm', 'hello4.c', '-sSIDE_MODULE'])
+    self.run_process([EMCC, '-o', 'hello1.wasm', 'hello1.c', '-sSIDE_MODULE'] + args)
+    self.run_process([EMCC, '-o', 'hello2.wasm', 'hello2.c', '-sSIDE_MODULE'] + args)
+    self.run_process([EMCC, '-o', 'hello3.wasm', 'hello3.c', '-sSIDE_MODULE'] + args)
+    self.run_process([EMCC, '-o', 'hello4.wasm', 'hello4.c', '-sSIDE_MODULE'] + args)
     self.run_process([EMCC, '--profiling-funcs', '-o', 'main.js', 'main.c', '-sMAIN_MODULE=2', '-sINITIAL_MEMORY=32Mb',
-                      '--embed-file', 'libhello1.wasm@/lib/libhello1.wasm',
-                      '--embed-file', 'libhello2.wasm@/usr/lib/libhello2.wasm',
-                      '--embed-file', 'libhello3.wasm@/libhello3.wasm',
-                      '--embed-file', 'libhello4.wasm@/usr/local/lib/libhello4.wasm',
-                      'libhello1.wasm', 'libhello2.wasm', 'libhello3.wasm', 'libhello4.wasm', '-sNO_AUTOLOAD_DYLIBS',
-                      '--pre-js', 'pre.js'])
+                      '--embed-file', 'hello1.wasm@/lib/libhello1.wasm',
+                      '--embed-file', 'hello2.wasm@/usr/lib/libhello2.wasm',
+                      '--embed-file', 'hello3.wasm@/libhello3.wasm',
+                      '--embed-file', 'hello4.wasm@/usr/local/lib/libhello4.wasm',
+                      'hello1.wasm', 'hello2.wasm', 'hello3.wasm', 'hello4.wasm', '-sNO_AUTOLOAD_DYLIBS',
+                      '--pre-js', 'pre.js'] + args)
     out = self.run_js('main.js')
     self.assertContained('Hello1', out)
     self.assertContained('Hello2', out)
@@ -7798,6 +7817,7 @@ int main() {
     print('  seen %s size: %d (expected: %d) (delta: %d), ratio to expected: %f' % (desc, size, expected_size, delta, ratio))
     self.assertLess(ratio, size_slack)
 
+  @crossplatform
   def test_unoptimized_code_size(self):
     # We don't care too about unoptimized code size but we would like to keep it
     # under control to a certain extent.  This test allows us to track major
@@ -8666,8 +8686,15 @@ end
     proc = test(check=True, extra=['-sIGNORE_CLOSURE_COMPILER_ERRORS'])
     self.assertNotContained(WARNING, proc.stderr)
 
-  def test_full_js_library(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY'])
+  @parameterized({
+    '': ([],),
+    'asyncify': (['-sASYNCIFY'],),
+    'gl_emu': (['-sLEGACY_GL_EMULATION'],),
+    'no_exception_throwing': (['-sDISABLE_EXCEPTION_THROWING'],),
+    'minimal_runtime': (['-sMINIMAL_RUNTIME'],),
+  })
+  def test_full_js_library(self, args):
+    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY'] + args)
 
   def test_full_js_library_undefined(self):
     create_file('main.c', 'void foo(); int main() { foo(); return 0; }')
@@ -8678,15 +8705,6 @@ end
     self.set_setting('INCLUDE_FULL_LIBRARY', 1)
     self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
     self.do_other_test('test_full_js_library_except.cpp')
-
-  def test_full_js_library_gl_emu(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sLEGACY_GL_EMULATION'])
-
-  def test_full_js_library_no_exception_throwing(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sDISABLE_EXCEPTION_THROWING'])
-
-  def test_full_js_library_minimal_runtime(self):
-    self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY', '-sMINIMAL_RUNTIME'])
 
   @crossplatform
   @parameterized({
@@ -10002,6 +10020,7 @@ int main () {
     'math': ('math', False),
     'hello_wasm_worker': ('hello_wasm_worker', False, True),
   })
+  @crossplatform
   def test_minimal_runtime_code_size(self, test_name, js, compare_js_output=False):
     smallest_code_size_args = ['-sMINIMAL_RUNTIME=2',
                                '-sENVIRONMENT=web',
@@ -10131,28 +10150,6 @@ int main () {
 
       print('size of ' + f + ' == ' + str(size) + ', expected ' + str(expected_size) + ', delta=' + str(size - expected_size) + print_percent(size, expected_size))
       print('size of ' + f_gz + ' == ' + str(size_gz) + ', expected ' + str(expected_size_gz) + ', delta=' + str(size_gz - expected_size_gz) + print_percent(size_gz, expected_size_gz))
-
-      # Hack: Generated .mem initializer files have different sizes on different
-      # platforms (Windows gives x, CircleCI Linux gives x-17 bytes, my home
-      # Linux gives x+2 bytes..). Likewise asm.js files seem to be affected by
-      # the LLVM IR text names, which lead to asm.js names, which leads to
-      # difference code size, which leads to different relooper choices,
-      # as a result leading to slightly different total code sizes.
-      # Also as of July 16, 2020, wasm2js files have different sizes on
-      # different platforms (Windows and MacOS improved to give a slightly
-      # better thing than Linux does, which didn't change; this just
-      # started to happen on CI, not in response to a code update, so it
-      # may have been present all along but just noticed now; it only
-      # happens in wasm2js, so it may be platform-nondeterminism in closure
-      # compiler).
-      # TODO: identify what is causing this. meanwhile allow some amount of slop
-      if not common.EMTEST_REBASELINE:
-        if js:
-          slop = 30
-        else:
-          slop = 20
-        if size <= expected_size + slop and size >= expected_size - slop:
-          size = expected_size
 
       # N.B. even though the test code above prints out gzip compressed sizes, regression testing is done against uncompressed sizes
       # this is because optimizing for compressed sizes can be unpredictable and sometimes counterproductive
@@ -10693,6 +10690,7 @@ int main(void) {
     'compile_only': (['-fexceptions'], [], False),
     # just link isn't enough as codegen didn't emit exceptions support
     'link_only': ([], ['-fexceptions'], False),
+    'standalone': (['-fexceptions'], ['-fexceptions', '-sSTANDALONE_WASM', '-sWASM_BIGINT'], True),
   })
   def test_f_exception(self, compile_flags, link_flags, expect_caught):
     create_file('src.cpp', r'''
@@ -11190,50 +11188,6 @@ Aborted(Module.arguments has been replaced with plain arguments_ (the initial va
     expected = read_file(test_file('other/test_standalone_syscalls.out'))
     for engine in config.WASM_ENGINES:
       self.assertContained(expected, self.run_js('test.wasm', engine))
-
-  @requires_native_clang
-  def test_wasm2c_reactor(self):
-    # test compiling an unsafe library using wasm2c, then using it from a
-    # main program. this shows it is easy to use wasm2c as a sandboxing
-    # mechanism.
-
-    # first compile the library with emcc, getting a .c and .h
-    self.run_process([EMCC,
-                      test_file('other/wasm2c/unsafe-library.c'),
-                      '-O3', '-o', 'lib.wasm', '-sWASM2C', '--no-entry'])
-    # compile the main program natively normally, together with the unsafe
-    # library
-    self.run_process([CLANG_CC,
-                      test_file('other/wasm2c/my-code.c'),
-                      'lib.wasm.c', '-O3', '-o', 'program.exe'] +
-                     clang_native.get_clang_native_args(),
-                     env=clang_native.get_clang_native_env())
-    output = self.run_process([os.path.abspath('program.exe')], stdout=PIPE).stdout
-    self.assertEqual(output, read_file(test_file('other/wasm2c/output.txt')))
-
-  @requires_native_clang
-  def test_wasm2c_multi_lib(self):
-    # compile two libraries to object files
-    for lib in ['a', 'b']:
-      self.run_process([EMCC,
-                        test_file('other/wasm2c', f'unsafe-library-{lib}.c'),
-                        '-O3', '-o', f'lib{lib}.wasm', '-sWASM2C', '--no-entry'])
-      # build with a different WASM_RT_MODULE_PREFIX for each library, so that
-      # they do not have colliding symbols
-      self.run_process([CLANG_CC, f'lib{lib}.wasm.c', '-O3', '-c',
-                        f'-DWASM_RT_MODULE_PREFIX={lib}_'] +
-                       clang_native.get_clang_native_args(),
-                       env=clang_native.get_clang_native_env())
-
-    # compile the main program with the wasmboxed libraries
-    self.run_process([CLANG_CC,
-                      test_file('other/wasm2c/my-code-multi.c'),
-                      'liba.wasm.o', 'libb.wasm.o',
-                      '-O3', '-o', 'program.exe'] +
-                     clang_native.get_clang_native_args(),
-                     env=clang_native.get_clang_native_env())
-    output = self.run_process([os.path.abspath('program.exe')], stdout=PIPE).stdout
-    self.assertEqual(output, read_file(test_file('other/wasm2c/output-multi.txt')))
 
   @parameterized({
     'wasm2js': (['-sWASM=0'], ''),
@@ -12036,6 +11990,22 @@ exec "$@"
     # Test that ERROR_ON_UNDEFINED_SYMBOLS works with MAIN_MODULE.
     self.do_runf(test_file('hello_world.c'), emcc_args=['-sMAIN_MODULE', '-sERROR_ON_UNDEFINED_SYMBOLS'])
 
+  def test_reverse_deps_allow_undefined(self):
+    # Check that reverse deps are still included even when -sERROR_ON_UNDEFINED_SYMBOLS=0.
+    create_file('test.c', '''
+    #include <assert.h>
+    #include <stdio.h>
+    #include <netdb.h>
+
+    int main() {
+      // Reference in getaddrinfo which has reverse deps on malloc and htons
+      // We expect these to be exported even when -sERROR_ON_UNDEFINED_SYMBOLS=0.
+      printf("%p\\n", &getaddrinfo);
+      return 0;
+    }
+    ''')
+    self.do_runf('test.c', emcc_args=['-sERROR_ON_UNDEFINED_SYMBOLS=0'])
+
   @parameterized({
     'relocatable': ('-sRELOCATABLE',),
     'linkable': ('-sLINKABLE',),
@@ -12229,17 +12199,19 @@ void foo() {}
 
   def test_unimplemented_syscalls_dladdr(self):
     create_file('main.c', '''
+    #include <assert.h>
     #include <dlfcn.h>
 
     int main() {
-      dladdr(0, 0);
+      Dl_info info;
+      int rtn = dladdr(&main, &info);
+      assert(rtn == 0);
       return 0;
     }
     ''')
 
-    self.run_process([EMCC, 'main.c'])
-    err = self.run_js('a.out.js', assert_returncode=NON_ZERO)
-    self.assertContained('Aborted(To use dlopen, you need enable dynamic linking, see https://emscripten.org/docs/compiling/Dynamic-Linking.html)', err)
+    self.do_runf('main.c')
+    self.do_runf('main.c', emcc_args=['-sMAIN_MODULE=2'])
 
   @requires_v8
   def test_missing_shell_support(self):
@@ -12358,10 +12330,15 @@ void foo() {}
     self.assertContained('ReferenceError: missing is not defined', output)
     self.assertContained('at foo (', output)
 
-  @node_pthreads
   def test_default_pthread_stack_size(self):
     self.do_runf(test_file('other/test_default_pthread_stack_size.c'))
-    self.emcc_args.append('-pthread')
+
+    # Same again with pthreads enabled
+    self.setup_node_pthreads()
+    self.do_runf(test_file('other/test_default_pthread_stack_size.c'))
+
+    # Same again but with a custom stack size
+    self.emcc_args += ['-DEXPECTED_STACK_SIZE=1024', '-sDEFAULT_PTHREAD_STACK_SIZE=1024']
     self.do_runf(test_file('other/test_default_pthread_stack_size.c'))
 
   def test_emscripten_set_immediate(self):
@@ -12891,7 +12868,13 @@ int main() {
 
   @also_with_wasm_bigint
   def test_parseTools(self):
-    self.do_other_test('test_parseTools.c', emcc_args=['--js-library', test_file('other/test_parseTools.js')])
+    self.emcc_args += ['--js-library', test_file('other/test_parseTools.js')]
+    self.do_other_test('test_parseTools.c')
+
+    # If we run ths same test with -sASSERTIONS=2 we expect it to fail because it
+    # involves writing numbers that are exceed the side of the type.
+    expected = 'Aborted(Assertion failed: value (316059037807746200000) too large to write as 64-bit value)'
+    self.do_runf(test_file('other/test_parseTools.c'), expected, emcc_args=['-sASSERTIONS=2'], assert_returncode=NON_ZERO)
 
   def test_lto_atexit(self):
     self.emcc_args.append('-flto')
@@ -13199,8 +13182,8 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     create_file('lib.js', '''
       mergeInto(LibraryManager.library, {
         foo: function() {
-            return {{{ Runtime.POINTER_SIZE }}};
-          }
+          return {{{ Runtime.POINTER_SIZE }}};
+        }
       });
     ''')
     self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', 'foo')
@@ -13383,3 +13366,130 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
   def test_windows_batch_file_dp0_expansion_bug(self):
     create_file('build_with_quotes.bat',  f'@"emcc" {test_file("hello_world.c")}')
     self.run_process(['build_with_quotes.bat'])
+
+  @parameterized({
+    'wasm2js': (True,),
+    '': (False,)
+  })
+  def test_add_js_function(self, wasm2js):
+    self.set_setting('INVOKE_RUN', 0)
+    self.set_setting('WASM_ASYNC_COMPILATION', 0)
+    self.set_setting('ALLOW_TABLE_GROWTH')
+    self.set_setting('EXPORTED_RUNTIME_METHODS', ['callMain'])
+    if wasm2js:
+      self.set_setting('WASM', 0)
+    self.emcc_args += ['--post-js', test_file('interop/test_add_function_post.js')]
+
+    print('basics')
+    self.do_run_in_out_file_test('interop/test_add_function.cpp')
+
+    print('with ALLOW_TABLE_GROWTH=0')
+    self.set_setting('ALLOW_TABLE_GROWTH', 0)
+    expected = 'Unable to grow wasm table'
+    if wasm2js:
+      # in wasm2js the error message doesn't come from the VM, but from our
+      # emulation code. when ASSERTIONS are enabled we show a clear message, but
+      # in optimized builds we don't waste code size on that, and the JS engine
+      # shows a generic error.
+      expected = 'wasmTable.grow is not a function'
+
+    self.do_runf(test_file('interop/test_add_function.cpp'), expected, assert_returncode=NON_ZERO)
+
+    print('- with table growth')
+    self.set_setting('ALLOW_TABLE_GROWTH')
+    self.emcc_args += ['-DGROWTH']
+    # enable costly assertions to verify correct table behavior
+    self.set_setting('ASSERTIONS', 2)
+    self.do_run_in_out_file_test('interop/test_add_function.cpp', interleaved_output=False)
+
+  @parameterized({
+    'memory64_wasm_function': (True, True),
+    'wasm_function': (False, True),
+    'memory64': (True, False),
+    '': (False, False)
+  })
+  @requires_v8
+  def test_add_js_function_bigint(self, memory64, wasm_function):
+    self.set_setting('WASM_BIGINT')
+
+    if memory64:
+      self.require_wasm64()
+
+    if not wasm_function:
+      create_file('pre.js', 'delete WebAssembly.Function;')
+      self.emcc_args.append('--pre-js=pre.js')
+
+    self.set_setting('ALLOW_TABLE_GROWTH')
+    create_file('main.c', r'''
+      #include <emscripten.h>
+      #include <assert.h>
+
+      EM_JS_DEPS(deps, "$addFunction");
+
+      typedef long long (functype)(long long);
+
+      int main() {
+        functype* f = (functype *)EM_ASM_INT({
+          return addFunction((num) => {
+              return num + 4294967296n;
+          }, 'jj');
+        });
+        assert(f(26) == 26 + 4294967296);
+        assert(f(493921253191) == 493921253191 + 4294967296);
+      }
+    ''')
+
+    self.do_runf('main.c', '')
+
+  @parameterized({
+    '': ([],),
+    'pthread': (['-g', '-pthread', '-Wno-experimental', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
+  })
+  def test_preload_module(self, args):
+    if args:
+      self.setup_node_pthreads()
+    # TODO(sbc): This test is copyied from test_browser.py.  Perhaps find a better way to
+    # share code between them.
+    create_file('library.c', r'''
+      #include <stdio.h>
+      int library_func() {
+        return 42;
+      }
+    ''')
+    self.run_process([EMCC, 'library.c', '-sSIDE_MODULE', '-o', 'tmp.so'] + args)
+    create_file('main.c', r'''
+      #include <assert.h>
+      #include <dlfcn.h>
+      #include <stdio.h>
+      #include <sys/stat.h>
+      #include <emscripten.h>
+      #include <emscripten/threading.h>
+
+      int main() {
+        // Check the file exists in the VFS
+        struct stat statbuf;
+        assert(stat("/library.so", &statbuf) == 0);
+
+        // Check that it was preloaded
+        if (emscripten_is_main_runtime_thread()) {
+          int found = EM_ASM_INT(
+            return preloadedWasm['/library.so'] !== undefined;
+          );
+          assert(found);
+        }
+        void *lib_handle = dlopen("/library.so", RTLD_NOW);
+        assert(lib_handle);
+        typedef int (*voidfunc)();
+        voidfunc x = (voidfunc)dlsym(lib_handle, "library_func");
+        assert(x);
+        assert(x() == 42);
+        printf("done\n");
+        return 0;
+      }
+    ''')
+    self.do_runf('main.c', 'done\n', emcc_args=['-sMAIN_MODULE=2', '--preload-file', 'tmp.so@library.so', '--use-preload-plugins'] + args)
+
+  @node_pthreads
+  def test_standalone_whole_archive(self):
+    self.emcc_args += ['-sSTANDALONE_WASM', '-pthread', '-Wl,--whole-archive', '-lbulkmemory', '-lstandalonewasm', '-Wl,--no-whole-archive']
+    self.do_runf(test_file('hello_world.c'))

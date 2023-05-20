@@ -236,7 +236,7 @@ if (ENVIRONMENT_IS_NODE) {
   process.on('uncaughtException', (ex) => {
     // suppress ExitStatus exceptions from showing an error
 #if RUNTIME_DEBUG
-    dbg('node: uncaughtException: ' + ex)
+    dbg(`node: uncaughtException: ${ex}`)
 #endif
     if (ex !== 'unwind' && !(ex instanceof ExitStatus) && !(ex.context instanceof ExitStatus)) {
       throw ex;
@@ -263,7 +263,7 @@ if (ENVIRONMENT_IS_NODE) {
 
   Module['inspect'] = () => '[Emscripten Module object]';
 
-#if PTHREADS
+#if PTHREADS || WASM_WORKERS
   let nodeWorkerThreads;
   try {
     nodeWorkerThreads = require('worker_threads');
@@ -349,7 +349,7 @@ if (ENVIRONMENT_IS_SHELL) {
           if (toThrow && typeof toThrow == 'object' && toThrow.stack) {
             toLog = [toThrow, toThrow.stack];
           }
-          err('exiting due to exception: ' + toLog);
+          err(`exiting due to exception: ${toLog}`);
         }
         quit(status);
       });
@@ -439,12 +439,12 @@ if (ENVIRONMENT_IS_NODE) {
 
 // Set up the out() and err() hooks, which are how we can print to stdout or
 // stderr, respectively.
-// Normally just binding console.log/console.warn here works fine, but
+// Normally just binding console.log/console.error here works fine, but
 // under node (with workers) we see missing/out-of-order messages so route
 // directly to stdout and stderr.
 // See https://github.com/emscripten-core/emscripten/issues/14804
 var defaultPrint = console.log.bind(console);
-var defaultPrintErr = console.warn.bind(console);
+var defaultPrintErr = console.error.bind(console);
 if (ENVIRONMENT_IS_NODE) {
   defaultPrint = (...args) => fs.writeSync(1, args.join(' ') + '\n');
   defaultPrintErr = (...args) => fs.writeSync(2, args.join(' ') + '\n');
@@ -453,7 +453,7 @@ if (ENVIRONMENT_IS_NODE) {
 {{{ makeModuleReceiveWithVar('err', 'printErr', 'defaultPrintErr', true) }}}
 #else
 {{{ makeModuleReceiveWithVar('out', 'print',    'console.log.bind(console)',  true) }}}
-{{{ makeModuleReceiveWithVar('err', 'printErr', 'console.warn.bind(console)', true) }}}
+{{{ makeModuleReceiveWithVar('err', 'printErr', 'console.error.bind(console)', true) }}}
 #endif
 
 // Merge back in the overrides
