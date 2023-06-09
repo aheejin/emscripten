@@ -97,6 +97,7 @@ UNSUPPORTED_LLD_FLAGS = {
     '-rpath': True,
     '-rpath-link': True,
     '-version-script': True,
+    '-install_name': True,
 }
 
 DEFAULT_ASYNCIFY_IMPORTS = [
@@ -1461,6 +1462,7 @@ def phase_setup(options, state, newargs):
                '-isysroot', '-imultilib', '-A', '-isystem', '-iquote',
                '-install_name', '-compatibility_version',
                '-current_version', '-I', '-L', '-include-pch',
+               '-undefined',
                '-Xlinker', '-Xclang', '-z'):
       skip = True
 
@@ -1783,17 +1785,17 @@ def phase_linker_setup(options, state, newargs):
     options.post_js.append(utils.path_from_root('src/cpuprofiler.js'))
 
   if not settings.RUNTIME_DEBUG:
-    settings.RUNTIME_DEBUG = (settings.LIBRARY_DEBUG or
-                              settings.GL_DEBUG or
-                              settings.DYLINK_DEBUG or
-                              settings.OPENAL_DEBUG or
-                              settings.SYSCALL_DEBUG or
-                              settings.WEBSOCKET_DEBUG or
-                              settings.SOCKET_DEBUG or
-                              settings.FETCH_DEBUG or
-                              settings.EXCEPTION_DEBUG or
-                              settings.PTHREADS_DEBUG or
-                              settings.ASYNCIFY_DEBUG)
+    settings.RUNTIME_DEBUG = bool(settings.LIBRARY_DEBUG or
+                                  settings.GL_DEBUG or
+                                  settings.DYLINK_DEBUG or
+                                  settings.OPENAL_DEBUG or
+                                  settings.SYSCALL_DEBUG or
+                                  settings.WEBSOCKET_DEBUG or
+                                  settings.SOCKET_DEBUG or
+                                  settings.FETCH_DEBUG or
+                                  settings.EXCEPTION_DEBUG or
+                                  settings.PTHREADS_DEBUG or
+                                  settings.ASYNCIFY_DEBUG)
 
   if options.memory_profiler:
     settings.MEMORYPROFILER = 1
@@ -2077,6 +2079,7 @@ def phase_linker_setup(options, state, newargs):
     assert not settings.SIDE_MODULE
     if settings.MAIN_MODULE == 1:
       settings.INCLUDE_FULL_LIBRARY = 1
+    # Called from preamble.js once the main module is instantiated.
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$loadDylibs']
     settings.REQUIRED_EXPORTS += ['malloc']
 
@@ -2196,6 +2199,9 @@ def phase_linker_setup(options, state, newargs):
     else:
       settings.REQUIRED_EXPORTS += ['emscripten_stack_init']
 
+  if settings.STACK_OVERFLOW_CHECK >= 2:
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$setStackLimits']
+
   if settings.MODULARIZE:
     if settings.PROXY_TO_WORKER:
       exit_with_error('-sMODULARIZE is not compatible with --proxy-to-worker (if you want to run in a worker with -sMODULARIZE, you likely want to do the worker side setup manually)')
@@ -2292,30 +2298,57 @@ def phase_linker_setup(options, state, newargs):
   if not settings.GL_SUPPORT_SIMPLE_ENABLE_EXTENSIONS and settings.GL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS:
     exit_with_error('-sGL_SUPPORT_SIMPLE_ENABLE_EXTENSIONS=0 only makes sense with -sGL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS=0!')
 
+  if options.use_preload_plugins or len(options.preload_files) or len(options.embed_files):
+    if settings.NODERAWFS:
+      exit_with_error('--preload-file and --embed-file cannot be used with NODERAWFS which disables virtual filesystem')
+    # if we include any files, or intend to use preload plugins, then we definitely need filesystem support
+    settings.FORCE_FILESYSTEM = 1
+
   if settings.WASMFS:
-    state.forced_stdlibs.append('libwasmfs')
+    if settings.NODERAWFS:
+      # wasmfs will be included normally in system_libs.py, but we must include
+      # noderawfs in a forced manner so that it is always linked in (the hook it
+      # implements can remain unimplemented, so it won't be linked in
+      # automatically)
+      # TODO: find a better way to do this
+      state.forced_stdlibs.append('libwasmfs_noderawfs')
     settings.FILESYSTEM = 1
     settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
     settings.JS_LIBRARIES.append((0, 'library_wasmfs.js'))
-    settings.REQUIRED_EXPORTS += ['_wasmfs_read_file']
+    if settings.ASSERTIONS:
+      # used in assertion checks for unflushed content
+      settings.REQUIRED_EXPORTS += ['wasmfs_flush']
     if settings.FORCE_FILESYSTEM:
       # Add exports for the JS API. Like the old JS FS, WasmFS by default
       # includes just what JS parts it actually needs, and FORCE_FILESYSTEM is
       # required to force all of it to be included if the user wants to use the
       # JS API directly.
       settings.REQUIRED_EXPORTS += [
+        '_wasmfs_read_file',
         '_wasmfs_write_file',
         '_wasmfs_open',
+        '_wasmfs_close',
+        '_wasmfs_write',
+        '_wasmfs_pwrite',
+        '_wasmfs_rename',
         '_wasmfs_mkdir',
         '_wasmfs_unlink',
         '_wasmfs_chdir',
+        '_wasmfs_mknod',
         '_wasmfs_rmdir',
+        '_wasmfs_read',
+        '_wasmfs_pread',
         '_wasmfs_symlink',
+        '_wasmfs_stat',
+        '_wasmfs_lstat',
         '_wasmfs_chmod',
+        '_wasmfs_fchmod',
+        '_wasmfs_lchmod',
         '_wasmfs_identify',
         '_wasmfs_readdir_start',
         '_wasmfs_readdir_get',
         '_wasmfs_readdir_finish',
+        '_wasmfs_get_cwd',
       ]
 
   if settings.FETCH and final_suffix in EXECUTABLE_ENDINGS:
@@ -2347,12 +2380,6 @@ def phase_linker_setup(options, state, newargs):
 
   if settings.SIDE_MODULE and 'GLOBAL_BASE' in user_settings:
     exit_with_error('GLOBAL_BASE is not compatible with SIDE_MODULE')
-
-  if options.use_preload_plugins or len(options.preload_files) or len(options.embed_files):
-    if settings.NODERAWFS:
-      exit_with_error('--preload-file and --embed-file cannot be used with NODERAWFS which disables virtual filesystem')
-    # if we include any files, or intend to use preload plugins, then we definitely need filesystem support
-    settings.FORCE_FILESYSTEM = 1
 
   if settings.PROXY_TO_WORKER or options.use_preload_plugins:
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$Browser']
@@ -2473,6 +2500,9 @@ def phase_linker_setup(options, state, newargs):
     exit_with_error(f'INITIAL_MEMORY must be larger than STACK_SIZE, was {settings.INITIAL_MEMORY} (STACK_SIZE={settings.STACK_SIZE})')
   if settings.MEMORY_GROWTH_LINEAR_STEP != -1:
     check_memory_setting('MEMORY_GROWTH_LINEAR_STEP')
+
+  if settings.ALLOW_MEMORY_GROWTH and settings.MAXIMUM_MEMORY < settings.INITIAL_MEMORY:
+    exit_with_error('MAXIMUM_MEMORY must be larger then INITIAL_MEMORY')
 
   if 'MAXIMUM_MEMORY' in user_settings and not settings.ALLOW_MEMORY_GROWTH:
     diagnostics.warning('unused-command-line-argument', 'MAXIMUM_MEMORY is only meaningful with ALLOW_MEMORY_GROWTH')
@@ -2716,6 +2746,10 @@ def phase_linker_setup(options, state, newargs):
       # by SAFE_HEAP as a null pointer dereference.
       exit_with_error('ASan does not work with SAFE_HEAP')
 
+  if settings.USE_ASAN or settings.SAFE_HEAP:
+    # ASan and SAFE_HEAP check address 0 themselves
+    settings.CHECK_NULL_WRITES = 0
+
   if sanitize and settings.GENERATE_SOURCE_MAP:
     settings.LOAD_SOURCE_MAP = 1
 
@@ -2792,7 +2826,7 @@ def phase_linker_setup(options, state, newargs):
     settings.ASYNCIFY_IMPORTS = [get_full_import_name(i) for i in settings.ASYNCIFY_IMPORTS]
 
     if settings.ASYNCIFY == 2:
-      diagnostics.warning('experimental', 'ASYNCIFY with stack switching is experimental')
+      diagnostics.warning('experimental', '-sASYNCIFY=2 (JSPI) is still experimental')
 
   if settings.WASM2JS:
     if settings.GENERATE_SOURCE_MAP:
@@ -3201,9 +3235,6 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
       minified_worker = building.acorn_optimizer(worklet_output, ['minifyWhitespace'], return_output=True)
       open(worklet_output, 'w').write(minified_worker)
 
-  # track files that will need native eols
-  generated_text_files_with_native_eols = []
-
   if settings.MODULARIZE:
     modularize()
 
@@ -3250,9 +3281,6 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
   # The JS is now final. Move it to its final location
   move_file(final_js, js_target)
 
-  if not settings.SINGLE_FILE:
-    generated_text_files_with_native_eols += [js_target]
-
   target_basename = unsuffixed_basename(target)
 
   # If we were asked to also generate HTML, do that
@@ -3269,8 +3297,8 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
     diagnostics.warning('experimental', 'The SPLIT_MODULE setting is experimental and subject to change')
     do_split_module(wasm_target, options)
 
-  for f in generated_text_files_with_native_eols:
-    tools.line_endings.convert_line_endings_in_file(f, os.linesep, options.output_eol)
+  if not settings.SINGLE_FILE:
+    tools.line_endings.convert_line_endings_in_file(js_target, os.linesep, options.output_eol)
 
   if options.executable:
     make_js_executable(js_target)
@@ -3492,7 +3520,7 @@ def parse_args(newargs):
       logger.error('jcache is no longer supported')
     elif check_arg('--cache'):
       config.CACHE = os.path.normpath(consume_arg())
-      cache.setup(config.CACHE)
+      cache.setup()
       # Ensure child processes share the same cache (e.g. when using emcc to compiler system
       # libraries)
       os.environ['EM_CACHE'] = config.CACHE
@@ -4183,8 +4211,8 @@ def process_libraries(state, linker_inputs):
     # let wasm-ld handle that.  However, we do want to map to the correct variant.
     # For example we map `-lc` to `-lc-mt` if we are building with threading support.
     if 'lib' + lib in system_libs_map:
-      lib = system_libs_map['lib' + lib]
-      new_flags.append((i, '-l' + strip_prefix(lib.get_base_name(), 'lib')))
+      lib = system_libs_map['lib' + lib].get_link_flag()
+      new_flags.append((i, lib))
       continue
 
     if building.map_and_apply_to_settings(lib):

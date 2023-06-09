@@ -101,7 +101,7 @@ commands:
     description: "install canary version of node"
     steps:
       - install-node-version:
-         node_version: "20.0.0-v8-canary202302081604228b65"
+         node_version: "20.0.0-v8-canary2023041819be670741"
          canary: true
   install-v8:
     description: "install v8 using jsvu"
@@ -230,7 +230,7 @@ commands:
           name: run tests (<< parameters.title >>)
           command: |
             ./test/runner << parameters.test_targets >>
-            $EMSDK_PYTHON ./tools/check_clean.py
+            $EMSDK_PYTHON ./test/check_clean.py
   freeze-cache:
     description: "Freeze emscripten cache"
     steps:
@@ -467,8 +467,9 @@ jobs:
             asan.test_dyncall_specific_minimal_runtime
             asan.test_async_hello
             asan.test_dlfcn_basic
-            asan.test_async_hello_stack_switching
+            asan.test_async_hello_jspi
             asan.test_cubescript
+            asan.test_wasm_worker_hello
             lsan.test_stdio_locking
             lsan.test_dlfcn_basic
             lsan.test_pthread_create"
@@ -500,20 +501,24 @@ jobs:
             core2ss.test_pthread_thread_local_storage
             core2s.test_dylink_syslibs_missing_assertions
             wasm2js3.test_memorygrowth_2
-            other.test_unistd_fstatfs_wasmfs
             wasmfs.test_hello_world
             wasmfs.test_hello_world_standalone
             wasmfs.test_unistd_links*
             wasmfs.test_atexit_standalone
             wasmfs.test_emscripten_get_now
             wasmfs.test_dyncall_specific_minimal_runtime
+            wasmfs.test_fcntl_misc
+            wasmfs.test_readdir_rawfs
             wasmfs.test_utime
             wasmfs.test_unistd_unlink
             wasmfs.test_unistd_access
             wasmfs.test_unistd_close
             wasmfs.test_unistd_truncate
             wasmfs.test_readdir
+            wasmfs.test_readdir_unlink
             wasmfs.test_unistd_pipe
+            wasmfs.test_fs_write
+            wasmfs.test_webidl
             wasmfs.test_dlfcn_self
             wasmfs.test_dlfcn_unique_sig
             wasmfs.test_dylink_basics
@@ -523,8 +528,11 @@ jobs:
             wasmfs.test_getcwd_with_non_ascii_name
             wasmfs.test_stat
             wasmfs.test_fstatat
+            wasmfs.test_futimens
             wasmfs.test_unistd_links_memfs
-            wasmfs.test_fcntl_open"
+            wasmfs.test_fcntl_open
+            wasmfs.test_fs_js_api
+            wasmfs.test_freetype"
   test-wasm2js1:
     executor: bionic
     steps:
@@ -542,11 +550,13 @@ jobs:
       - install-v8
       - run-tests:
           title: "wasm64l"
-          test_targets: "wasm64l"
+          # On older versions of node wasm64l.test_bigswitch uses a lot (~3.5Gb)
+          # of memory, so skip it here, but run it below under node-canary.
+          test_targets: "wasm64l skip:wasm64l.test_bigswitch"
       - install-node-canary
       - run-tests:
           title: "wasm64"
-          test_targets: "wasm64"
+          test_targets: "wasm64 wasm64l.test_bigswitch"
       - upload-test-results
   test-node-compat:
     # We don't use `bionic` here since its tool old to run recent node versions:

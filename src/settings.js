@@ -50,12 +50,6 @@
 // [link]
 var ASSERTIONS = 1;
 
-// Whether extra logging should be enabled.
-// This logging isn't quite assertion-quality in that it isn't necessarily a
-// symptom that something is wrong.
-// [link]
-var RUNTIME_LOGGING = false;
-
 // Chooses what kind of stack smash checks to emit to generated code:
 // Building with ASSERTIONS=1 causes STACK_OVERFLOW_CHECK default to 1.
 // Since ASSERTIONS=1 is the default at -O0, which itself is the default
@@ -68,6 +62,13 @@ var RUNTIME_LOGGING = false;
 //    stack pointer assignments. Has a small performance cost.
 // [link]
 var STACK_OVERFLOW_CHECK = 0;
+
+// When STACK_OVERFLOW_CHECK is enabled we also check writes to address zero.
+// This can help detect NULL pointer usage.  If you want to skip this extra
+// check (for example, if you want reads from the address zero to always return
+// zero) you can disabled this here.  This setting has no effect when
+// STACK_OVERFLOW_CHECK is disabled.
+var CHECK_NULL_WRITES = true;
 
 // When set to 1, will generate more verbose output during compilation.
 // [general]
@@ -344,7 +345,7 @@ var SOCKET_DEBUG = false;
 
 // Log dynamic linker information
 // [link]
-var DYLINK_DEBUG = false;
+var DYLINK_DEBUG = 0;
 
 // Register file system callbacks using trackingDelegate in library_fs.js
 // [link]
@@ -2135,4 +2136,5 @@ var LEGACY_SETTINGS = [
   ['USE_PTHREADS', [0, 1], 'No longer needed. Use -pthread instead'],
   ['USES_DYNAMIC_ALLOC', [1], 'No longer supported. Use -sMALLOC=none'],
   ['REVERSE_DEPS', ['auto', 'all', 'none'], 'No longer needed'],
+  ['RUNTIME_LOGGING', 'RUNTIME_DEBUG'],
 ];

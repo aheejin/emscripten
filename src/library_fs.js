@@ -373,19 +373,26 @@ FS.staticInit();` +
     // streams
     //
     MAX_OPEN_FDS: 4096,
-    nextfd: (fd_start = 0, fd_end = FS.MAX_OPEN_FDS) => {
-      for (var fd = fd_start; fd <= fd_end; fd++) {
+    nextfd: () => {
+      for (var fd = 0; fd <= FS.MAX_OPEN_FDS; fd++) {
         if (!FS.streams[fd]) {
           return fd;
         }
       }
       throw new FS.ErrnoError({{{ cDefs.EMFILE }}});
     },
+    getStreamChecked: (fd) => {
+      var stream = FS.getStream(fd);
+      if (!stream) {
+        throw new FS.ErrnoError({{{ cDefs.EBADF }}});
+      }
+      return stream;
+    },
     getStream: (fd) => FS.streams[fd],
     // TODO parameterize this function such that a stream
     // object isn't directly passed in. not possible until
     // SOCKFS is completed.
-    createStream: (stream, fd_start, fd_end) => {
+    createStream: (stream, fd = -1) => {
       if (!FS.FSStream) {
         FS.FSStream = /** @constructor */ function() {
           this.shared = { };
@@ -426,7 +433,9 @@ FS.staticInit();` +
       }
       // clone it, so we can return an instance of FSStream
       stream = Object.assign(new FS.FSStream(), stream);
-      var fd = FS.nextfd(fd_start, fd_end);
+      if (fd == -1) {
+        fd = FS.nextfd();
+      }
       stream.fd = fd;
       FS.streams[fd] = stream;
       return stream;
@@ -909,10 +918,7 @@ FS.staticInit();` +
       FS.chmod(path, mode, true);
     },
     fchmod: (fd, mode) => {
-      var stream = FS.getStream(fd);
-      if (!stream) {
-        throw new FS.ErrnoError({{{ cDefs.EBADF }}});
-      }
+      var stream = FS.getStreamChecked(fd);
       FS.chmod(stream.node, mode);
     },
     chown: (path, uid, gid, dontFollow) => {
@@ -935,10 +941,7 @@ FS.staticInit();` +
       FS.chown(path, uid, gid, true);
     },
     fchown: (fd, uid, gid) => {
-      var stream = FS.getStream(fd);
-      if (!stream) {
-        throw new FS.ErrnoError({{{ cDefs.EBADF }}});
-      }
+      var stream = FS.getStreamChecked(fd);
       FS.chown(stream.node, uid, gid);
     },
     truncate: (path, len) => {
@@ -971,10 +974,7 @@ FS.staticInit();` +
       });
     },
     ftruncate: (fd, len) => {
-      var stream = FS.getStream(fd);
-      if (!stream) {
-        throw new FS.ErrnoError({{{ cDefs.EBADF }}});
-      }
+      var stream = FS.getStreamChecked(fd);
       if ((stream.flags & {{{ cDefs.O_ACCMODE }}}) === {{{ cDefs.O_RDONLY}}}) {
         throw new FS.ErrnoError({{{ cDefs.EINVAL }}});
       }
@@ -1077,7 +1077,7 @@ FS.staticInit();` +
         if (!(path in FS.readFiles)) {
           FS.readFiles[path] = 1;
 #if FS_DEBUG
-          dbg("FS.trackingDelegate error on read file: " + path);
+          dbg(`FS.trackingDelegate error on read file: ${path}`);
 #endif
         }
       }
@@ -1359,8 +1359,7 @@ FS.staticInit();` +
           node.node_ops = {
             lookup: (parent, name) => {
               var fd = +name;
-              var stream = FS.getStream(fd);
-              if (!stream) throw new FS.ErrnoError({{{ cDefs.EBADF }}});
+              var stream = FS.getStreamChecked(fd);
               var ret = {
                 parent: null,
                 mount: { mountpoint: 'fake' },
@@ -1871,7 +1870,3 @@ FS.staticInit();` +
 #endif
   },
 });
-
-if (FORCE_FILESYSTEM) {
-  DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.push('$FS');
-}

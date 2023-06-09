@@ -46,11 +46,9 @@ global.LibraryManager = {
       'library_math.js',
       'library_path.js',
       'library_strings.js',
-      'library_syscall.js',
       'library_html5.js',
       'library_stack_trace.js',
       'library_wasi.js',
-      'library_dylink.js',
       'library_makeDynCall.js',
       'library_eventloop.js',
       'library_promise.js',
@@ -75,6 +73,14 @@ global.LibraryManager = {
 
     if (AUTODEBUG) {
       libraries.push('library_autodebug.js');
+    }
+
+    if (!WASMFS) {
+      libraries.push('library_syscall.js');
+    }
+
+    if (RELOCATABLE) {
+      libraries.push('library_dylink.js');
     }
 
     if (FILESYSTEM) {
