@@ -8141,7 +8141,7 @@ void* operator new(size_t size) {
     self.do_run_in_out_file_test('core/test_setlocale.c')
 
   def test_vswprintf_utf8(self):
-    self.do_run_in_out_file_test('vswprintf_utf8.c')
+    self.do_core_test('test_vswprintf_utf8.c')
 
   # Test that a main with arguments is automatically asyncified.
   @no_wasm64('TODO: asyncify for wasm64')
@@ -9723,6 +9723,16 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('MIN_FIREFOX_VERSION', '79')
     self.set_setting('MIN_CHROME_VERSION', '85')
     self.do_core_test('test_promise.c')
+
+  @no_wasm64('TODO: asyncify for wasm64')
+  @with_asyncify_and_jspi
+  def test_promise_await(self):
+    self.do_core_test('test_promise_await.c')
+
+  def test_promise_await_error(self):
+    # Check that the API is not available when ASYNCIFY is not set
+    self.do_runf(test_file('core/test_promise_await.c'), 'Aborted(emscripten_promise_await is only available with ASYNCIFY)',
+                 assert_returncode=NON_ZERO)
 
   def test_emscripten_async_load_script(self):
     create_file('script1.js', 'Module._set(456);''')
