@@ -794,6 +794,7 @@ If manually bisecting:
       '-lSDL', '-lGL',
     ])
 
+  @also_with_wasmfs
   def test_sdl_image_prepare(self):
     # load an image file, get pixel data.
     shutil.copyfile(test_file('screenshot.jpg'), 'screenshot.not')
@@ -1884,6 +1885,7 @@ keydown(100);keyup(100); // trigger the end
   def test_emscripten_api(self):
     self.btest_exit('emscripten_api_browser.c', args=['-sEXPORTED_FUNCTIONS=_main,_third', '-lSDL'])
 
+  @also_with_wasmfs
   def test_emscripten_async_load_script(self):
     def setup():
       create_file('script1.js', '''
@@ -2548,6 +2550,7 @@ void *getBindBuffer() {
     stderr = self.expect_fail([EMCC, 'hello.o', '-o', 'a.js', '-g', '--closure=1', '-pthread', '-sBUILD_AS_WORKER'])
     self.assertContained("pthreads + BUILD_AS_WORKER require separate modes that don't work together, see https://github.com/emscripten-core/emscripten/issues/8854", stderr)
 
+  @also_with_wasmfs
   def test_emscripten_async_wget2(self):
     self.btest_exit('test_emscripten_async_wget2.cpp')
 
@@ -5109,8 +5112,15 @@ Module["preRun"].push(function () {
   def test_embind_with_pthreads(self):
     self.btest_exit(test_file('embind/test_pthreads.cpp'), args=['-lembind', '-pthread', '-sPTHREAD_POOL_SIZE=2'])
 
-  def test_embind_with_asyncify(self):
-    self.btest('embind_with_asyncify.cpp', '1', args=['-lembind', '-sASYNCIFY'])
+  @parameterized({
+    'asyncify': (['-sASYNCIFY=1'],),
+    'jspi': (['-sASYNCIFY=2', '-Wno-experimental'],),
+  })
+  def test_embind(self, args):
+    if is_jspi(args) and not is_chrome():
+      self.skipTest(f'Current browser ({EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
+
+    self.btest('embind_with_asyncify.cpp', '1', args=['-lembind'] + args)
 
   # Test emscripten_console_log(), emscripten_console_warn() and emscripten_console_error()
   def test_emscripten_console_log(self):
@@ -5503,7 +5513,7 @@ Module["preRun"].push(function () {
     self.do_run_in_out_file_test('browser', 'test_2GB_fail.cpp')
 
   @no_firefox('no 4GB support yet')
-  @also_with_wasm64
+  # @also_with_wasm64 Blocked on https://bugs.chromium.org/p/v8/issues/detail?id=4153
   @requires_v8
   def test_zzz_zzz_4gb_fail(self):
     # TODO Convert to an actual browser test when it reaches stable.

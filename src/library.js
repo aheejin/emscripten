@@ -2332,23 +2332,18 @@ mergeInto(LibraryManager.library, {
     // Pthreads need their clocks synchronized to the execution of the main
     // thread, so, when using them, make sure to adjust all timings to the
     // respective time origins.
-    _emscripten_get_now = () => performance.timeOrigin + performance.now();
+    _emscripten_get_now = () => performance.timeOrigin + {{{ getPerformanceNow() }}}();
 #else
-#if ENVIRONMENT_MAY_BE_SHELL
-    if (typeof dateNow != 'undefined') {
-      _emscripten_get_now = dateNow;
-    } else
-#endif
 #if MIN_IE_VERSION <= 9 || MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 || AUDIO_WORKLET // https://caniuse.com/#feat=high-resolution-time
     // AudioWorkletGlobalScope does not have performance.now()
     // (https://github.com/WebAudio/web-audio-api/issues/2527), so if building
     // with
     // Audio Worklets enabled, do a dynamic check for its presence.
-    if (typeof performance != 'undefined' && performance.now) {
+    if (typeof performance != 'undefined' && {{{ getPerformanceNow() }}}) {
 #if PTHREADS
-      _emscripten_get_now = () => performance.timeOrigin + performance.now();
+      _emscripten_get_now = () => performance.timeOrigin + {{{ getPerformanceNow() }}}();
 #else
-      _emscripten_get_now = () => performance.now();
+      _emscripten_get_now = () => {{{ getPerformanceNow() }}}();
 #endif
     } else {
       _emscripten_get_now = Date.now;
@@ -2357,7 +2352,7 @@ mergeInto(LibraryManager.library, {
     // Modern environment where performance.now() is supported:
     // N.B. a shorter form "_emscripten_get_now = performance.now;" is
     // unfortunately not allowed even in current browsers (e.g. FF Nightly 75).
-    _emscripten_get_now = () => performance.now();
+    _emscripten_get_now = () => {{{ getPerformanceNow() }}}();
 #endif
 #endif
 `,
@@ -2366,11 +2361,6 @@ mergeInto(LibraryManager.library, {
 #if ENVIRONMENT_MAY_BE_NODE
     if (ENVIRONMENT_IS_NODE) {
       return 1; // nanoseconds
-    }
-#endif
-#if ENVIRONMENT_MAY_BE_SHELL
-    if (typeof dateNow != 'undefined') {
-      return 1000; // microseconds (1/1000 of a millisecond)
     }
 #endif
 #if MIN_IE_VERSION <= 9 || MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 // https://caniuse.com/#feat=high-resolution-time
@@ -2392,9 +2382,6 @@ mergeInto(LibraryManager.library, {
      ((typeof performance == 'object' && performance && typeof performance['now'] == 'function')
 #if ENVIRONMENT_MAY_BE_NODE
       || ENVIRONMENT_IS_NODE
-#endif
-#if ENVIRONMENT_MAY_BE_SHELL
-      || (typeof dateNow != 'undefined')
 #endif
     );`,
 #else

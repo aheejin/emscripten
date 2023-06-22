@@ -2318,15 +2318,18 @@ def phase_linker_setup(options, state, newargs):
     if settings.ASSERTIONS:
       # used in assertion checks for unflushed content
       settings.REQUIRED_EXPORTS += ['wasmfs_flush']
-    if settings.FORCE_FILESYSTEM:
+    if settings.FORCE_FILESYSTEM or settings.INCLUDE_FULL_LIBRARY:
       # Add exports for the JS API. Like the old JS FS, WasmFS by default
       # includes just what JS parts it actually needs, and FORCE_FILESYSTEM is
       # required to force all of it to be included if the user wants to use the
-      # JS API directly.
+      # JS API directly. (INCLUDE_FULL_LIBRARY also causes this code to be
+      # included, as the entire JS library can refer to things that require
+      # these exports.)
       settings.REQUIRED_EXPORTS += [
         '_wasmfs_read_file',
         '_wasmfs_write_file',
         '_wasmfs_open',
+        '_wasmfs_allocate',
         '_wasmfs_close',
         '_wasmfs_write',
         '_wasmfs_pwrite',
@@ -2346,8 +2349,10 @@ def phase_linker_setup(options, state, newargs):
         '_wasmfs_chmod',
         '_wasmfs_fchmod',
         '_wasmfs_lchmod',
+        '_wasmfs_utime',
         '_wasmfs_llseek',
         '_wasmfs_identify',
+        '_wasmfs_readlink',
         '_wasmfs_readdir_start',
         '_wasmfs_readdir_get',
         '_wasmfs_readdir_finish',
@@ -3745,9 +3750,6 @@ def phase_binaryen(target, options, wasm_target):
     with ToolchainProfiler.profile_block('asyncify_lazy_load_code'):
       building.asyncify_lazy_load_code(wasm_target, debug=intermediate_debug_info)
 
-  def preprocess_wasm2js_script():
-    return read_and_preprocess(utils.path_from_root('src/wasm2js.js'), expand_macros=True)
-
   if final_js and (options.use_closure_compiler or settings.TRANSPILE_TO_ES5):
     if options.use_closure_compiler:
       with ToolchainProfiler.profile_block('closure_compile'):
@@ -3765,8 +3767,11 @@ def phase_binaryen(target, options, wasm_target):
   if settings.WASM2JS:
     symbols_file_js = None
     if settings.WASM == 2:
+      # With normal wasm2js mode this file gets included as part of the
+      # preamble, but with WASM=2 its a separate file.
+      wasm2js_polyfill = read_and_preprocess(utils.path_from_root('src/wasm2js.js'), expand_macros=True)
       wasm2js_template = wasm_target + '.js'
-      write_file(wasm2js_template, preprocess_wasm2js_script())
+      write_file(wasm2js_template, wasm2js_polyfill)
       # generate secondary file for JS symbols
       if options.emit_symbol_map:
         symbols_file_js = shared.replace_or_append_suffix(wasm2js_template, '.symbols')

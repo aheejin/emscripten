@@ -129,6 +129,10 @@ int _wasmfs_open(char* path, int flags, mode_t mode) {
   return __syscall_openat(AT_FDCWD, (intptr_t)path, flags, mode);
 }
 
+int _wasmfs_allocate(int fd, off_t offset, off_t len) {
+  return __syscall_fallocate(fd, 0, offset, len);
+}
+
 int _wasmfs_mknod(char* path, mode_t mode, dev_t dev) {
   return __syscall_mknodat(AT_FDCWD, (intptr_t)path, mode, dev);
 }
@@ -141,6 +145,16 @@ int _wasmfs_chdir(char* path) { return __syscall_chdir((intptr_t)path); }
 
 int _wasmfs_symlink(char* old_path, char* new_path) {
   return __syscall_symlink((intptr_t)old_path, (intptr_t)new_path);
+}
+
+intptr_t _wasmfs_readlink(char* path) {
+  static thread_local void* readBuf = nullptr;
+  readBuf = realloc(readBuf, PATH_MAX);
+  int err = __syscall_readlinkat(AT_FDCWD, (intptr_t)path, (intptr_t)readBuf, PATH_MAX);
+  if (err < 0) {
+    return err;
+  }
+  return (intptr_t)readBuf;
 }
 
 int _wasmfs_write(int fd, void *buf, size_t count) {
@@ -231,6 +245,16 @@ int _wasmfs_ftruncate(int fd, off_t length) {
 int _wasmfs_close(int fd) {
   return __wasi_fd_close(fd);
 }
+
+int _wasmfs_utime(char *path, long atime_ms, long mtime_ms) {
+  struct timespec times[2];
+  times[0].tv_sec = atime_ms / 1000;
+  times[0].tv_nsec = (atime_ms % 1000) * 1000000;
+  times[1].tv_sec = mtime_ms / 1000;
+  times[1].tv_nsec = (mtime_ms % 1000) * 1000000;
+
+  return __syscall_utimensat(AT_FDCWD, (intptr_t)path, (intptr_t)times, 0);
+};
 
 int _wasmfs_stat(char* path, struct stat* statBuf) {
   return __syscall_stat64((intptr_t)path, (intptr_t)statBuf);
