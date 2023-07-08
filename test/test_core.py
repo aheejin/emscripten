@@ -6637,8 +6637,9 @@ void* operator new(size_t size) {
 
   @no_lsan('Test code contains memory leaks')
   @parameterized({
-      '': (False,),
-      '_asyncify': (True,)
+      '': (0,),
+      'asyncify': (1,),
+      'jspi': (2,),
   })
   def test_cubescript(self, asyncify):
     # uses register keyword
@@ -6652,7 +6653,10 @@ void* operator new(size_t size) {
     if asyncify:
       if self.is_wasm64():
         self.skipTest('TODO: asyncify for wasm64')
-      self.set_setting('ASYNCIFY')
+      self.set_setting('ASYNCIFY', asyncify)
+    if asyncify == 2:
+      self.require_jspi()
+      self.emcc_args += ['-Wno-experimental']
 
     src = test_file('third_party/cubescript/command.cpp')
     self.do_runf(src, '*\nTemp is 33\n9\n5\nhello, everyone\n*')
@@ -8239,12 +8243,18 @@ Module.onRuntimeInitialized = () => {
     self.do_runf('main.c', 'HelloWorld')
 
   @parameterized({
-    '': (False,),
-    'exit_runtime': (True,),
+    'asyncify': (False, 1),
+    'exit_runtime_asyncify': (True, 1),
+    'jspi': (False, 2),
+    'exit_runtime_jspi': (True, 2),
   })
   @no_wasm64('TODO: asyncify for wasm64')
-  def test_async_ccall_promise(self, exit_runtime):
-    self.set_setting('ASYNCIFY')
+  def test_async_ccall_promise(self, exit_runtime, asyncify):
+    if asyncify == 2:
+      self.require_jspi()
+      self.emcc_args += ['-Wno-experimental']
+      self.set_setting('ASYNCIFY_EXPORTS', ['stringf', 'floatf'])
+    self.set_setting('ASYNCIFY', asyncify)
     self.set_setting('EXIT_RUNTIME')
     self.set_setting('ASSERTIONS')
     self.set_setting('INVOKE_RUN', 0)
