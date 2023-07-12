@@ -190,11 +190,6 @@ def with_asyncify_and_jspi(f):
     if jspi:
       self.set_setting('ASYNCIFY', 2)
       self.require_jspi()
-      if not self.is_wasm():
-        self.skipTest('wasm2js does not support WebAssembly.Suspender yet')
-      # emcc warns about stack switching being experimental, and we build with
-      # warnings-as-errors, so disable that warning
-      self.emcc_args += ['-Wno-experimental']
       f(self)
     else:
       self.set_setting('ASYNCIFY')
@@ -1598,6 +1593,7 @@ int main(int argc, char **argv) {
                   // Emscripten EH sets the refcount to 0 when throwing, and
                   // increase it in __cxa_begin_catch, and decrease it in
                   // __cxa_end_catch. Fix this inconsistency later.
+                  // https://github.com/emscripten-core/emscripten/issues/17115
                   incrementExceptionRefcount(p);
 #endif
                   console.log(getExceptionMessage(p).toString());
@@ -8034,7 +8030,7 @@ void* operator new(size_t size) {
     self.set_setting('DEMANGLE_SUPPORT')
     if '-g' not in self.emcc_args:
       self.emcc_args.append('-g')
-    self.emcc_args += ['-DRUN_FROM_JS_SHELL']
+    self.emcc_args += ['-DRUN_FROM_JS_SHELL', '-Wno-deprecated-pragma']
     self.do_run_in_out_file_test('emscripten_log/emscripten_log.cpp', interleaved_output=False)
     # test closure compiler as well
     if self.maybe_closure():
@@ -8252,7 +8248,6 @@ Module.onRuntimeInitialized = () => {
   def test_async_ccall_promise(self, exit_runtime, asyncify):
     if asyncify == 2:
       self.require_jspi()
-      self.emcc_args += ['-Wno-experimental']
       self.set_setting('ASYNCIFY_EXPORTS', ['stringf', 'floatf'])
     self.set_setting('ASYNCIFY', asyncify)
     self.set_setting('EXIT_RUNTIME')
@@ -8430,11 +8425,9 @@ Module.onRuntimeInitialized = () => {
     # TODO Test with ASYNCIFY=1 https://github.com/emscripten-core/emscripten/issues/17552
     self.require_jspi()
     self.do_runf(test_file('core/test_pthread_join_and_asyncify.c'), 'joining thread!\njoined thread!',
-                 emcc_args=['-sASYNCIFY=2',
-                            '-sASYNCIFY_EXPORTS=run_thread',
+                 emcc_args=['-sASYNCIFY_EXPORTS=run_thread',
                             '-sEXIT_RUNTIME=1',
-                            '-pthread', '-sPROXY_TO_PTHREAD',
-                            '-Wno-experimental'])
+                            '-pthread', '-sPROXY_TO_PTHREAD'])
 
   @no_asan('asyncify stack operations confuse asan')
   @no_wasm64('TODO: asyncify for wasm64')
