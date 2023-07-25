@@ -8628,6 +8628,10 @@ int main() {
         else:
           self.expect_fail(separate_dwarf_cmd)
 
+  @requires_v8
+  def test_single_file_shell(self):
+    self.do_runf(test_file('hello_world.c'), emcc_args=['-sSINGLE_FILE'])
+
   def test_emar_M(self):
     create_file('file1', ' ')
     create_file('file2', ' ')
@@ -12023,7 +12027,7 @@ exec "$@"
   # Tests that the filename suffix of the response files can be used to detect which encoding the file is.
   @crossplatform
   def test_response_file_encoding(self):
-    open('äö.c', 'w').write('int main(){}')
+    create_file('äö.c', 'int main(){}')
 
     open('a.rsp', 'w', encoding='utf-8').write('äö.c') # Write a response file with unicode contents ...
     self.run_process([EMCC, '@a.rsp']) # ... and test that in the absence of a file suffix, it is autodetected to utf-8.
