@@ -143,10 +143,6 @@ def err(*args):
   print(*args, file=sys.stderr)
 
 
-def to_unix_path(p):
-  return p.replace(os.path.sep, '/')
-
-
 def base64_encode(b):
   b64 = base64.b64encode(b)
   return b64.decode('ascii')
@@ -282,7 +278,7 @@ def generate_object_file(data_files):
 
       size = os.path.getsize(f.srcpath)
       dstpath = to_asm_string(f.dstpath)
-      srcpath = to_unix_path(f.srcpath)
+      srcpath = utils.normalize_path(f.srcpath)
       out.write(dedent(f'''
       .section .rodata.{f.c_symbol_name},"",@
 
@@ -515,7 +511,7 @@ def main():
 
   for file_ in data_files:
     # name in the filesystem, native and emulated
-    file_.dstpath = to_unix_path(file_.dstpath)
+    file_.dstpath = utils.normalize_path(file_.dstpath)
     # If user has submitted a directory name as the destination but omitted
     # the destination filename, use the filename from source file
     if file_.dstpath.endswith('/'):
@@ -594,6 +590,7 @@ def escape_for_makefile(fpath):
   # Escapes for CMake's "pathname" grammar as described here:
   #   https://cmake.org/cmake/help/latest/command/add_custom_command.html#grammar-token-depfile-pathname
   # Which is congruent with how Ninja and GNU Make expect characters escaped.
+  fpath = utils.normalize_path(fpath)
   return fpath.replace('$', '$$').replace('#', '\\#').replace(' ', '\\ ')
 
 
