@@ -34,6 +34,8 @@ from .shared import get_emscripten_temp_dir, exe_suffix, is_c_symbol
 from .utils import WINDOWS
 from .settings import settings
 
+from . import mylog
+
 logger = logging.getLogger('building')
 
 #  Building
@@ -332,6 +334,7 @@ def acorn_optimizer(filename, passes, extra_info=None, return_output=False):
   if extra_info is not None:
     temp_files = shared.get_temp_files()
     temp = temp_files.get('.js', prefix='emcc_acorn_info_').name
+    mylog.log_copy(filename, temp)
     shutil.copyfile(filename, temp)
     with open(temp, 'a') as f:
       f.write('// EXTRA_INFO: ' + extra_info)
@@ -590,6 +593,7 @@ def run_closure_cmd(cmd, filename, env, pretty):
     if isascii(filename):
       return os.path.abspath(filename)
     safe_filename = tempfiles.get('.js').name  # Safe 7-bit filename
+    mylog.log_copy(filename, safe_filename)
     shutil.copyfile(filename, safe_filename)
     return os.path.relpath(safe_filename, tempfiles.tmpdir)
 
@@ -946,6 +950,7 @@ def emit_debug_on_side(wasm_file):
     # normalize the path to use URL-style separators, per the spec
     embedded_path = utils.normalize_path(embedded_path)
 
+  mylog.log_move(wasm_file, wasm_file_with_dwarf)
   shutil.move(wasm_file, wasm_file_with_dwarf)
   strip(wasm_file_with_dwarf, wasm_file, debug=True)
 
@@ -1264,6 +1269,7 @@ def save_intermediate(src, dst):
     save_intermediate.counter += 1
     dst = os.path.join(shared.CANONICAL_TEMP_DIR, dst)
     logger.debug('saving debug copy %s' % dst)
+    mylog.log_copy(src, dst)
     shutil.copyfile(src, dst)
 
 
