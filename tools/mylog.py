@@ -7,8 +7,7 @@ def log_cmd(cmd, cwd='', *args, **kwargs):
   sys.stderr.flush()
   if not mydebug:
     return
-  if not isinstance(cmd[0], str):
-    cmd = [str(item) for item in cmd]
+  cmd = [str(item) for item in cmd]
   print('CMD: ' + ' '.join(cmd))
   if cwd:
     print('  CWD: ' + cwd)
