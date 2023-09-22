@@ -101,9 +101,7 @@ UNSUPPORTED_LLD_FLAGS = {
     '-install_name': True,
 }
 
-DEFAULT_ASYNCIFY_IMPORTS = [
-  'wasi_snapshot_preview1.fd_sync', '__wasi_fd_sync', '__asyncjs__*'
-]
+DEFAULT_ASYNCIFY_IMPORTS = ['__asyncjs__*']
 
 DEFAULT_ASYNCIFY_EXPORTS = [
   'main',
@@ -1330,10 +1328,13 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       for sym in settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE:
         add_js_deps(sym)
+      for sym in js_info['extraLibraryFuncs']:
+        add_js_deps(sym)
       for sym in settings.EXPORTED_RUNTIME_METHODS:
         add_js_deps(shared.demangle_c_symbol_name(sym))
     if settings.ASYNCIFY:
-      settings.ASYNCIFY_IMPORTS += ['env.' + x for x in js_info['asyncFuncs']]
+      settings.ASYNCIFY_IMPORTS_EXCEPT_JS_LIBS = settings.ASYNCIFY_IMPORTS[:]
+      settings.ASYNCIFY_IMPORTS += ['*.' + x for x in js_info['asyncFuncs']]
 
   phase_calculate_system_libraries(state, linker_arguments, newargs)
 
@@ -1855,6 +1856,16 @@ def phase_linker_setup(options, state, newargs):
     # Ignore -sMODULARIZE which could otherwise effect how we run the module
     # to generate the bindings.
     settings.MODULARIZE = False
+    # Don't include any custom user JS or files.
+    options.pre_js = []
+    options.post_js = []
+    options.extern_pre_js = []
+    options.extern_post_js = []
+    options.use_preload_cache = False
+    options.preload_files = []
+    options.embed_files = []
+    # Force node since that is where the tool runs.
+    settings.ENVIRONMENT = 'node'
 
   # options.output_file is the user-specified one, target is what we will generate
   if options.output_file:
@@ -2973,6 +2984,15 @@ def phase_linker_setup(options, state, newargs):
 
   settings.MINIFY_WHITESPACE = settings.OPT_LEVEL >= 2 and settings.DEBUG_LEVEL == 0 and not options.no_minify
 
+  # Closure might be run if we run it ourselves, or if whitespace is not being
+  # minifed. In the latter case we keep both whitespace and comments, and the
+  # purpose of the comments might be closure compiler, so also perform all
+  # adjustments necessary to ensure that works (which amounts to a few more
+  # comments; adding some more of them is not an issue in such a build which
+  # includes all comments and whitespace anyhow).
+  if settings.USE_CLOSURE_COMPILER or not settings.MINIFY_WHITESPACE:
+    settings.MAYBE_CLOSURE_COMPILER = 1
+
   return target, wasm_target
 
 
@@ -3435,6 +3455,8 @@ def parse_args(newargs):
         settings.LTO = arg.split('=')[1]
       else:
         settings.LTO = 'full'
+    elif arg == "-fno-lto":
+      settings.LTO = 0
     elif check_arg('--llvm-lto'):
       logger.warning('--llvm-lto ignored when using llvm backend')
       consume_arg()
@@ -3927,7 +3949,7 @@ def modularize():
   if settings.MINIMAL_RUNTIME and not settings.PTHREADS:
     # Single threaded MINIMAL_RUNTIME programs do not need access to
     # document.currentScript, so a simple export declaration is enough.
-    src = 'var %s=%s' % (settings.EXPORT_NAME, src)
+    src = '/** @nocollapse */ var %s=%s' % (settings.EXPORT_NAME, src)
   else:
     script_url_node = ''
     # When MODULARIZE this JS may be executed later,

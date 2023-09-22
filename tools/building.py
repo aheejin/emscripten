@@ -40,7 +40,7 @@ logger = logging.getLogger('building')
 
 #  Building
 binaryen_checked = False
-EXPECTED_BINARYEN_VERSION = 114
+EXPECTED_BINARYEN_VERSION = 115
 
 _is_ar_cache: Dict[str, bool] = {}
 # the exports the user requested
@@ -340,9 +340,9 @@ def acorn_optimizer(filename, passes, extra_info=None, return_output=False):
       f.write('// EXTRA_INFO: ' + extra_info)
     filename = temp
   cmd = config.NODE_JS + [optimizer, filename] + passes
-  # Keep JS code comments intact through the acorn optimization pass so that JSDoc comments
-  # will be carried over to a later Closure run.
-  if settings.USE_CLOSURE_COMPILER or not settings.MINIFY_WHITESPACE:
+  # Keep JS code comments intact through the acorn optimization pass so that
+  # JSDoc comments will be carried over to a later Closure run.
+  if settings.MAYBE_CLOSURE_COMPILER:
     cmd += ['--closureFriendly']
   if settings.EXPORT_ES6:
     cmd += ['--exportES6']
@@ -685,7 +685,7 @@ def minify_wasm_js(js_file, wasm_file, expensive_optimizations, debug_info):
   if not settings.LINKABLE:
     passes.append('JSDCE' if not expensive_optimizations else 'AJSDCE')
   # Don't minify if we are going to run closure compiler afterwards
-  minify = settings.MINIFY_WHITESPACE and not settings.USE_CLOSURE_COMPILER
+  minify = settings.MINIFY_WHITESPACE and not settings.MAYBE_CLOSURE_COMPILER
   if minify:
     passes.append('minifyWhitespace')
   if passes:
