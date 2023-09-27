@@ -3903,6 +3903,23 @@ addToLibrary({
     ''')
     self.do_runf('src.c', 'main\ndone\n', emcc_args=['-sEXIT_RUNTIME', '-pthread', '-sPROXY_TO_PTHREAD', '--js-library', 'lib.js'])
 
+  def test_js_lib_method_syntax(self):
+    create_file('lib.js', r'''
+addToLibrary({
+  foo() {
+    out('foo');
+  },
+});
+''')
+    create_file('src.c', r'''
+    #include <stdio.h>
+    void foo();
+    int main() {
+      foo();
+    }
+    ''')
+    self.do_runf('src.c', 'foo', emcc_args=['--js-library', 'lib.js'])
+
   def test_js_lib_exported(self):
     create_file('lib.js', r'''
 addToLibrary({
@@ -13846,3 +13863,25 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     self.assertExists('glue.cpp')
     self.assertExists('glue.js')
     self.emcc('glue.cpp', ['-c', '-Wall', '-Werror'])
+
+  def test_noExitRuntime(self):
+    onexit_called = 'onExit called'
+    create_file('pre.js', f'Module.onExit = () => console.log("${onexit_called}");')
+    self.emcc_args += ['--pre-js=pre.js']
+    self.set_setting('EXIT_RUNTIME')
+
+    # Normally with EXIT_RUNTIME set we expect onExit to be called;
+    output = self.do_runf(test_file('hello_world.c'), 'hello, world')
+    self.assertContained(onexit_called, output)
+
+    # However, if we set `Module.noExitRuntime = true`, then we expect
+    # it not to be called.
+    create_file('noexit.js', 'Module.noExitRuntime = true;')
+    output = self.do_runf(test_file('hello_world.c'), 'hello, world', emcc_args=['--pre-js=noexit.js'])
+    self.assertNotContained(onexit_called, output)
+
+    # Setting the internal `noExitRuntime` after startup should have the
+    # same effect.
+    create_file('noexit_oninit.js', 'Module.preRun = () => { noExitRuntime = true; }')
+    output = self.do_runf(test_file('hello_world.c'), 'hello, world', emcc_args=['--pre-js=noexit_oninit.js'])
+    self.assertNotContained(onexit_called, output)
