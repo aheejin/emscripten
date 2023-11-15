@@ -589,7 +589,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
     self.clear()
     err = self.expect_fail(cmd + ['-o', 'out.o'])
 
-    self.assertContained('cannot specify -o with -c/-S/-E/-M and multiple source files', err)
+    self.assertContained('clang: error: cannot specify -o when generating multiple output files', err)
     self.assertNotExists('twopart_main.o')
     self.assertNotExists('twopart_side.o')
     self.assertNotExists(test_file('twopart_main.o'))
@@ -5280,10 +5280,11 @@ int main() {
     self.assertEqual(os.listdir('.'), [])
     self.assertContained('hello_world.c', stdout)
 
-  def test_emit_llvm(self):
+  def test_emit_llvm_asm(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-S', '-emit-llvm'])
     self.assertIsLLVMAsm('hello_world.ll')
 
+  def test_emit_llvm(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-c', '-emit-llvm'])
     self.assertTrue(building.is_bitcode('hello_world.bc'))
 
@@ -11414,7 +11415,7 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
   def test_linker_input_unused(self):
     self.run_process([EMXX, '-c', test_file('hello_world.cpp')])
     err = self.run_process([EMCC, 'hello_world.o', '-c', '-o', 'out.o'], stderr=PIPE).stderr
-    self.assertContained("warning: hello_world.o: linker input file unused because linking not done [-Wunused-command-line-argument", err)
+    self.assertContained("clang: warning: hello_world.o: 'linker' input unused [-Wunused-command-line-argument]", err)
     # In this case the compiler does not produce any output file.
     self.assertNotExists('out.o')
 
@@ -11720,29 +11721,16 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
     create_file('foo.h', '#include <string.h>')
     create_file('cxxfoo.h', '#include <string>')
 
-    # The default bahviour is to default to C++, which means the C++ header can be compiled even
-    # with emcc.
-    self.run_process([EMCC, '-c', 'cxxfoo.h'])
+    # Compiling a C++ header using `em++` works.
+    self.run_process([EMXX, '-c', 'cxxfoo.h'])
 
-    # But this means that C flags can't be passed (since we are assuming C++)
-    err = self.expect_fail([EMCC, '-std=gnu11', '-c', 'foo.h'])
-    self.assertContained("'-std=gnu11' not allowed with 'C++'", err)
-
-    # If we disable DEFAULT_TO_CXX the emcc can be used with C-only flags (e.g. -std=gnu11),
-    self.run_process([EMCC, '-std=gnu11', '-c', 'foo.h', '-sDEFAULT_TO_CXX=0'])
-
-    # But can't be used to build C++ headers
-    err = self.expect_fail([EMCC, '-c', 'cxxfoo.h', '-sDEFAULT_TO_CXX=0'])
-    self.assertContained("'string' file not found", err)
-
-    # Check that STRICT also disables DEFAULT_TO_CXX
+    # Compiling the same header using `emcc` fails, just like `clang`
     err = self.expect_fail([EMCC, '-c', 'cxxfoo.h', '-sSTRICT'])
     self.assertContained("'string' file not found", err)
 
-    # Using em++ should alwasy work for C++ headers
-    self.run_process([EMXX, '-c', 'cxxfoo.h', '-sDEFAULT_TO_CXX=0'])
-    # Or using emcc with `-x c++`
-    self.run_process([EMCC, '-c', 'cxxfoo.h', '-sDEFAULT_TO_CXX=0', '-x', 'c++-header'])
+    # But it works if we pass and explicit language mode.
+    self.run_process([EMCC, '-c', 'cxxfoo.h', '-x', 'c++-header'])
+    self.run_process([EMCC, '-c', 'cxxfoo.h', '-x', 'c++'])
 
   @parameterized({
     '': ([],),
@@ -14171,3 +14159,8 @@ addToLibrary({
     create_file('a.cpp', '#include <emscripten/bind.h>')
     create_file('b.cpp', '#include <emscripten/bind.h>')
     self.run_process([EMXX, '-std=c++23', '-lembind', 'a.cpp', 'b.cpp'])
+
+  def test_no_pthread(self):
+    self.do_runf('hello_world.c', emcc_args=['-pthread', '-no-pthread'])
+    self.assertExists('hello_world.js')
+    self.assertNotExists('hello_world.worker.js')

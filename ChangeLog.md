@@ -18,8 +18,19 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-3.1.49 (in development)
+3.1.50 (in development)
 -----------------------
+- When compiling, Emscripten will now invoke `clang` or `clang++` depending only
+  on whether `emcc` or `em++` was run.  Previously it would determine which to
+  run based on individual file extensions.  One side effect of this is that you
+  may now see a clang warning when building `.c` source files using `em++`:
+  `warning: treating 'c' input as 'c++' when in C++ mode`.  This also means that
+  the `DEFAULT_TO_CXX` setting now only applies when linking and not when
+  compiling. (#20712)
+
+3.1.49 - 11/14/23
+-----------------
+- Many MEMORY64 fixes for browser and graphics APIs (#20678)
 - The `glfwSetWindowSize` function no longer switches to fullscreen when the
   width/height provided as parameters match the screen size. This behavior
   now matches the behavior of SDL and glut. In order to switch to fullscreen,
