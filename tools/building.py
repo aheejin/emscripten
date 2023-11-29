@@ -208,6 +208,7 @@ def lld_flags_for_executable(external_symbols):
 
   if settings.RELOCATABLE:
     cmd.append('--experimental-pic')
+    cmd.append('--unresolved-symbols=import-dynamic')
     if settings.SIDE_MODULE:
       cmd.append('-shared')
     else:
