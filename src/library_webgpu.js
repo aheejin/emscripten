@@ -23,7 +23,7 @@
 
 {{{
   // Helper functions for code generation
-  global.gpu = {
+  globalThis.gpu = {
     makeInitManager: function(type) {
       var mgr = `WebGPU.mgr${type}`;
       return `${mgr} = ${mgr} || new Manager();`;
@@ -771,6 +771,7 @@ var LibraryWebGPU = {
     setLimitValueU32('maxComputeWorkgroupSizeY', {{{ C_STRUCTS.WGPULimits.maxComputeWorkgroupSizeY }}});
     setLimitValueU32('maxComputeWorkgroupSizeZ', {{{ C_STRUCTS.WGPULimits.maxComputeWorkgroupSizeZ }}});
     setLimitValueU32('maxComputeWorkgroupsPerDimension', {{{ C_STRUCTS.WGPULimits.maxComputeWorkgroupsPerDimension }}});
+    return 1;
   },
 
   wgpuDeviceGetQueue: (deviceId) => {
