@@ -66,7 +66,7 @@ OBJCXX_ENDINGS = ['.mm', '.mii']
 SPECIAL_ENDINGLESS_FILENAMES = [os.devnull]
 C_ENDINGS += SPECIAL_ENDINGLESS_FILENAMES # consider the special endingless filenames like /dev/null to be C
 
-SOURCE_ENDINGS = C_ENDINGS + CXX_ENDINGS + OBJC_ENDINGS + OBJCXX_ENDINGS + ['.ll', '.S']
+SOURCE_ENDINGS = C_ENDINGS + CXX_ENDINGS + OBJC_ENDINGS + OBJCXX_ENDINGS + ['.bc', '.ll', '.S']
 ASSEMBLY_ENDINGS = ['.s']
 HEADER_ENDINGS = ['.h', '.hxx', '.hpp', '.hh', '.H', '.HXX', '.HPP', '.HH']
 
@@ -432,7 +432,7 @@ def get_cflags(user_args, is_cxx):
 
   if array_contains_any_of(user_args, SIMD_INTEL_FEATURE_TOWER) or array_contains_any_of(user_args, SIMD_NEON_FLAGS):
     if '-msimd128' not in user_args and '-mrelaxed-simd' not in user_args:
-      exit_with_error('Passing any of ' + ', '.join(SIMD_INTEL_FEATURE_TOWER + SIMD_NEON_FLAGS) + ' flags also requires passing -msimd128 (or -mrelaxed-simd)!')
+      exit_with_error('passing any of ' + ', '.join(SIMD_INTEL_FEATURE_TOWER + SIMD_NEON_FLAGS) + ' flags also requires passing -msimd128 (or -mrelaxed-simd)!')
     cflags += ['-D__SSE__=1']
 
   if array_contains_any_of(user_args, SIMD_INTEL_FEATURE_TOWER[1:]):
@@ -566,6 +566,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         print(proc.stderr)
         exit_with_error('error getting cflags')
       lines = [x for x in proc.stderr.splitlines() if clang in x and input_file in x]
+      if not lines:
+        exit_with_error(f'unable to parse output of `{cmd}`:\n{proc.stderr}')
       parts = shlex.split(lines[0].replace('\\', '\\\\'))
       parts = [x for x in parts if x not in ['-c', '-o', '-v', '-emit-llvm'] and input_file not in x and temp_target not in x]
       print(shared.shlex_join(parts[1:]))
@@ -851,7 +853,7 @@ def phase_setup(options, state, newargs):
     # -fwasm-exceptions takes care of enabling them, so users aren't supposed to
     # pass them explicitly, regardless of their values
     if 'DISABLE_EXCEPTION_CATCHING' in user_settings or 'DISABLE_EXCEPTION_THROWING' in user_settings:
-      diagnostics.warning('emcc', 'You no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions')
+      diagnostics.warning('emcc', 'you no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions')
     settings.DISABLE_EXCEPTION_CATCHING = 1
     settings.DISABLE_EXCEPTION_THROWING = 1
 

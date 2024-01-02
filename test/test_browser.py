@@ -2794,7 +2794,7 @@ Module["preRun"] = () => {
   @requires_graphics_hardware
   @parameterized({
     'legacy_browser': (['-sMIN_CHROME_VERSION=0', '-Wno-transpile'],),
-    'closure': (['-O2', '-g1', '--closure=1', '-sWORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG'],),
+    'closure': (['-O2', '-g1', '--closure=1'],),
     'full_es2': (['-sFULL_ES2'],),
   })
   def test_webgl2(self, args):
@@ -4750,11 +4750,6 @@ Module["preRun"] = () => {
       cmd = args + ['-lGL', '-sOFFSCREEN_FRAMEBUFFER', '-DEXPLICIT_SWAP=1']
       self.btest_exit('webgl_offscreen_framebuffer_swap_with_bad_state.c', args=cmd)
 
-  # Tests that -sWORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG rendering works.
-  @requires_graphics_hardware
-  def test_webgl_workaround_webgl_uniform_upload_bug(self):
-    self.btest_exit('webgl_draw_triangle_with_uniform_color.c',  args=['-lGL', '-sWORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG'])
-
   # Tests that using an array of structs in GL uniforms works.
   @requires_graphics_hardware
   def test_webgl_array_of_structs_uniform(self):
@@ -5028,12 +5023,16 @@ Module["preRun"] = () => {
   # Tests the absolute minimum pthread-enabled application.
   @parameterized({
     '': ([],),
+    'modularize': (['-sMODULARIZE', '-sEXPORT_NAME=MyModule', '--shell-file',
+                    test_file('shell_that_launches_modularize.html')],),
+  })
+  @parameterized({
+    '': ([],),
     'O3': (['-O3'],)
   })
   @requires_threads
-  def test_pthread_hello_thread(self, opts):
-    for modularize in [[], ['-sMODULARIZE', '-sEXPORT_NAME=MyModule', '--shell-file', test_file('shell_that_launches_modularize.html')]]:
-      self.btest_exit('pthread/hello_thread.c', args=['-pthread'] + modularize + opts)
+  def test_pthread_hello_thread(self, opts, modularize):
+    self.btest_exit('pthread/hello_thread.c', args=['-pthread'] + modularize + opts)
 
   # Tests that a pthreads build of -sMINIMAL_RUNTIME works well in different build modes
   @parameterized({

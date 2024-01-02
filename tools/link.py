@@ -187,10 +187,10 @@ def setup_environment_settings():
       (settings.ENVIRONMENT_MAY_BE_NODE and settings.PTHREADS)
 
   if not settings.ENVIRONMENT_MAY_BE_WORKER and settings.PROXY_TO_WORKER:
-    exit_with_error('If you specify --proxy-to-worker and specify a "-sENVIRONMENT=" directive, it must include "worker" as a target! (Try e.g. -sENVIRONMENT=web,worker)')
+    exit_with_error('if you specify --proxy-to-worker and specify a "-sENVIRONMENT=" directive, it must include "worker" as a target! (Try e.g. -sENVIRONMENT=web,worker)')
 
   if not settings.ENVIRONMENT_MAY_BE_WORKER and settings.SHARED_MEMORY:
-    exit_with_error('When building with multithreading enabled and a "-sENVIRONMENT=" directive is specified, it must include "worker" as a target! (Try e.g. -sENVIRONMENT=web,worker)')
+    exit_with_error('when building with multithreading enabled and a "-sENVIRONMENT=" directive is specified, it must include "worker" as a target! (Try e.g. -sENVIRONMENT=web,worker)')
 
 
 def embed_memfile(options):
@@ -621,6 +621,26 @@ def set_max_memory():
     exit_with_error('MAXIMUM_MEMORY cannot be less than INITIAL_MEMORY')
 
 
+def check_browser_versions():
+  # Map of setting all VM version settings to the minimum version
+  # we support.
+  min_version_setttings = {
+    'MIN_FIREFOX_VERSION': feature_matrix.OLDEST_SUPPORTED_FIREFOX,
+    'MIN_CHROME_VERSION': feature_matrix.OLDEST_SUPPORTED_CHROME,
+    'MIN_SAFARI_VERSION': feature_matrix.OLDEST_SUPPORTED_SAFARI,
+    'MIN_NODE_VERSION': feature_matrix.OLDEST_SUPPORTED_NODE,
+  }
+
+  if settings.LEGACY_VM_SUPPORT:
+    # Default all browser versions to zero
+    for key in min_version_setttings.keys():
+      default_setting(key, 0)
+
+  for key, oldest in min_version_setttings.items():
+    if settings[key] != 0 and settings[key] < oldest:
+      exit_with_error(f'{key} older than {oldest} is not supported')
+
+
 @ToolchainProfiler.profile_block('linker_setup')
 def phase_linker_setup(options, state, newargs):
   system_libpath = '-L' + str(cache.get_lib_dir(absolute=True))
@@ -797,7 +817,7 @@ def phase_linker_setup(options, state, newargs):
     # For a command we always want EXIT_RUNTIME=1
     # For a reactor we always want EXIT_RUNTIME=0
     if 'EXIT_RUNTIME' in user_settings:
-      exit_with_error('Explicitly setting EXIT_RUNTIME not compatible with STANDALONE_WASM.  EXIT_RUNTIME will always be True for programs (with a main function) and False for reactors (not main function).')
+      exit_with_error('explicitly setting EXIT_RUNTIME not compatible with STANDALONE_WASM.  EXIT_RUNTIME will always be True for programs (with a main function) and False for reactors (not main function).')
     settings.EXIT_RUNTIME = settings.EXPECT_MAIN
     settings.IGNORE_MISSING_MAIN = 0
     # the wasm must be runnable without the JS, so there cannot be anything that
@@ -928,7 +948,7 @@ def phase_linker_setup(options, state, newargs):
 
   if 'CLOSURE_WARNINGS' in user_settings:
     if settings.CLOSURE_WARNINGS not in ['quiet', 'warn', 'error']:
-      exit_with_error('Invalid option -sCLOSURE_WARNINGS=%s specified! Allowed values are "quiet", "warn" or "error".' % settings.CLOSURE_WARNINGS)
+      exit_with_error('invalid option -sCLOSURE_WARNINGS=%s specified! Allowed values are "quiet", "warn" or "error".' % settings.CLOSURE_WARNINGS)
 
     diagnostics.warning('deprecated', 'CLOSURE_WARNINGS is deprecated, use -Wclosure/-Wno-closure instread')
     closure_warnings = diagnostics.manager.warnings['closure']
@@ -1091,27 +1111,13 @@ def phase_linker_setup(options, state, newargs):
     if settings.MINIMAL_RUNTIME and options.oformat == OFormat.HTML and not settings.PTHREADS:
       settings.EXPORT_READY_PROMISE = 0
 
-  if settings.LEGACY_VM_SUPPORT:
-    if settings.WASM2JS:
-      settings.POLYFILL_OLD_MATH_FUNCTIONS = 1
+  if settings.WASM2JS and settings.LEGACY_VM_SUPPORT:
+    settings.POLYFILL_OLD_MATH_FUNCTIONS = 1
 
-    # Support all old browser versions
-    settings.MIN_FIREFOX_VERSION = 0
-    settings.MIN_SAFARI_VERSION = 0
-    settings.MIN_CHROME_VERSION = 0
-    settings.MIN_NODE_VERSION = 0
+  check_browser_versions()
 
-  if settings.MIN_CHROME_VERSION <= 37:
-    settings.WORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG = 1
-
-  # 10.19.0 is the oldest version of node that we do any testing with.
-  # Keep this in sync with the test-node-compat in .circleci/config.yml
-  # and MINIMUM_NODE_VERSION in tools/shared.py
-  if settings.MIN_NODE_VERSION:
-    if settings.MIN_NODE_VERSION < 101900:
-      exit_with_error('targeting node older than 10.19.00 is not supported')
-    if settings.MIN_NODE_VERSION >= 150000:
-      default_setting('NODEJS_CATCH_REJECTION', 0)
+  if settings.MIN_NODE_VERSION >= 150000:
+    default_setting('NODEJS_CATCH_REJECTION', 0)
 
   # Do not catch rejections or exits in modularize mode, as these options
   # are for use when running emscripten modules standalone
@@ -1120,7 +1126,7 @@ def phase_linker_setup(options, state, newargs):
     default_setting('NODEJS_CATCH_REJECTION', 0)
     default_setting('NODEJS_CATCH_EXIT', 0)
     if settings.NODEJS_CATCH_REJECTION or settings.NODEJS_CATCH_EXIT:
-      exit_with_error('Cannot use -sNODEJS_CATCH_REJECTION or -sNODEJS_CATCH_EXIT with -sMODULARIZE')
+      exit_with_error('cannot use -sNODEJS_CATCH_REJECTION or -sNODEJS_CATCH_EXIT with -sMODULARIZE')
 
   setup_environment_settings()
 
@@ -1153,7 +1159,6 @@ def phase_linker_setup(options, state, newargs):
   # Silently drop any individual backwards compatibility emulation flags that are known never to occur on browsers that support WebAssembly.
   if not settings.WASM2JS:
     settings.POLYFILL_OLD_MATH_FUNCTIONS = 0
-    settings.WORKAROUND_OLD_WEBGL_UNIFORM_UPLOAD_IGNORED_OFFSET_BUG = 0
 
   if settings.STB_IMAGE and final_suffix in EXECUTABLE_ENDINGS:
     state.forced_stdlibs.append('libstb_image')
@@ -1326,11 +1331,6 @@ def phase_linker_setup(options, state, newargs):
     settings.WASM_BIGINT = 1
 
   if settings.WASM_WORKERS:
-    # TODO: After #15982 is resolved, these dependencies can be declared in library_wasm_worker.js
-    #       instead of having to record them here.
-    wasm_worker_imports = ['_emscripten_wasm_worker_initialize', '___set_thread_state']
-    settings.EXPORTED_FUNCTIONS += wasm_worker_imports
-    building.user_requested_exports.update(wasm_worker_imports)
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$_wasmWorkerInitializeRuntime']
     # set location of Wasm Worker bootstrap JS file
     if settings.WASM_WORKERS == 1:
@@ -2081,7 +2081,7 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
     delete_file(memfile)
 
   if settings.SPLIT_MODULE:
-    diagnostics.warning('experimental', 'The SPLIT_MODULE setting is experimental and subject to change')
+    diagnostics.warning('experimental', 'the SPLIT_MODULE setting is experimental and subject to change')
     do_split_module(wasm_target, options)
 
   if not settings.SINGLE_FILE:
@@ -2336,53 +2336,54 @@ def modularize():
   if settings.MINIMAL_RUNTIME and not settings.PTHREADS:
     # Single threaded MINIMAL_RUNTIME programs do not need access to
     # document.currentScript, so a simple export declaration is enough.
-    src = '/** @nocollapse */ var %s=%s' % (settings.EXPORT_NAME, src)
+    src = '/** @nocollapse */ var %s = %s' % (settings.EXPORT_NAME, src)
   else:
     script_url_node = ''
     # When MODULARIZE this JS may be executed later,
     # after document.currentScript is gone, so we save it.
-    # In EXPORT_ES6 + PTHREADS the 'thread' is actually an ES6 module webworker running in strict mode,
-    # so doesn't have access to 'document'. In this case use 'import.meta' instead.
+    # In EXPORT_ES6 + PTHREADS the 'thread' is actually an ES6 module
+    # webworker running in strict mode, so doesn't have access to 'document'.
+    # In this case use 'import.meta' instead.
     if settings.EXPORT_ES6 and settings.USE_ES6_IMPORT_META:
       script_url = 'import.meta.url'
     else:
       script_url = "typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined"
       if shared.target_environment_may_be('node'):
-        script_url_node = "if (typeof __filename !== 'undefined') _scriptDir = _scriptDir || __filename;"
+        script_url_node = "if (typeof __filename !== 'undefined') _scriptDir ||= __filename;"
     src = '''%(node_imports)s
 var %(EXPORT_NAME)s = (() => {
   var _scriptDir = %(script_url)s;
   %(script_url_node)s
   return (%(src)s);
 })();
-%(capture_module_function_for_audio_worklet)s;
 ''' % {
       'node_imports': node_es6_imports(),
       'EXPORT_NAME': settings.EXPORT_NAME,
       'script_url': script_url,
       'script_url_node': script_url_node,
       'src': src,
-      # Given the async nature of how the Module function and Module object come into existence in AudioWorkletGlobalScope,
-      # store the Module function under a different variable name so that AudioWorkletGlobalScope will be able to reference
-      # it without aliasing/conflicting with the Module variable name.
-      'capture_module_function_for_audio_worklet': 'globalThis.AudioWorkletModule = ' + settings.EXPORT_NAME if settings.AUDIO_WORKLET and settings.MODULARIZE else ''
     }
+    # Given the async nature of how the Module function and Module object
+    # come into existence in AudioWorkletGlobalScope, store the Module
+    # function under a different variable name so that AudioWorkletGlobalScope
+    # will be able to reference it without aliasing/conflicting with the
+    # Module variable name.
+    if settings.AUDIO_WORKLET and settings.MODULARIZE:
+      src += f'globalThis.AudioWorkletModule = {settings.EXPORT_NAME};'
 
-  final_js += '.modular.js'
-  with open(final_js, 'w', encoding='utf-8') as f:
-    f.write(src)
-
-    # Export using a UMD style export, or ES6 exports if selected
-    if settings.EXPORT_ES6:
-      f.write('export default %s;' % settings.EXPORT_NAME)
-    elif not settings.MINIMAL_RUNTIME:
-      f.write('''\
+  # Export using a UMD style export, or ES6 exports if selected
+  if settings.EXPORT_ES6:
+    src += 'export default %s;' % settings.EXPORT_NAME
+  elif not settings.MINIMAL_RUNTIME:
+    src += '''\
 if (typeof exports === 'object' && typeof module === 'object')
   module.exports = %(EXPORT_NAME)s;
 else if (typeof define === 'function' && define['amd'])
   define([], () => %(EXPORT_NAME)s);
-''' % {'EXPORT_NAME': settings.EXPORT_NAME})
+''' % {'EXPORT_NAME': settings.EXPORT_NAME}
 
+  final_js += '.modular.js'
+  write_file(final_js, src)
   shared.get_temp_files().note(final_js)
   save_intermediate('modularized')
 
@@ -2413,7 +2414,7 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
   if settings.EXPORT_NAME != 'Module' and options.shell_path == DEFAULT_SHELL_HTML:
     # the minimal runtime shell HTML is designed to support changing the export
     # name, but the normal one does not support that currently
-    exit_with_error('Customizing EXPORT_NAME requires that the HTML be customized to use that name (see https://github.com/emscripten-core/emscripten/issues/10086)')
+    exit_with_error('customizing EXPORT_NAME requires that the HTML be customized to use that name (see https://github.com/emscripten-core/emscripten/issues/10086)')
 
   shell = shared.read_and_preprocess(options.shell_path)
   if '{{{ SCRIPT }}}' not in shell:

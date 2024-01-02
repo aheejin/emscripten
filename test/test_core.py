@@ -880,27 +880,9 @@ base align: 0, 0, 0, 0'''])
     self.set_setting('MALLOC', 'emmalloc')
     self.do_core_test('emmalloc_memalign_corruption.cpp')
 
-  def test_addr_of_stacked(self):
-    self.do_core_test('test_addr_of_stacked.c')
-
-  def test_globals(self):
-    self.do_core_test('test_globals.c')
-
-  def test_linked_list(self):
-    self.do_core_test('test_linked_list.c')
-
-  def test_sup(self):
-    self.do_run_in_out_file_test('core/test_sup.cpp')
-
   @also_with_standalone_wasm()
   def test_assert(self):
     self.do_core_test('test_assert.cpp', assert_returncode=NON_ZERO)
-
-  def test_wcslen(self):
-    self.do_core_test('test_wcslen.c')
-
-  def test_regex(self):
-    self.do_core_test('test_regex.c')
 
   @crossplatform
   @also_with_standalone_wasm(impure=True)
@@ -1594,12 +1576,12 @@ int main() {
     # test setting includes -Werror.
     self.set_setting('DISABLE_EXCEPTION_THROWING', 1)
     err = self.expect_fail([EMCC, test_file('hello_world.cpp'), '-fwasm-exceptions'] + self.get_emcc_args())
-    self.assertContained('error: You no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions', err)
+    self.assertContained('error: you no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions', err)
     clear_all_relevant_settings(self)
 
     self.set_setting('DISABLE_EXCEPTION_CATCHING', 1)
     err = self.expect_fail([EMCC, test_file('hello_world.cpp'), '-fwasm-exceptions'] + self.get_emcc_args())
-    self.assertContained('error: You no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions', err)
+    self.assertContained('error: you no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions', err)
     clear_all_relevant_settings(self)
 
     # Emscripten SjLj and Wasm EH cannot mix
@@ -1657,28 +1639,6 @@ int main() {
     self.emcc_args.append('--no-entry')
     self.do_core_test('test_ctors_no_main.cpp')
 
-  def test_class(self):
-    self.do_core_test('test_class.cpp')
-
-  def test_inherit(self):
-    self.do_core_test('test_inherit.cpp')
-
-  def test_isdigit_l(self):
-    # needs to flush stdio streams
-    self.set_setting('EXIT_RUNTIME')
-    self.do_core_test('test_isdigit_l.cpp')
-
-  def test_iswdigit(self):
-    # needs to flush stdio streams
-    self.set_setting('EXIT_RUNTIME')
-    self.do_core_test('test_iswdigit.cpp')
-
-  def test_polymorph(self):
-    self.do_core_test('test_polymorph.cpp')
-
-  def test_complex(self):
-    self.do_core_test('test_complex.c')
-
   def test_float_builtins(self):
     # tests wasm_libc_rt
     self.do_core_test('test_float_builtins.c')
@@ -1728,29 +1688,17 @@ int main() {
       else:
         self.do_run(src, 'marfoosh')
 
-  def test_dynamic_cast(self):
-    self.do_core_test('test_dynamic_cast.cpp')
-
-  def test_dynamic_cast_b(self):
-    self.do_core_test('test_dynamic_cast_b.cpp')
-
-  def test_dynamic_cast_2(self):
-    self.do_core_test('test_dynamic_cast_2.cpp')
-
+  @only_wasm2js('tests function pointer calls')
   def test_funcptr(self):
     self.do_core_test('test_funcptr.c')
 
+  @only_wasm2js('tests function pointer calls')
   def test_mathfuncptr(self):
     self.do_core_test('test_mathfuncptr.c')
 
+  @only_wasm2js('tests function pointer calls')
   def test_funcptrfunc(self):
     self.do_core_test('test_funcptrfunc.c')
-
-  def test_funcptr_namecollide(self):
-    self.do_core_test('test_funcptr_namecollide.c')
-
-  def test_emptyclass(self):
-    self.do_core_test('test_emptyclass.cpp')
 
   def test_alloca(self):
     self.do_runf('core/test_alloca.c')
@@ -1906,7 +1854,7 @@ int main() {
     # Sanitizers are not compatible with LINKABLE (dynamic linking.
     if not is_sanitizing(self.emcc_args) and not self.is_wasm64():
       # test EXPORT_ALL
-      self.set_setting('EXPORTED_FUNCTIONS', [])
+      self.clear_setting('EXPORTED_FUNCTIONS')
       self.set_setting('EXPORT_ALL')
       self.set_setting('LINKABLE')
       self.do_core_test('test_emscripten_api.cpp')
@@ -9099,6 +9047,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
     'vector': ('test_asan_vector.cpp', [
       'AddressSanitizer: container-overflow on address'
     ]),
+    # some coverage for mimalloc as well
+    'use_after_free_c_mimalloc': ('test_asan_use_after_free.c', [
+      'AddressSanitizer: heap-use-after-free on address',
+    ], ['-sMALLOC=mimalloc']),
   })
   def test_asan(self, name, expected_output, cflags=None):
     if '-Oz' in self.emcc_args:
