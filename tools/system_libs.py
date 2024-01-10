@@ -877,6 +877,7 @@ class MuslInternalLibrary(Library):
   includes = [
     'system/lib/libc/musl/src/internal',
     'system/lib/libc/musl/src/include',
+    'system/lib/libc/musl/include',
     'system/lib/libc',
     'system/lib/pthread',
   ]
