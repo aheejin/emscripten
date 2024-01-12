@@ -136,12 +136,21 @@ namespace wgpu {
 
     static constexpr uint32_t kArrayLayerCountUndefined = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
     static constexpr uint32_t kCopyStrideUndefined = WGPU_COPY_STRIDE_UNDEFINED;
+    static constexpr uint32_t kDepthSliceUndefined = WGPU_DEPTH_SLICE_UNDEFINED;
     static constexpr uint32_t kLimitU32Undefined = WGPU_LIMIT_U32_UNDEFINED;
     static constexpr uint64_t kLimitU64Undefined = WGPU_LIMIT_U64_UNDEFINED;
     static constexpr uint32_t kMipLevelCountUndefined = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
     static constexpr uint32_t kQuerySetIndexUndefined = WGPU_QUERY_SET_INDEX_UNDEFINED;
     static constexpr size_t kWholeMapSize = WGPU_WHOLE_MAP_SIZE;
     static constexpr uint64_t kWholeSize = WGPU_WHOLE_SIZE;
+
+    enum class WGSLFeatureName : uint32_t {
+        Undefined = 0x00000000,
+        ReadonlyAndReadwriteStorageTextures = 0x00000001,
+        Packed4x8IntegerDotProduct = 0x00000002,
+        UnrestrictedPointerParameters = 0x00000003,
+        PointerCompositeAccess = 0x00000004,
+    };
 
     enum class AdapterType : uint32_t {
         DiscreteGPU = 0x00000000,
@@ -983,6 +992,7 @@ namespace wgpu {
         using ObjectBase::operator=;
 
         Surface CreateSurface(SurfaceDescriptor const * descriptor) const;
+        bool HasWGSLLanguageFeature(WGSLFeatureName feature) const;
         void ProcessEvents() const;
         void RequestAdapter(RequestAdapterOptions const * options, RequestAdapterCallback callback, void * userdata) const;
 
@@ -1647,6 +1657,7 @@ namespace wgpu {
     struct RenderPassColorAttachment {
         ChainedStruct const * nextInChain = nullptr;
         TextureView view = nullptr;
+        uint32_t depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
         TextureView resolveTarget = nullptr;
         LoadOp loadOp;
         StoreOp storeOp;
