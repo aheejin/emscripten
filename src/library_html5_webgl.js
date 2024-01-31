@@ -20,31 +20,6 @@ var LibraryHtml5WebGL = {
     return len;
   },
 
-  // Execute in calling thread without proxying needed.
-  emscripten_webgl_init_context_attributes: (attributes) => {
-#if ASSERTIONS
-    assert(attributes);
-#endif
-    var a = attributes >> 2;
-    for (var i = 0; i < ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.__size__ }}}>>2); ++i) {
-      HEAP32[a+i] = 0;
-    }
-
-    HEAP32[a + ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.alpha }}}>>2)] =
-    HEAP32[a + ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.depth }}}>>2)] =
-    HEAP32[a + ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.antialias }}}>>2)] =
-    HEAP32[a + ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.premultipliedAlpha }}}>>2)] =
-    HEAP32[a + ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.majorVersion }}}>>2)] =
-    HEAP32[a + ({{{ C_STRUCTS.EmscriptenWebGLContextAttributes.enableExtensionsByDefault }}}>>2)] = 1;
-
-#if PTHREADS
-    // Default context initialization state (user can override):
-    // - if main thread is creating the context, default to the context not being shared between threads - enabling sharing has performance overhead, because it forces the context to be OffscreenCanvas or OffscreenFramebuffer.
-    // - if a web worker is creating the context, default to using OffscreenCanvas if available, or proxying via Offscreen Framebuffer if not
-    if (ENVIRONMENT_IS_WORKER) {{{ makeSetValue('attributes', C_STRUCTS.EmscriptenWebGLContextAttributes.proxyContextToMainThread, 1/*EMSCRIPTEN_WEBGL_CONTEXT_PROXY_FALLBACK*/, 'i32') }}};
-#endif
-  },
-
   $emscripten_webgl_power_preferences: "['default', 'low-power', 'high-performance']",
 
 #if PTHREADS && OFFSCREEN_FRAMEBUFFER
@@ -70,6 +45,7 @@ var LibraryHtml5WebGL = {
   emscripten_webgl_do_create_context__deps: [
 #if OFFSCREENCANVAS_SUPPORT
   'malloc',
+  'emscripten_supports_offscreencanvas',
 #endif
 #if PTHREADS && OFFSCREEN_FRAMEBUFFER
   'emscripten_webgl_create_context_proxied',
@@ -120,7 +96,7 @@ var LibraryHtml5WebGL = {
         dbg('Performance warning: forcing renderViaOffscreenBackBuffer=true and preserveDrawingBuffer=true since proxying WebGL rendering.');
 #endif
         // We will be proxying - if OffscreenCanvas is supported, we can proxy a bit more efficiently by avoiding having to create an Offscreen FBO.
-        if (typeof OffscreenCanvas == 'undefined') {
+        if (!_emscripten_supports_offscreencanvas()) {
           {{{ makeSetValue('attributes', C_STRUCTS.EmscriptenWebGLContextAttributes.renderViaOffscreenBackBuffer, '1', 'i32') }}};
           {{{ makeSetValue('attributes', C_STRUCTS.EmscriptenWebGLContextAttributes.preserveDrawingBuffer, '1', 'i32') }}};
         }
@@ -140,12 +116,12 @@ var LibraryHtml5WebGL = {
     if (canvas.offscreenCanvas) canvas = canvas.offscreenCanvas;
 
 #if GL_DEBUG
-    if (typeof OffscreenCanvas != 'undefined' && canvas instanceof OffscreenCanvas) dbg(`emscripten_webgl_create_context: Creating an OffscreenCanvas-based WebGL context on target "${targetStr}"`);
+    if (_emscripten_supports_offscreencanvas() && canvas instanceof OffscreenCanvas) dbg(`emscripten_webgl_create_context: Creating an OffscreenCanvas-based WebGL context on target "${targetStr}"`);
     else if (typeof HTMLCanvasElement != 'undefined' && canvas instanceof HTMLCanvasElement) dbg(`emscripten_webgl_create_context: Creating an HTMLCanvasElement-based WebGL context on target "${targetStr}"`);
 #endif
 
     if (contextAttributes.explicitSwapControl) {
-      var supportsOffscreenCanvas = canvas.transferControlToOffscreen || (typeof OffscreenCanvas != 'undefined' && canvas instanceof OffscreenCanvas);
+      var supportsOffscreenCanvas = canvas.transferControlToOffscreen || (_emscripten_supports_offscreencanvas() && canvas instanceof OffscreenCanvas);
 
       if (!supportsOffscreenCanvas) {
 #if OFFSCREEN_FRAMEBUFFER
