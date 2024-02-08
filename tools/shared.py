@@ -251,6 +251,7 @@ def exec_process(cmd):
   else:
     sys.stdout.flush()
     sys.stderr.flush()
+    mylog.log_cmd(cmd)
     os.execv(cmd[0], cmd)
 
 
