@@ -141,6 +141,7 @@ class EmccOptions:
     self.ignore_dynamic_linking = False
     self.shell_path = None
     self.source_map_base = ''
+    self.emit_tsd = ''
     self.embind_emit_tsd = ''
     self.emrun = False
     self.cpu_profiler = False
@@ -1277,6 +1278,9 @@ def parse_args(newargs):
       options.source_map_base = consume_arg()
     elif check_arg('--embind-emit-tsd'):
       options.embind_emit_tsd = consume_arg()
+    elif check_arg('--emit-tsd'):
+      diagnostics.warning('experimental', '--emit-tsd is still experimental. Not all definitions are generated.')
+      options.emit_tsd = consume_arg()
     elif check_flag('--no-entry'):
       options.no_entry = True
     elif check_arg('--js-library'):
@@ -1447,7 +1451,7 @@ def parse_symbol_list_file(contents):
   kind of quoting or escaping.
   """
   values = contents.splitlines()
-  return [v.strip() for v in values]
+  return [v.strip() for v in values if not v.startswith('#')]
 
 
 def parse_value(text, expected_type):

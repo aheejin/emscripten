@@ -203,7 +203,7 @@ def embed_memfile(options):
 
 def generate_js_sym_info():
   # Runs the js compiler to generate a list of all symbols available in the JS
-  # libraries.  This must be done separately for each linker invokation since the
+  # libraries.  This must be done separately for each linker invocation since the
   # list of symbols depends on what settings are used.
   # TODO(sbc): Find a way to optimize this.  Potentially we could add a super-set
   # mode of the js compiler that would generate a list of all possible symbols
@@ -348,7 +348,7 @@ def get_binaryen_passes(memfile):
   # sign-ext is enabled by default by llvm.  If the target browser settings don't support
   # this we lower it away here using a binaryen pass.
   if not feature_matrix.caniuse(feature_matrix.Feature.SIGN_EXT):
-    logger.debug('lowering sign-ext feature due to incompatiable target browser engines')
+    logger.debug('lowering sign-ext feature due to incompatible target browser engines')
     passes += ['--signext-lowering']
   if optimizing:
     passes += ['--post-emscripten']
@@ -357,8 +357,9 @@ def get_binaryen_passes(memfile):
   if optimizing:
     passes += [building.opt_level_to_str(settings.OPT_LEVEL, settings.SHRINK_LEVEL)]
   # when optimizing, use the fact that low memory is never used (1024 is a
-  # hardcoded value in the binaryen pass)
-  if optimizing and settings.GLOBAL_BASE >= 1024:
+  # hardcoded value in the binaryen pass). we also cannot do it when the stack
+  # is first, as then the stack is in the low memory that should be unused.
+  if optimizing and settings.GLOBAL_BASE >= 1024 and not settings.STACK_FIRST:
     passes += ['--low-memory-unused']
   if settings.AUTODEBUG:
     # adding '--flatten' here may make these even more effective
@@ -487,7 +488,7 @@ def get_worker_js_suffix():
 
 def setup_pthreads(target):
   if settings.RELOCATABLE:
-    # phtreads + dyanmic linking has certain limitations
+    # pthreads + dynamic linking has certain limitations
     if settings.SIDE_MODULE:
       diagnostics.warning('experimental', '-sSIDE_MODULE + pthreads is experimental')
     elif settings.MAIN_MODULE:
@@ -596,7 +597,7 @@ def set_max_memory():
 def check_browser_versions():
   # Map of setting all VM version settings to the minimum version
   # we support.
-  min_version_setttings = {
+  min_version_settings = {
     'MIN_FIREFOX_VERSION': feature_matrix.OLDEST_SUPPORTED_FIREFOX,
     'MIN_CHROME_VERSION': feature_matrix.OLDEST_SUPPORTED_CHROME,
     'MIN_SAFARI_VERSION': feature_matrix.OLDEST_SUPPORTED_SAFARI,
@@ -605,10 +606,10 @@ def check_browser_versions():
 
   if settings.LEGACY_VM_SUPPORT:
     # Default all browser versions to zero
-    for key in min_version_setttings.keys():
+    for key in min_version_settings.keys():
       default_setting(key, 0)
 
-  for key, oldest in min_version_setttings.items():
+  for key, oldest in min_version_settings.items():
     if settings[key] != 0 and settings[key] < oldest:
       exit_with_error(f'{key} older than {oldest} is not supported')
 
@@ -699,6 +700,9 @@ def phase_linker_setup(options, state, newargs):
 
   if 'SUPPORT_ERRNO' in user_settings:
     diagnostics.warning('deprecated', 'SUPPORT_ERRNO is deprecated since emscripten no longer uses the setErrNo library function')
+
+  if 'DEMANGLE_SUPPORT' in user_settings:
+    diagnostics.warning('deprecated', 'DEMANGLE_SUPPORT is deprecated since mangled names no longer appear in stack traces')
 
   if settings.EXTRA_EXPORTED_RUNTIME_METHODS:
     diagnostics.warning('deprecated', 'EXTRA_EXPORTED_RUNTIME_METHODS is deprecated, please use EXPORTED_RUNTIME_METHODS instead')
@@ -922,7 +926,7 @@ def phase_linker_setup(options, state, newargs):
     if settings.CLOSURE_WARNINGS not in ['quiet', 'warn', 'error']:
       exit_with_error('invalid option -sCLOSURE_WARNINGS=%s specified! Allowed values are "quiet", "warn" or "error".' % settings.CLOSURE_WARNINGS)
 
-    diagnostics.warning('deprecated', 'CLOSURE_WARNINGS is deprecated, use -Wclosure/-Wno-closure instread')
+    diagnostics.warning('deprecated', 'CLOSURE_WARNINGS is deprecated, use -Wclosure/-Wno-closure instead')
     closure_warnings = diagnostics.manager.warnings['closure']
     if settings.CLOSURE_WARNINGS == 'error':
       closure_warnings['error'] = True
@@ -1339,9 +1343,12 @@ def phase_linker_setup(options, state, newargs):
       settings.AUDIO_WORKLET_FILE = unsuffixed(os.path.basename(target)) + '.aw.js'
     settings.JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_webaudio.js')))
     if not settings.MINIMAL_RUNTIME:
+      # If we are in the audio worklet environment, we can only access the Module object
+      # and not the global scope of the main JS script. Therefore we need to export
+      # all symbols that the audio worklet scope needs onto the Module object.
       # MINIMAL_RUNTIME exports these manually, since this export mechanism is placed
       # in global scope that is not suitable for MINIMAL_RUNTIME loader.
-      settings.EXPORTED_RUNTIME_METHODS += ['stackSave', 'stackAlloc', 'stackRestore']
+      settings.EXPORTED_RUNTIME_METHODS += ['stackSave', 'stackAlloc', 'stackRestore', 'wasmTable']
 
   if settings.FORCE_FILESYSTEM and not settings.MINIMAL_RUNTIME:
     # when the filesystem is forced, we export by default methods that filesystem usage
@@ -1838,13 +1845,13 @@ def phase_post_link(options, state, in_wasm, wasm_target, target, js_syms):
 
   settings.TARGET_JS_NAME = os.path.basename(state.js_target)
 
-  phase_emscript(options, in_wasm, wasm_target, js_syms)
+  metadata = phase_emscript(options, in_wasm, wasm_target, js_syms)
 
   if settings.EMBIND_AOT:
     phase_embind_aot(wasm_target, js_syms)
 
-  if options.embind_emit_tsd:
-    phase_embind_emit_tsd(options, wasm_target, js_syms)
+  if options.embind_emit_tsd or options.emit_tsd:
+    phase_emit_tsd(options, wasm_target, js_syms, metadata)
 
   if options.js_transform:
     phase_source_transforms(options)
@@ -1871,8 +1878,9 @@ def phase_emscript(options, in_wasm, wasm_target, js_syms):
   if shared.SKIP_SUBPROCS:
     return
 
-  emscripten.emscript(in_wasm, wasm_target, final_js, js_syms)
+  metadata = emscripten.emscript(in_wasm, wasm_target, final_js, js_syms)
   save_intermediate('original')
+  return metadata
 
 
 def run_embind_gen(wasm_target, js_syms, extra_settings):
@@ -1899,6 +1907,8 @@ def run_embind_gen(wasm_target, js_syms, extra_settings):
   # Disable proxying and thread pooling so a worker is not automatically created.
   settings.PROXY_TO_PTHREAD = False
   settings.PTHREAD_POOL_SIZE = 0
+  # Assume wasm support at binding generation time
+  settings.WASM2JS = 0
   # Disable minify since the binaryen pass has not been run yet to change the
   # import names.
   settings.MINIFY_WASM_IMPORTED_MODULES = False
@@ -1926,12 +1936,21 @@ def run_embind_gen(wasm_target, js_syms, extra_settings):
   return out
 
 
-@ToolchainProfiler.profile_block('embind emit tsd')
-def phase_embind_emit_tsd(options, wasm_target, js_syms):
+@ToolchainProfiler.profile_block('emit tsd')
+def phase_emit_tsd(options, wasm_target, js_syms, metadata):
   logger.debug('emit tsd')
-  out = run_embind_gen(wasm_target, js_syms, {'EMBIND_JS': False})
-  out_file = os.path.join(os.path.dirname(wasm_target), options.embind_emit_tsd)
-  write_file(out_file, out)
+  filename = ''
+  # Support using either option for now, but prefer emit_tsd if specified.
+  if options.emit_tsd:
+    filename = options.emit_tsd
+  else:
+    filename = options.embind_emit_tsd
+  embind_tsd = ''
+  if settings.EMBIND:
+    embind_tsd = run_embind_gen(wasm_target, js_syms, {'EMBIND_JS': False})
+  all_tsd = emscripten.create_tsd(metadata, embind_tsd)
+  out_file = os.path.join(os.path.dirname(wasm_target), filename)
+  write_file(out_file, all_tsd)
 
 
 @ToolchainProfiler.profile_block('embind aot js')
@@ -2031,7 +2050,7 @@ def phase_final_emitting(options, state, target, wasm_target, memfile):
     # mode)
     final_js = building.closure_compiler(final_js, advanced=False, extra_closure_args=options.closure_args)
     # Run unsafe_optimizations.js once more.  This allows the cleanup of newly
-    # unused things that closure compiler leaves behing (e.g `new Float64Array(x)`).
+    # unused things that closure compiler leaves behind (e.g `new Float64Array(x)`).
     shared.run_js_tool(utils.path_from_root('tools/unsafe_optimizations.js'), [final_js, '-o', final_js], cwd=utils.path_from_root('.'))
     save_intermediate('unsafe-optimizations2')
 
@@ -2349,13 +2368,15 @@ var %(EXPORT_NAME)s = (() => {
       'script_url_node': script_url_node,
       'src': src,
     }
-    # Given the async nature of how the Module function and Module object
-    # come into existence in AudioWorkletGlobalScope, store the Module
-    # function under a different variable name so that AudioWorkletGlobalScope
-    # will be able to reference it without aliasing/conflicting with the
-    # Module variable name.
-    if settings.AUDIO_WORKLET and settings.MODULARIZE:
-      src += f'globalThis.AudioWorkletModule = {settings.EXPORT_NAME};'
+
+  # Given the async nature of how the Module function and Module object
+  # come into existence in AudioWorkletGlobalScope, store the Module
+  # function under a different variable name so that AudioWorkletGlobalScope
+  # will be able to reference it without aliasing/conflicting with the
+  # Module variable name. This should happen even in MINIMAL_RUNTIME builds
+  # for MODULARIZE and EXPORT_ES6 to work correctly.
+  if settings.AUDIO_WORKLET and settings.MODULARIZE:
+    src += f'globalThis.AudioWorkletModule = {settings.EXPORT_NAME};'
 
   # Export using a UMD style export, or ES6 exports if selected
   if settings.EXPORT_ES6:
@@ -2744,7 +2765,7 @@ def process_dynamic_libs(dylibs, lib_dirs):
     exports = webassembly.get_exports(dylib)
     exports = set(e.name for e in exports)
     # EM_JS function are exports with a special prefix.  We need to strip
-    # this prefix to get the actaul symbol name.  For the main module, this
+    # this prefix to get the actual symbol name.  For the main module, this
     # is handled by extract_metadata.py.
     exports = [removeprefix(e, '__em_js__') for e in exports]
     settings.SIDE_MODULE_EXPORTS.extend(sorted(exports))
@@ -2862,7 +2883,7 @@ def package_files(options, target):
     js_manipulation.add_files_pre_js(settings.PRE_JS_FILES, file_code)
   else:
     # Otherwise, we are embedding files, which does not require --pre-js code,
-    # and instead relies on a static constrcutor to populate the filesystem.
+    # and instead relies on a static constructor to populate the filesystem.
     shared.check_call(cmd)
 
   return rtn
