@@ -5703,9 +5703,6 @@ Module = {
     self.set_setting('EXIT_RUNTIME')
     self.do_core_test('test_direct_string_constant_usage.cpp')
 
-  def test_std_cout_new(self):
-    self.do_core_test('test_std_cout_new.cpp')
-
   def test_std_function_incomplete_return(self):
     self.do_core_test('test_std_function_incomplete_return.cpp')
 
@@ -7113,6 +7110,7 @@ void* operator new(size_t size) {
 
     # Adding the symbol to DEFAULT_LIBRARY_FUNCS_TO_INCLUDE should allow direct usage, but
     # Module usage should continue to fail.
+    self.emcc_args += ['-Wno-deprecated']
     self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$ALLOC_STACK'])
     test(not_exported, assert_returncode=NON_ZERO)
     test('1', args=['-DDIRECT'])
