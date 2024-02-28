@@ -23,6 +23,7 @@ from urllib.request import urlopen
 from common import BrowserCore, RunnerCore, path_from_root, has_browser, EMTEST_BROWSER, Reporting
 from common import create_file, parameterized, ensure_dir, disabled, test_file, WEBIDL_BINDER
 from common import read_file, also_with_minimal_runtime, EMRUN, no_wasm64, no_2gb, no_4gb
+from common import requires_wasm2js
 from tools import shared
 from tools import ports
 from tools import utils
@@ -185,17 +186,6 @@ def requires_threads(f):
   return decorated
 
 
-def requires_wasm2js(f):
-  assert callable(f)
-
-  @wraps(f)
-  def decorated(self, *args, **kwargs):
-    self.require_wasm2js()
-    return f(self, *args, **kwargs)
-
-  return decorated
-
-
 def also_with_threads(f):
   assert callable(f)
 
@@ -232,12 +222,6 @@ class browser(BrowserCore):
       '-Wno-pointer-sign',
       '-Wno-int-conversion',
     ]
-
-  def require_wasm2js(self):
-    if self.is_wasm64():
-      self.skipTest('wasm2js is not compatible with MEMORY64')
-    if self.is_2gb() or self.is_4gb():
-      self.skipTest('wasm2js does not support over 2gb of memory')
 
   def require_jspi(self):
     if not is_chrome():
@@ -769,21 +753,14 @@ If manually bisecting:
     # Test Emscripten-specific extensions to optimize SDL_LockSurface and SDL_UnlockSurface.
     self.reftest('hello_world_sdl.cpp', 'htmltest.png', args=['-DTEST_SDL_LOCK_OPTS', '-lSDL', '-lGL'])
 
-  @parameterized({
-    '': ([],),
-    'meminit_file':  (['--memory-init-file=1', '-sWASM=0'],),
-  })
   @also_with_wasmfs
-  def test_sdl_image(self, args):
-    # load an image file, get pixel data. Also O2 coverage for --preload-file, and memory-init
+  def test_sdl_image(self):
+    # load an image file, get pixel data. Also O2 coverage for --preload-file
     shutil.copyfile(test_file('screenshot.jpg'), 'screenshot.jpg')
     src = test_file('browser/test_sdl_image.c')
-    if '-sWASM=0' in args:
-      self.require_wasm2js()
-
     for dest, dirname, basename in [('screenshot.jpg', '/', 'screenshot.jpg'),
                                     ('screenshot.jpg@/assets/screenshot.jpg', '/assets', 'screenshot.jpg')]:
-      self.btest_exit(src, args=args + [
+      self.btest_exit(src, args=[
         '-O2', '-lSDL', '-lGL',
         '--preload-file', dest, '-DSCREENSHOT_DIRNAME="' + dirname + '"', '-DSCREENSHOT_BASENAME="' + basename + '"', '--use-preload-plugins'
       ])
@@ -2399,13 +2376,8 @@ void *getBindBuffer() {
     self.run_process([EMCC, 'supp.c', '-o', 'supp.wasm', '-sSIDE_MODULE', '-O2'] + self.get_emcc_args())
     self.btest_exit('main.c', args=['-sMAIN_MODULE=2', '-O2', 'supp.wasm'])
 
-  @parameterized({
-    '': ([],),
-    'memfile': (['-sWASM=0', '--memory-init-file=1'],)
-  })
-  def test_pre_run_deps(self, args):
-    if args:
-      self.require_wasm2js()
+  @also_with_wasm2js
+  def test_pre_run_deps(self):
     # Adding a dependency in preRun will delay run
     create_file('pre.js', '''
       Module.preRun = () => {
@@ -2418,61 +2390,10 @@ void *getBindBuffer() {
       };
     ''')
 
-    self.btest('pre_run_deps.cpp', expected='10', args=args + ['--pre-js', 'pre.js'])
+    self.btest('pre_run_deps.cpp', expected='10', args=['--pre-js', 'pre.js'])
 
-  @requires_wasm2js
-  def test_mem_init(self):
-    self.set_setting('WASM_ASYNC_COMPILATION', 0)
-    create_file('pre.js', '''
-      function myJSCallback() { // called from main()
-        Module._note(1);
-      }
-      Module.preRun = () => {
-        addOnPreMain(() => Module._note(2));
-      };
-    ''')
-    create_file('post.js', '''
-      Module._note(4); // this happens too early! and is overwritten when the mem init arrives
-    ''')
-
-    args = ['-sWASM=0', '--pre-js', 'pre.js', '--post-js', 'post.js', '--memory-init-file', '1']
-
-    # with assertions, we notice when memory was written to too early
-    expected = 'abort:Assertion failed: native function `note` called before runtime initialization'
-    self.btest('mem_init.cpp', expected=expected, args=args)
-    # otherwise, we just overwrite
-    self.btest_exit('mem_init.cpp', args=args + ['-sASSERTIONS=0'])
-
-  @requires_wasm2js
-  def test_mem_init_request(self):
-    def test(what, status):
-      print(what, status)
-      create_file('pre.js', '''
-        var xhr = Module.memoryInitializerRequest = new XMLHttpRequest();
-        xhr.open('GET', "''' + what + '''", true);
-        xhr.responseType = 'arraybuffer';
-        xhr.send(null);
-
-        console.warn = (x) => {
-          if (x.includes('a problem seems to have happened with Module.memoryInitializerRequest')) {
-            maybeReportResultToServer('got_error');
-          }
-          console.log('WARNING: ' + x);
-        };
-      ''')
-      self.btest('mem_init_request.cpp', expected=status, args=['-sWASM=0', '--pre-js', 'pre.js', '--memory-init-file', '1'])
-
-    self.set_setting('EXIT_RUNTIME')
-    test('test.html.mem', 'exit:0')
-    test('nothing.nowhere', 'got_error')
-
-  @parameterized({
-    '': ([],),
-    'wasm2js': (['-sWASM=0', '--memory-init-file=1'],)
-  })
-  def test_runtime_misuse(self, mode):
-    if mode:
-      self.require_wasm2js()
+  @also_with_wasm2js
+  def test_runtime_misuse(self):
     self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$ccall,$cwrap')
     post_prep = '''
       var expected_ok = false;
@@ -2554,14 +2475,14 @@ void *getBindBuffer() {
 
       print('mem init, so async, call too early')
       create_file('post.js', post_prep + post_test + post_hook)
-      self.btest(filename, expected='600', args=['--post-js', 'post.js', '-sEXIT_RUNTIME'] + extra_args + mode, reporting=Reporting.NONE)
+      self.btest(filename, expected='600', args=['--post-js', 'post.js', '-sEXIT_RUNTIME'] + extra_args, reporting=Reporting.NONE)
       print('sync startup, call too late')
       create_file('post.js', post_prep + 'Module.postRun = () => { ' + post_test + ' };' + post_hook)
-      self.btest(filename, expected=str(second_code), args=['--post-js', 'post.js', '-sEXIT_RUNTIME'] + extra_args + mode, reporting=Reporting.NONE)
+      self.btest(filename, expected=str(second_code), args=['--post-js', 'post.js', '-sEXIT_RUNTIME'] + extra_args, reporting=Reporting.NONE)
 
       print('sync, runtime still alive, so all good')
       create_file('post.js', post_prep + 'expected_ok = true; Module.postRun = () => { ' + post_test + ' };' + post_hook)
-      self.btest(filename, expected='606', args=['--post-js', 'post.js'] + extra_args + mode, reporting=Reporting.NONE)
+      self.btest(filename, expected='606', args=['--post-js', 'post.js'] + extra_args, reporting=Reporting.NONE)
 
   def test_cwrap_early(self):
     self.btest(Path('browser/cwrap_early.cpp'), args=['-O2', '-sASSERTIONS', '--pre-js', test_file('browser/cwrap_early.js'), '-sEXPORTED_RUNTIME_METHODS=cwrap'], expected='0')
@@ -2937,8 +2858,6 @@ Module["preRun"] = () => {
       ensure_dir('sub')
       if wasm:
         shutil.move('page.wasm', Path('sub/page.wasm'))
-      else:
-        shutil.move('page.html.mem', Path('sub/page.html.mem'))
       shutil.move('test.data', Path('sub/test.data'))
       self.run_browser('page.html', '/report_result?exit:0')
 
@@ -2961,28 +2880,9 @@ Module["preRun"] = () => {
         self.compile_btest('src.cpp', ['-O2', '-g', '--shell-file', 'shell.html', '--pre-js', 'data.js', '-o', 'page.html', '-sSAFE_HEAP', '-sASSERTIONS', '-sFORCE_FILESYSTEM', '-sWASM=' + str(wasm)] + args, reporting=Reporting.JS_ONLY)
         if wasm:
           shutil.move('page.wasm', Path('sub/page.wasm'))
-        else:
-          shutil.move('page.html.mem', Path('sub/page.html.mem'))
         self.run_browser('page.html', '/report_result?exit:' + expected)
 
       in_html('0')
-
-      # verify that the mem init request succeeded in the latter case
-      if not wasm:
-        create_file('src.cpp', r'''
-          #include <stdio.h>
-          #include <emscripten.h>
-
-          int main() {
-            int result = EM_ASM_INT({
-              return Module['memoryInitializerRequest'].status;
-            });
-            printf("memory init request: %d\n", result);
-            return result;
-          }
-          ''')
-
-        in_html('200')
 
   @requires_graphics_hardware
   def test_glfw3_default_hints(self):
@@ -3008,20 +2908,15 @@ Module["preRun"] = () => {
     self.btest_exit('test_glfw3_hi_dpi_aware.c', args=['-sUSE_GLFW=3', '-lGL'])
 
   @requires_graphics_hardware
+  @also_with_wasm2js
   @no_wasm64('SDL2 + wasm64')
-  @parameterized({
-    '': ([],),
-    'memfile': (['-sWASM=0', '--memory-init-file=1'],)
-  })
-  def test_sdl2_image(self, args):
-    if args:
-      self.require_wasm2js()
-    # load an image file, get pixel data. Also O2 coverage for --preload-file, and memory-init
+  def test_sdl2_image(self):
+    # load an image file, get pixel data. Also O2 coverage for --preload-file
     shutil.copyfile(test_file('screenshot.jpg'), 'screenshot.jpg')
 
     for dest, dirname, basename in [('screenshot.jpg', '/', 'screenshot.jpg'),
                                     ('screenshot.jpg@/assets/screenshot.jpg', '/assets', 'screenshot.jpg')]:
-      self.btest_exit('test_sdl2_image.c', 600, args=args + [
+      self.btest_exit('test_sdl2_image.c', 600, args=[
         '-O2',
         '--preload-file', dest,
         '-DSCREENSHOT_DIRNAME="' + dirname + '"',
@@ -3586,12 +3481,6 @@ Module["preRun"] = () => {
             hello._main();
           });
         '''),
-        # Even without a mem init file, everything is async
-        (['-sEXPORT_NAME="HelloWorld"', '--memory-init-file', '0'], '''
-          HelloWorld({ noInitialRun: true }).then(hello => {
-            hello._main();
-          });
-        '''),
       ]:
         print('test on', opts, args, code)
         # this test is synchronous, so avoid async startup due to wasm features
@@ -4005,7 +3894,7 @@ Module["preRun"] = () => {
   @no_4gb('https://github.com/emscripten-core/emscripten/issues/21318')
   @requires_threads
   def test_pthread_gcc_64bit_atomic_fetch_and_op(self):
-    if not self.is_wasm():
+    if self.is_wasm2js():
       self.skipTest('https://github.com/WebAssembly/binaryen/issues/4358')
     self.emcc_args += ['-Wno-sync-fetch-and-nand-semantics-changed']
     self.btest_exit('pthread/test_pthread_gcc_64bit_atomic_fetch_and_op.cpp', args=['-O3', '-pthread', '-sPTHREAD_POOL_SIZE=8'])
@@ -4025,7 +3914,7 @@ Module["preRun"] = () => {
   @no_4gb('https://github.com/emscripten-core/emscripten/issues/21318')
   @requires_threads
   def test_pthread_gcc_64bit_atomic_op_and_fetch(self):
-    if not self.is_wasm():
+    if self.is_wasm2js():
       self.skipTest('https://github.com/WebAssembly/binaryen/issues/4358')
     self.emcc_args += ['-Wno-sync-fetch-and-nand-semantics-changed', '--profiling-funcs']
     self.btest_exit('pthread/test_pthread_gcc_64bit_atomic_op_and_fetch.cpp', args=['-pthread', '-O2', '-sPTHREAD_POOL_SIZE=8'])
@@ -4250,8 +4139,6 @@ Module["preRun"] = () => {
     create_file('shell.html', read_file(path_from_root('src/shell.html')).replace('var Module = {', 'var Module = { locateFile: function (path, prefix) {if (path.endsWith(".wasm")) {return prefix + path;} else {return "cdn/" + path;}}, '))
     self.compile_btest('main.cpp', ['--shell-file', 'shell.html', '-pthread', '-sPTHREAD_POOL_SIZE', '-o', 'test.html'], reporting=Reporting.JS_ONLY)
     shutil.move('test.worker.js', Path('cdn/test.worker.js'))
-    if os.path.exists('test.html.mem'):
-      shutil.copyfile('test.html.mem', Path('cdn/test.html.mem'))
     self.run_browser('test.html', '/report_result?exit:0')
 
     # Test that it is possible to define "Module.locateFile(foo)" function to locate where worker.js will be loaded from.
@@ -4329,23 +4216,13 @@ Module["preRun"] = () => {
   # global data section of the application memory area.
   @requires_threads
   def test_pthread_global_data_initialization(self):
-    # --memory-init-file mode disabled because WASM=0 does not seem to work with EXPORT_NAME
-    mem_init_modes = [[]]  # ['-sWASM=0', '--memory-init-file', '0'], ['-sWASM=0', '--memory-init-file', '1']]
-    for mem_init_mode in mem_init_modes:
-      print(mem_init_mode)
-      for args in [['-sMODULARIZE', '-sEXPORT_NAME=MyModule', '--shell-file', test_file('shell_that_launches_modularize.html')], ['-O3']]:
-        self.btest_exit('pthread/test_pthread_global_data_initialization.c', args=args + mem_init_mode + ['-pthread', '-sPROXY_TO_PTHREAD', '-sPTHREAD_POOL_SIZE'])
+    for args in [['-sMODULARIZE', '-sEXPORT_NAME=MyModule', '--shell-file', test_file('shell_that_launches_modularize.html')], ['-O3']]:
+      self.btest_exit('pthread/test_pthread_global_data_initialization.c', args=args + ['-pthread', '-sPROXY_TO_PTHREAD', '-sPTHREAD_POOL_SIZE'])
 
   @requires_wasm2js
   @requires_threads
   def test_pthread_global_data_initialization_in_sync_compilation_mode(self):
-    if self.is_wasm64():
-      self.skipTest('wasm2js is not compatible with MEMORY64')
-    mem_init_modes = [[], ['-sWASM=0', '--memory-init-file', '0'], ['-sWASM=0', '--memory-init-file', '1']]
-    for mem_init_mode in mem_init_modes:
-      print(mem_init_mode)
-      args = ['-sWASM_ASYNC_COMPILATION=0']
-      self.btest_exit('pthread/test_pthread_global_data_initialization.c', args=args + mem_init_mode + ['-pthread', '-sPROXY_TO_PTHREAD', '-sPTHREAD_POOL_SIZE'])
+    self.btest_exit('pthread/test_pthread_global_data_initialization.c', args=['-sWASM_ASYNC_COMPILATION=0', '-pthread', '-sPROXY_TO_PTHREAD', '-sPTHREAD_POOL_SIZE'])
 
   # Test that emscripten_get_now() reports coherent wallclock times across all
   # pthreads, instead of each pthread independently reporting wallclock times
@@ -4496,27 +4373,6 @@ Module["preRun"] = () => {
       self.compile_btest('browser_test_hello_world.c', ['-o', 'test.js', '-O' + str(opts), '--proxy-to-worker'])
       create_file('test.html', '<script src="test.js"></script>')
       self.run_browser('test.html', '/report_result?0')
-
-  @requires_wasm2js
-  @parameterized({
-    'O0': [('-O0',), '0'],
-    'O1': [('-O1',), '0'],
-    'O2': [('-O2',), '1'],
-  })
-  def test_in_flight_memfile_request(self, args, expected):
-    # test the XHR for an asm.js mem init file being in flight already
-    self.emcc_args += args
-    self.set_setting('WASM', 0)
-
-    print('plain html')
-    self.compile_btest('in_flight_memfile_request.c', ['-o', 'test.js'])
-    create_file('test.html', '<script src="test.js"></script>')
-    # never when we provide our own HTML like this.
-    self.run_browser('test.html', '/report_result?0')
-
-    print('default html')
-    # should happen when there is a mem init file (-O2+)
-    self.btest('in_flight_memfile_request.c', expected=expected)
 
   @parameterized({
     '': ([], 1),
@@ -5110,7 +4966,6 @@ Module["preRun"] = () => {
     self.assertNotExists('test.js')
     self.assertNotExists('test.worker.js')
     self.assertNotExists('test.wasm')
-    self.assertNotExists('test.mem')
 
   # Tests that SINGLE_FILE works as intended in generated HTML with MINIMAL_RUNTIME
   @parameterized({
@@ -5124,7 +4979,6 @@ Module["preRun"] = () => {
     self.assertNotExists('test.js')
     self.assertNotExists('test.wasm')
     self.assertNotExists('test.asm.js')
-    self.assertNotExists('test.mem')
     self.assertNotExists('test.js')
     self.assertNotExists('test.worker.js')
 
@@ -5356,16 +5210,10 @@ Module["preRun"] = () => {
     '': ([],),
     'modularize': (['-sMODULARIZE'],),
   })
-  @parameterized({
-    '': ([],),
-    'wasm2js': (['-sWASM=0', '--memory-init-file', '0'],),
-    'wasm2js_mem_init_file': (['-sWASM=0', '--memory-init-file', '1'],),
-  })
-  def test_minimal_runtime_loader_shell(self, wasm_args, modularize):
+  @also_with_wasm2js
+  def test_minimal_runtime_loader_shell(self, args):
     args = ['-sMINIMAL_RUNTIME=2']
-    if wasm_args:
-      self.require_wasm2js()
-    self.btest_exit('minimal_hello.c', args=args + wasm_args + modularize)
+    self.btest_exit('minimal_hello.c', args=args)
 
   # Tests that -sMINIMAL_RUNTIME works well in different build modes
   @parameterized({
@@ -5860,22 +5708,22 @@ class emrun(RunnerCore):
   def test_emrun_info(self):
     if not has_browser():
       self.skipTest('need a browser')
-    result = self.run_process([EMRUN, '--system_info', '--browser_info'], stdout=PIPE).stdout
+    result = self.run_process([EMRUN, '--system-info', '--browser_info'], stdout=PIPE).stdout
     assert 'CPU' in result
     assert 'Browser' in result
     assert 'Traceback' not in result
 
-    result = self.run_process([EMRUN, '--list_browsers'], stdout=PIPE).stdout
+    result = self.run_process([EMRUN, '--list-browsers'], stdout=PIPE).stdout
     assert 'Traceback' not in result
 
   def test_no_browser(self):
-    # Test --no_browser mode where we have to take care of launching the browser ourselves
+    # Test --no-browser mode where we have to take care of launching the browser ourselves
     # and then killing emrun when we are done.
     if not has_browser():
       self.skipTest('need a browser')
 
     self.run_process([EMCC, test_file('test_emrun.c'), '--emrun', '-o', 'hello_world.html'])
-    proc = subprocess.Popen([EMRUN, '--no_browser', '.', '--port=3333'], stdout=PIPE)
+    proc = subprocess.Popen([EMRUN, '--no-browser', '.', '--port=3333'], stdout=PIPE)
     try:
       if EMTEST_BROWSER:
         print('Starting browser')
@@ -5907,9 +5755,9 @@ class emrun(RunnerCore):
 
     os.chdir(path_from_root())
     args_base = [EMRUN, '--timeout', '30', '--safe_firefox_profile',
-                 '--kill_exit', '--port', '6939', '--verbose',
-                 '--log_stdout', self.in_dir('stdout.txt'),
-                 '--log_stderr', self.in_dir('stderr.txt')]
+                 '--kill-exit', '--port', '6939', '--verbose',
+                 '--log-stdout', self.in_dir('stdout.txt'),
+                 '--log-stderr', self.in_dir('stderr.txt')]
 
     # Verify that trying to pass argument to the page without the `--` separator will
     # generate an actionable error message

@@ -138,24 +138,7 @@ var HEAP,
 var HEAP_DATA_VIEW;
 #endif
 
-function updateMemoryViews() {
-  var b = wasmMemory.buffer;
-#if SUPPORT_BIG_ENDIAN
-  Module['HEAP_DATA_VIEW'] = HEAP_DATA_VIEW = new DataView(b);
-#endif
-  Module['HEAP8'] = HEAP8 = new Int8Array(b);
-  Module['HEAP16'] = HEAP16 = new Int16Array(b);
-  Module['HEAPU8'] = HEAPU8 = new Uint8Array(b);
-  Module['HEAPU16'] = HEAPU16 = new Uint16Array(b);
-  Module['HEAP32'] = HEAP32 = new Int32Array(b);
-  Module['HEAPU32'] = HEAPU32 = new Uint32Array(b);
-  Module['HEAPF32'] = HEAPF32 = new Float32Array(b);
-  Module['HEAPF64'] = HEAPF64 = new Float64Array(b);
-#if WASM_BIGINT
-  Module['HEAP64'] = HEAP64 = new BigInt64Array(b);
-  Module['HEAPU64'] = HEAPU64 = new BigUint64Array(b);
-#endif
-}
+#include "runtime_shared.js"
 
 #if ASSERTIONS
 assert(!Module['STACK_SIZE'], 'STACK_SIZE can no longer be set at runtime.  Use -sSTACK_SIZE at link time')
@@ -990,9 +973,6 @@ function createWasm() {
 #endif
     updateMemoryViews();
 #endif
-#if !MEM_INIT_IN_WASM
-    runMemoryInitializer();
-#endif
 
 #if '$wasmTable' in addedLibraryItems && !RELOCATABLE
     wasmTable = wasmExports['__indirect_function_table'];
@@ -1139,88 +1119,6 @@ function getCompilerSetting(name) {
   return compilerSettings[name];
 }
 #endif // RETAIN_COMPILER_SETTINGS
-
-#if !MEM_INIT_IN_WASM
-var memoryInitializer = <<< MEM_INITIALIZER >>>;
-
-function runMemoryInitializer() {
-#if PTHREADS
-  if (ENVIRONMENT_IS_PTHREAD) return;
-#endif
-  if (!isDataURI(memoryInitializer)) {
-    memoryInitializer = locateFile(memoryInitializer);
-  }
-  if (ENVIRONMENT_IS_NODE || ENVIRONMENT_IS_SHELL) {
-    var data = readBinary(memoryInitializer);
-    HEAPU8.set(data, {{{ GLOBAL_BASE }}});
-  } else {
-    addRunDependency('memory initializer');
-    var applyMemoryInitializer = (data) => {
-      if (data.byteLength) data = new Uint8Array(data);
-#if ASSERTIONS
-      for (var i = 0; i < data.length; i++) {
-        assert(HEAPU8[{{{ GLOBAL_BASE }}} + i] === 0, "area for memory initializer should not have been touched before it's loaded");
-      }
-#endif
-      HEAPU8.set(data, {{{ GLOBAL_BASE }}});
-      // Delete the typed array that contains the large blob of the memory initializer request response so that
-      // we won't keep unnecessary memory lying around. However, keep the XHR object itself alive so that e.g.
-      // its .status field can still be accessed later.
-      if (Module['memoryInitializerRequest']) delete Module['memoryInitializerRequest'].response;
-      removeRunDependency('memory initializer');
-    };
-    var doBrowserLoad = () => {
-      readAsync(memoryInitializer, applyMemoryInitializer, () => {
-        var e = new Error('could not load memory initializer ' + memoryInitializer);
-#if MODULARIZE
-          readyPromiseReject(e);
-#else
-          throw e;
-#endif
-      });
-    };
-#if SUPPORT_BASE64_EMBEDDING
-    var memoryInitializerBytes = tryParseAsDataURI(memoryInitializer);
-    if (memoryInitializerBytes) {
-      applyMemoryInitializer(memoryInitializerBytes.buffer);
-    } else
-#endif
-    if (Module['memoryInitializerRequest']) {
-      // a network request has already been created, just use that
-      var useRequest = () => {
-        var request = Module['memoryInitializerRequest'];
-        var response = request.response;
-        if (request.status !== 200 && request.status !== 0) {
-#if SUPPORT_BASE64_EMBEDDING
-          var data = tryParseAsDataURI(Module['memoryInitializerRequestURL']);
-          if (data) {
-            response = data.buffer;
-          } else {
-#endif
-            // If you see this warning, the issue may be that you are using locateFile and defining it in JS. That
-            // means that the HTML file doesn't know about it, and when it tries to create the mem init request early, does it to the wrong place.
-            // Look in your browser's devtools network console to see what's going on.
-            console.warn('a problem seems to have happened with Module.memoryInitializerRequest, status: ' + request.status + ', retrying ' + memoryInitializer);
-            doBrowserLoad();
-            return;
-#if SUPPORT_BASE64_EMBEDDING
-          }
-#endif
-        }
-        applyMemoryInitializer(response);
-      };
-      if (Module['memoryInitializerRequest'].response) {
-        setTimeout(useRequest, 0); // it's already here; but, apply it asynchronously
-      } else {
-        Module['memoryInitializerRequest'].addEventListener('load', useRequest); // wait for it
-      }
-    } else {
-      // fetch it from the network ourselves
-      doBrowserLoad();
-    }
-  }
-}
-#endif // MEM_INIT_IN_WASM == 0
 
 #if MAIN_MODULE && ASYNCIFY
 // With MAIN_MODULE + ASYNCIFY the normal method of placing stub functions in

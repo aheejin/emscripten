@@ -306,6 +306,17 @@ def requires_v8(func):
   return decorated
 
 
+def requires_wasm2js(f):
+  assert callable(f)
+
+  @wraps(f)
+  def decorated(self, *args, **kwargs):
+    self.require_wasm2js()
+    return f(self, *args, **kwargs)
+
+  return decorated
+
+
 def node_pthreads(f):
   @wraps(f)
   def decorated(self, *args, **kwargs):
@@ -373,7 +384,7 @@ def also_with_wasm_bigint(f):
 
   def metafunc(self, with_bigint):
     if with_bigint:
-      if not self.is_wasm():
+      if self.is_wasm2js():
         self.skipTest('wasm2js does not support WASM_BIGINT')
       if self.get_setting('WASM_BIGINT') is not None:
         self.skipTest('redundant in bigint test config')
@@ -461,7 +472,7 @@ def with_both_sjlj(f):
 
   def metafunc(self, is_native):
     if is_native:
-      if not self.is_wasm():
+      if self.is_wasm2js():
         self.skipTest('wasm2js does not support wasm SjLj')
       self.require_wasm_eh()
       # FIXME Temporarily disabled. Enable this later when the bug is fixed.
@@ -680,9 +691,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     return self.get_setting('INITIAL_MEMORY') == '2200mb'
 
   def check_dylink(self):
-    if self.get_setting('ALLOW_MEMORY_GROWTH') == 1 and not self.is_wasm():
-      self.skipTest('no dynamic linking with memory growth (without wasm)')
-    if not self.is_wasm():
+    if self.is_wasm2js():
       self.skipTest('no dynamic linking support in wasm2js yet')
     if '-fsanitize=undefined' in self.emcc_args:
       self.skipTest('no dynamic linking support in UBSan yet')
@@ -793,7 +802,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     # warnings-as-errors, so disable that warning
     self.emcc_args += ['-Wno-experimental']
     self.set_setting('ASYNCIFY', 2)
-    if not self.is_wasm():
+    if self.is_wasm2js():
       self.skipTest('JSPI is not currently supported for WASM2JS')
 
     if self.is_browser_test():
@@ -823,6 +832,12 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     else:
       self.fail('either d8 or node >= 19 required to run JSPI tests.  Use EMTEST_SKIP_JSPI to skip')
 
+  def require_wasm2js(self):
+    if self.is_wasm64():
+      self.skipTest('wasm2js is not compatible with MEMORY64')
+    if self.is_2gb() or self.is_4gb():
+      self.skipTest('wasm2js does not support over 2gb of memory')
+
   def setup_node_pthreads(self):
     self.require_node()
     self.emcc_args += ['-Wno-pthreads-mem-growth', '-pthread']
@@ -831,16 +846,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     nodejs = self.get_nodejs()
     self.js_engines = [nodejs]
     self.node_args += shared.node_pthread_flags(nodejs)
-
-  def uses_memory_init_file(self):
-    if self.get_setting('SIDE_MODULE') or (self.is_wasm() and not self.get_setting('WASM2JS')):
-      return False
-    elif '--memory-init-file' in self.emcc_args:
-      return int(self.emcc_args[self.emcc_args.index('--memory-init-file') + 1])
-    else:
-      # side modules handle memory differently; binaryen puts the memory in the wasm module
-      opt_supports = any(opt in self.emcc_args for opt in ('-O2', '-O3', '-Os', '-Oz'))
-      return opt_supports
 
   def set_temp_dir(self, temp_dir):
     self.temp_dir = temp_dir
@@ -1087,11 +1092,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
 
     self.run_process(cmd, stderr=self.stderr_redirect if not DEBUG else None)
     self.assertExists(output)
-
-    if js_outfile and self.uses_memory_init_file():
-      src = read_file(output)
-      # side memory init file, or an empty one in the js
-      assert ('/* memory initializer */' not in src) or ('/* memory initializer */ allocate([]' in src)
 
     return output
 

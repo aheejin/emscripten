@@ -717,31 +717,25 @@ f.close()
     self.assertContained('disabling source maps because a js transform is being done', err)
     self.assertIn('transformed!', read_file('a.out.js'))
 
-  def test_js_mem_file(self):
-    for opts in [0, 1, 2, 3]:
-      print('mem init in', opts)
+  @parameterized({
+    '': [[]],
+    'O1': [['-O1']],
+    'O2': [['-O2']],
+    'O3': [['-O3']],
+  })
+  def test_emcc_asm_v_wasm(self, opts):
+    for mode in ([], ['-sWASM=0']):
       self.clear()
-      self.run_process([EMCC, test_file('hello_world.c'), '-sWASM=0', '-O' + str(opts)])
-      if opts >= 2:
-        self.assertExists('a.out.js.mem')
-      else:
-        self.assertNotExists('a.out.js.mem')
-
-  def test_emcc_asm_v_wasm(self):
-    for opts in ([], ['-O1'], ['-O2'], ['-O3']):
-      print('opts', opts)
-      for mode in ([], ['-sWASM=0']):
-        self.clear()
-        wasm = '=0' not in str(mode)
-        print('  mode', mode, 'wasm?', wasm)
-        self.run_process([EMCC, test_file('hello_world.c'), '-sENVIRONMENT=node,shell'] + opts + mode)
-        self.assertExists('a.out.js')
-        if wasm:
-          self.assertExists('a.out.wasm')
-        for engine in config.JS_ENGINES:
-          print('    engine', engine)
-          out = self.run_js('a.out.js', engine=engine)
-          self.assertContained('hello, world!', out)
+      wasm = '=0' not in str(mode)
+      print('  mode', mode, 'wasm?', wasm)
+      self.run_process([EMCC, test_file('hello_world.c'), '-sENVIRONMENT=node,shell'] + opts + mode)
+      self.assertExists('a.out.js')
+      if wasm:
+        self.assertExists('a.out.wasm')
+      for engine in config.JS_ENGINES:
+        print('    engine', engine)
+        out = self.run_js('a.out.js', engine=engine)
+        self.assertContained('hello, world!', out)
 
   @crossplatform
   def test_emcc_cflags(self):
@@ -2435,6 +2429,16 @@ int f() {
     stderr = self.expect_fail([EMCC, test_file('other/test_external_ports.c'), f'--use-port={external_port_path}:dependency=invalid', '-o', 'a4.out.js'])
     self.assertFalse(os.path.exists('a4.out.js'))
     self.assertContained('unknown dependency `invalid` for port `external`', stderr)
+    # testing help
+    stdout = self.run_process([EMCC, test_file('other/test_external_ports.c'), f'--use-port={external_port_path}:help'], stdout=PIPE).stdout
+    self.assertContained('''external (--use-port=external; Test License)
+Test Description
+Options:
+* value1: Value for define TEST_VALUE_1
+* value2: Value for define TEST_VALUE_2
+* dependency: A dependency
+More info: https://emscripten.org
+''', stdout)
 
   def test_link_memcpy(self):
     # memcpy can show up *after* optimizations, so after our opportunity to link in libc, so it must be special-cased
@@ -8431,7 +8435,8 @@ int main() {
     'wasmfs': (['-Oz', '-sWASMFS'], [], []), # noqa
   })
   def test_metadce_minimal(self, *args):
-    self.set_setting('INCOMING_MODULE_JS_API', [])
+    self.set_setting('STRICT')
+    self.emcc_args.append('--no-entry')
     self.run_metadce_test('minimal.c', *args)
 
   @node_pthreads
@@ -9091,26 +9096,19 @@ int main() {
   })
   def test_single_file(self, wasm2js):
     for (single_file_enabled,
-         meminit1_enabled,
          debug_enabled,
-         closure_enabled) in itertools.product([True, False], repeat=4):
+         closure_enabled) in itertools.product([True, False], repeat=3):
       # skip unhelpful option combinations
-      if meminit1_enabled and not wasm2js:
-        continue
       if closure_enabled and debug_enabled:
         continue
 
       expect_wasm = not wasm2js
-      expect_meminit = meminit1_enabled and wasm2js
 
       cmd = [EMCC, test_file('hello_world.c')]
 
       if single_file_enabled:
-        expect_meminit = False
         expect_wasm = False
         cmd += ['-sSINGLE_FILE']
-      if meminit1_enabled:
-        cmd += ['--memory-init-file', '1']
       if debug_enabled:
         cmd += ['-g']
       if closure_enabled:
@@ -9124,7 +9122,6 @@ int main() {
         print(' '.join(cmd))
         self.run_process(cmd)
         print(os.listdir('.'))
-        assert expect_meminit == (os.path.exists('a.out.mem') or os.path.exists('a.out.js.mem'))
         assert expect_wasm == os.path.exists('a.out.wasm')
         assert not os.path.exists('a.out.wat')
         self.assertContained('hello, world!', self.run_js('a.out.js'))
@@ -9645,7 +9642,7 @@ int main() {
     self.do_runf('src.c', 'hello!', emcc_args=args)
 
   def test_check_sourcemapurl(self):
-    if not self.is_wasm():
+    if self.is_wasm2js():
       self.skipTest('only supported with wasm')
     self.run_process([EMCC, test_file('hello_123.c'), '-gsource-map', '-o', 'a.js', '--source-map-base', 'dir/'])
     output = read_binary('a.wasm')
@@ -9671,7 +9668,7 @@ int main() {
     'profiling': ['--profiling'] # -gsource-map --profiling should still emit a source map; see #8584
   })
   def test_check_sourcemapurl_default(self, *args):
-    if not self.is_wasm():
+    if self.is_wasm2js():
       self.skipTest('only supported with wasm')
 
     self.run_process([EMCC, test_file('hello_123.c'), '-gsource-map', '-o', 'a.js'] + list(args))
@@ -9760,7 +9757,33 @@ int main() {
     test('foo.wasm.dump')
     test('bar.wasm.dump')
 
-  def test_emsymbolizer(self):
+  def get_instr_addr(self, text, filename):
+    '''
+    Runs llvm-objdump to get the address of the first occurrence of the
+    specified line within the given function. llvm-objdump's output format
+    example is as follows:
+    ...
+    00000004 <foo>:
+          ...
+          6: 41 00         i32.const       0
+          ...
+    The addresses here are the offsets to the start of the file. Returns
+    the address string in hexadecimal.
+    '''
+    out = self.run_process([common.LLVM_OBJDUMP, '-d', filename],
+                           stdout=PIPE).stdout.strip()
+    out_lines = out.splitlines()
+    found = False
+    for line in out_lines:
+      if text in line:
+        offset = line.strip().split(':')[0]
+        found = True
+        break
+    assert found
+    return '0x' + offset
+
+  def test_emsymbolizer_srcloc(self):
+    'Test emsymbolizer use cases that provide src location granularity info'
     def check_dwarf_loc_info(address, funcs, locs):
       out = self.run_process(
           [emsymbolizer, '-s', 'dwarf', 'test_dwarf.wasm', address],
@@ -9772,45 +9795,19 @@ int main() {
 
     def check_source_map_loc_info(address, loc):
       out = self.run_process(
-          [emsymbolizer, '-s', 'sourcemap', 'test_dwarf.wasm',
-           address],
+          [emsymbolizer, '-s', 'sourcemap', 'test_dwarf.wasm', address],
           stdout=PIPE).stdout
       self.assertIn(loc, out)
-
-    # Runs llvm-objdump to get the address of the first occurrence of the
-    # specified line within the given function. llvm-objdump's output format
-    # example is as follows:
-    # ...
-    # 00000004 <foo>:
-    #        ...
-    #        6: 41 00         i32.const       0
-    #        ...
-    # The addresses here are the offsets to the start of the file. Returns
-    # the address string in hexadecimal.
-    def get_addr(text):
-      out = self.run_process([common.LLVM_OBJDUMP, '-d', 'test_dwarf.wasm'],
-                             stdout=PIPE).stdout.strip()
-      out_lines = out.splitlines()
-      found = False
-      for line in out_lines:
-        if text in line:
-          offset = line.strip().split(':')[0]
-          found = True
-          break
-      assert found
-      return '0x' + offset
 
     # We test two locations within test_dwarf.c:
     # out_to_js(0);     // line 6
     # __builtin_trap(); // line 13
-
-    # 1. Test DWARF + source map together
     self.run_process([EMCC, test_file('core/test_dwarf.c'),
                       '-g', '-gsource-map', '-O1', '-o', 'test_dwarf.js'])
     # Address of out_to_js(0) within foo(), uninlined
-    out_to_js_call_addr = get_addr('call\t0')
+    out_to_js_call_addr = self.get_instr_addr('call\t0', 'test_dwarf.wasm')
     # Address of __builtin_trap() within bar(), inlined into main()
-    unreachable_addr = get_addr('unreachable')
+    unreachable_addr = self.get_instr_addr('unreachable', 'test_dwarf.wasm')
 
     # Function name of out_to_js(0) within foo(), uninlined
     out_to_js_call_func = ['foo']
@@ -9824,6 +9821,7 @@ int main() {
     # The first one corresponds to the innermost inlined location.
     unreachable_loc = ['test_dwarf.c:13:3', 'test_dwarf.c:18:3']
 
+    # 1. Test DWARF + source map together
     # For DWARF, we check for the full inlined info for both function names and
     # source locations. Source maps provide neither function names nor inlined
     # info. So we only check for the source location of the outermost function.
@@ -9848,6 +9846,27 @@ int main() {
     check_dwarf_loc_info(out_to_js_call_addr, out_to_js_call_func,
                          out_to_js_call_loc)
     check_dwarf_loc_info(unreachable_addr, unreachable_func, unreachable_loc)
+
+  def test_emsymbolizer_functions(self):
+    'Test emsymbolizer use cases that only provide function-granularity info'
+    def check_func_info(filename, address, func):
+      out = self.run_process(
+        [emsymbolizer, filename, address], stdout=PIPE).stdout
+      self.assertIn(func, out)
+
+    # 1. Test name section only
+    self.run_process([EMCC, test_file('core/test_dwarf.c'),
+                      '--profiling-funcs', '-O1', '-o', 'test_dwarf.js'])
+    with webassembly.Module('test_dwarf.wasm') as wasm:
+      self.assertTrue(wasm.has_name_section())
+      self.assertIsNone(wasm.get_custom_section('.debug_info'))
+    # Address of out_to_js(0) within foo(), uninlined
+    out_to_js_call_addr = self.get_instr_addr('call\t0', 'test_dwarf.wasm')
+    # Address of __builtin_trap() within bar(), inlined into main()
+    unreachable_addr = self.get_instr_addr('unreachable', 'test_dwarf.wasm')
+    check_func_info('test_dwarf.wasm', out_to_js_call_addr, 'foo')
+    # The name section will not show bar, as it's inlined into main
+    check_func_info('test_dwarf.wasm', unreachable_addr, '__original_main')
 
   def test_separate_dwarf(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-g'])
@@ -10664,7 +10683,7 @@ int main () {
                                '-DNDEBUG',
                                '-ffast-math']
 
-    wasm2js = ['-sWASM=0', '--memory-init-file', '1']
+    wasm2js = ['-sWASM=0']
 
     math_sources = [test_file('code_size/math.c')]
     hello_world_sources = [test_file('small_hello_world.c'),
@@ -10705,7 +10724,6 @@ int main () {
     args = smallest_code_size_args[:]
 
     if js:
-      outputs += ['a.mem']
       args += wasm2js
       test_name += '_wasm2js'
     else:
@@ -13852,6 +13870,7 @@ foo/version.txt
     self.do_other_test('test_itimer.c')
 
   @node_pthreads
+  @flaky('https://github.com/emscripten-core/emscripten/issues/20125')
   def test_itimer_pthread(self):
     self.do_other_test('test_itimer.c')
 
@@ -14096,8 +14115,8 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     run(['-pthread'], expect_bulk_mem=True)
 
   def test_memory_init_file_unsupported(self):
-    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Werror', '--memory-init-file=1'])
-    self.assertContained('error: --memory-init-file is only supported with -sWASM=0 [-Wunsupported] [-Werror]', err)
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '--memory-init-file=1'])
+    self.assertContained('error: --memory-init-file is no longer supported', err)
 
   @node_pthreads
   def test_node_pthreads_err_out(self):
