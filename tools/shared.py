@@ -210,6 +210,7 @@ def run_multiple_processes(commands,
       if DEBUG:
         logger.debug('Running subprocess %d/%d: %s' % (i + 1, len(commands), ' '.join(commands[i])))
       print_compiler_stage(commands[i])
+      mylog.log_cmd(commands[i])
       proc = subprocess.Popen(commands[i], stdout=stdout, stderr=None, env=env, cwd=cwd)
       processes[i] = proc
       if route_stdout_to_temp_files_suffix:
