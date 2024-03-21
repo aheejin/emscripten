@@ -753,7 +753,7 @@ class TestCoreBase(RunnerCore):
     self.do_core_test('test_stack.c')
 
   def test_stack_align(self):
-    src = test_file('core/test_stack_align.cpp')
+    src = test_file('core/test_stack_align.c')
 
     def test():
       self.do_runf(src, ['''align 4: 0
@@ -1715,7 +1715,7 @@ int main() {
     self.do_core_test('test_mod_globalstruct.c')
 
   def test_sizeof(self):
-    self.do_core_test('test_sizeof.cpp')
+    self.do_core_test('test_sizeof.c')
 
   def test_llvm_used(self):
     self.do_core_test('test_llvm_used.c')
@@ -2625,7 +2625,7 @@ The current type of b is: 9
     self.do_runf('termios/test_tcgetattr.c', 'success')
 
   def test_time(self):
-    self.do_core_test('test_time.cpp')
+    self.do_core_test('test_time.c')
     for tz in ['EST+05EDT', 'UTC+0', 'CET']:
       print('extra tz test:', tz)
       with env_modify({'TZ': tz}):
@@ -2633,7 +2633,7 @@ The current type of b is: 9
         # possible. It seems that the TZ environment variable does not
         # work all the time (at least it's not well respected by
         # Node.js on Windows), but it does no harm either.
-        self.do_core_test('test_time.cpp')
+        self.do_core_test('test_time.c')
 
   def test_timeb(self):
     # Confirms they are called in reverse order
@@ -2720,7 +2720,29 @@ The current type of b is: 9
     self.do_runf('core/stack_overflow.c', 'Aborted(stack overflow', assert_returncode=NON_ZERO)
 
   def test_stackAlloc(self):
-    self.do_core_test('stackAlloc.cpp')
+    self.do_core_test('test_stackAlloc.c')
+
+  def test_legacy_stack_deps(self):
+    # stackSave/stackRestore/stackAlloc are now normal JS library
+    # functions that must be $-prefixed in `__deps` lists.  However,
+    # to support legacy code we continue to support the non-prefixed
+    # versions in `__deps` lists.
+    create_file('lib.js', '''
+    addToLibrary({
+      foo__deps: ['stackSave', 'stackRestore'],
+      foo: () => {
+        var a = stackSave();
+        stackRestore(a);
+        return 0;
+      }
+    })''')
+    create_file('main.c', '''
+    int foo();
+
+    int main() {
+      return foo();
+    }''')
+    self.do_runf('main.c', emcc_args=['--js-library=lib.js'])
 
   def test_nestedstructs(self):
     src = r'''
@@ -5323,7 +5345,7 @@ Pass: 0.000012 0.000012''')
     self.do_core_test('test_sscanf_caps.c')
 
   def test_sscanf_hex(self):
-    self.do_core_test('test_sscanf_hex.cpp')
+    self.do_core_test('test_sscanf_hex.c')
 
   def test_sscanf_float(self):
     self.do_core_test('test_sscanf_float.c')
@@ -7182,7 +7204,7 @@ void* operator new(size_t size) {
   def test_demangle_stacks_symbol_map(self):
     # disable aggressive inlining in binaryen
     self.set_setting('BINARYEN_EXTRA_PASSES', '--one-caller-inline-max-function-size=1')
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$stackTrace')
+    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', '$jsStackTrace')
 
     self.set_setting('ENVIRONMENT', 'node,shell')
     if '-O' not in str(self.emcc_args) or '-O0' in self.emcc_args or '-O1' in self.emcc_args or '-g' in self.emcc_args:
@@ -9125,9 +9147,8 @@ NODEFS is no longer included by default; build with -lnodefs.js
     # embind should work with stack overflow checks (see #12356)
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('EXIT_RUNTIME')
-    self.set_setting('DEFAULT_TO_CXX')
     self.emcc_args += ['-lembind']
-    self.do_run_in_out_file_test('core/pthread/create.c')
+    self.do_run_in_out_file_test('core/pthread/create.c', emcc_args=['-sDEFAULT_TO_CXX'])
 
   @node_pthreads
   def test_pthread_exceptions(self):

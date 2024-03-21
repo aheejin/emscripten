@@ -3363,8 +3363,12 @@ Module["preRun"] = () => {
     self.btest_exit('async_mainloop.cpp', args=args + ['-sASYNCIFY'])
 
   @requires_sound_hardware
-  def test_sdl_audio_beep_sleep(self):
-    self.btest_exit('test_sdl_audio_beep_sleep.cpp', args=['-Os', '-sASSERTIONS', '-sDISABLE_EXCEPTION_CATCHING=0', '-profiling', '-sSAFE_HEAP', '-lSDL', '-sASYNCIFY'], timeout=90)
+  @parameterized({
+    '': ([],),
+    'safeheap': (['-sSAFE_HEAP'],),
+  })
+  def test_sdl_audio_beep_sleep(self, args):
+    self.btest_exit('test_sdl_audio_beep_sleep.cpp', args=['-Os', '-sASSERTIONS', '-sDISABLE_EXCEPTION_CATCHING=0', '-profiling', '-lSDL', '-sASYNCIFY'] + args, timeout=90)
 
   def test_mainloop_reschedule(self):
     self.btest('mainloop_reschedule.cpp', '1', args=['-Os', '-sASYNCIFY'])
@@ -4773,7 +4777,7 @@ Module["preRun"] = () => {
     'modularize': (['-sMODULARIZE', '-sEXPORT_NAME=MyModule'],),
     'O3': (['-O3'],),
     'O3_modularize': (['-O3', '-sMODULARIZE', '-sEXPORT_NAME=MyModule'],),
-    'O3_modularize_MINIMAL_RUNTIME_2': (['-O3', '-sMODULARIZE', '-sEXPORT_NAME=MyModule', '-sMINIMAL_RUNTIME=2', '-Wno-unused-command-line-argument'],),
+    'O3_modularize_MINIMAL_RUNTIME_2': (['-O3', '-sMODULARIZE', '-sEXPORT_NAME=MyModule', '-sMINIMAL_RUNTIME=2'],),
   })
   def test_minimal_runtime_hello_thread(self, opts):
     self.btest_exit('pthread/hello_thread.c', args=['--closure=1', '-sMINIMAL_RUNTIME', '-pthread'] + opts)

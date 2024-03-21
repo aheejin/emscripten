@@ -7815,10 +7815,6 @@ high = 1234
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sEXPORTED_FUNCTIONS=[{"a":1}]'])
     self.assertContained("list members in settings must be strings (not $<class 'dict'>)", err)
 
-  def test_dash_s_repeated(self):
-    err = self.expect_fail([EMCC, '-Werror', test_file('hello_world.c'), '-sEXPORTED_FUNCTIONS=foo', '-sEXPORTED_FUNCTIONS=bar'])
-    self.assertContained('emcc: error: -sEXPORTED_FUNCTIONS specified multiple times. Ignoring previous value (`foo`) [-Wunused-command-line-argument]', err)
-
   def test_zeroinit(self):
     create_file('src.c', r'''
 #include <stdio.h>
@@ -12023,23 +12019,21 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
 
   @parameterized({
     '': ([],),
-    'minimal': (['-sMINIMAL_RUNTIME'],),
+    'minimal': (['-sMINIMAL_RUNTIME', '-sSUPPORT_ERRNO'],),
   })
   def test_support_errno(self, args):
     self.emcc_args += args + ['-sEXPORTED_FUNCTIONS=_main,___errno_location', '-Wno-deprecated']
 
-    self.do_other_test('test_support_errno.c', emcc_args=['-sSUPPORT_ERRNO'])
-    size_enabled = os.path.getsize('test_support_errno.js')
+    self.do_other_test('test_support_errno.c')
+    size_default = os.path.getsize('test_support_errno.js')
 
     # Run the same test again but with SUPPORT_ERRNO disabled.  This time we don't expect errno
     # to be set after the failing syscall.
-    self.do_other_test('test_support_errno.c', emcc_args=['-sSUPPORT_ERRNO=0'], out_suffix='_disabled')
+    self.emcc_args += ['-sSUPPORT_ERRNO=0']
+    self.do_other_test('test_support_errno.c', out_suffix='_disabled')
 
     # Verify the JS output was smaller
-    size_disabled = os.path.getsize('test_support_errno.js')
-    print(size_enabled)
-    print(size_disabled)
-    self.assertLess(size_disabled, size_enabled)
+    self.assertLess(os.path.getsize('test_support_errno.js'), size_default)
 
   def test_assembly(self):
     self.run_process([EMCC, '-c', test_file('other/test_asm.s'), '-o', 'foo.o'])
@@ -14033,13 +14027,13 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
       {{{ C_STRUCTS.Foo }}}
     ''')
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '--js-library=lib.js'])
-    self.assertContained('Error: Missing C struct Foo! If you just added it to struct_info.json, you need to run ./tools/gen_struct_info.py', err)
+    self.assertContained('Error: Missing C struct Foo! If you just added it to struct_info.json, you need to run ./tools/maint/gen_struct_info.py (then run a second time with --wasm64)', err)
 
     create_file('lib.js', '''
       {{{ C_DEFINES.Foo }}}
     ''')
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '--js-library=lib.js'])
-    self.assertContained('Error: Missing C define Foo! If you just added it to struct_info.json, you need to run ./tools/gen_struct_info.py', err)
+    self.assertContained('Error: Missing C define Foo! If you just added it to struct_info.json, you need to run ./tools/maint/gen_struct_info.py (then run a second time with --wasm64)', err)
 
   def run_wasi_test_suite_test(self, name):
     if not os.path.exists(path_from_root('test/third_party/wasi-test-suite')):
