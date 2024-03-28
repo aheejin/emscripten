@@ -28,7 +28,7 @@ if __name__ == '__main__':
   raise Exception('do not run this file directly; do something like: test/runner other')
 
 from tools.shared import config
-from tools.shared import EMCC, EMXX, EMAR, EMRANLIB, FILE_PACKAGER, WINDOWS, LLVM_NM
+from tools.shared import EMCC, EMXX, EMAR, EMRANLIB, FILE_PACKAGER, LLVM_NM
 from tools.shared import CLANG_CC, CLANG_CXX, LLVM_AR, LLVM_DWARFDUMP, LLVM_DWP, EMCMAKE, EMCONFIGURE, WASM_LD
 from common import RunnerCore, path_from_root, is_slow_test, ensure_dir, disabled, make_executable
 from common import env_modify, no_mac, no_windows, only_windows, requires_native_clang, with_env_modify
@@ -40,7 +40,7 @@ from common import also_with_minimal_runtime, also_with_wasm_bigint, also_with_w
 from common import EMTEST_BUILD_VERBOSE, PYTHON, WEBIDL_BINDER
 from common import requires_network
 from tools import shared, building, utils, response_file, cache
-from tools.utils import read_file, write_file, delete_file, read_binary
+from tools.utils import read_file, write_file, delete_file, read_binary, MACOS, WINDOWS
 import common
 import jsrun
 import clang_native
@@ -2429,7 +2429,7 @@ int f() {
     # testing 2 options
     self.do_runf('other/test_external_ports.c', 'value1=12&value2=36\n', emcc_args=[f'--use-port={external_port_path}:value1=12:value2=36'])
     # testing dependency
-    self.do_runf('other/test_external_ports.c', 'sdl2=2\n', emcc_args=[f'--use-port={external_port_path}:dependency=sdl2'])
+    self.do_runf('other/test_external_ports.c', 'mpg123=45\n', emcc_args=[f'--use-port={external_port_path}:dependency=mpg123'])
     # testing invalid dependency
     stderr = self.expect_fail([EMCC, test_file('other/test_external_ports.c'), f'--use-port={external_port_path}:dependency=invalid', '-o', 'a4.out.js'])
     self.assertFalse(os.path.exists('a4.out.js'))
@@ -3246,9 +3246,14 @@ More info: https://emscripten.org
 
   def test_emit_tsd(self):
     self.run_process([EMCC, test_file('other/test_emit_tsd.c'),
-                      '--emit-tsd', 'test_emit_tsd.d.ts', '-Wno-experimental'] +
+                      '--emit-tsd', 'test_emit_tsd.d.ts', '-sEXPORT_ES6',
+                      '-sMODULARIZE', '-sEXPORTED_RUNTIME_METHODS=UTF8ArrayToString',
+                      '-Wno-experimental', '-o', 'test_emit_tsd.js'] +
                      self.get_emcc_args())
     self.assertFileContents(test_file('other/test_emit_tsd.d.ts'), read_file('test_emit_tsd.d.ts'))
+    # Test that the output compiles with a TS file that uses the defintions.
+    cmd = shared.get_npm_cmd('tsc') + [test_file('other/test_tsd.ts'), '--noEmit']
+    shared.check_call(cmd)
 
   def test_emconfig(self):
     output = self.run_process([emconfig, 'LLVM_ROOT'], stdout=PIPE).stdout.strip()
@@ -5721,6 +5726,8 @@ int main()
   @crossplatform
   @also_with_env_modify({'gb_locale': {'LC_ALL': 'en_GB'}, 'long_tz': {'TZ': 'Asia/Kathmandu'}})
   def test_strftime_zZ(self):
+    if os.environ.get('LC_ALL') == 'en_GB' and MACOS:
+      self.skipTest('setting LC_ALL is not compatible with macOS python')
     self.do_runf('other/test_strftime_zZ.c', 'ok!')
 
   def test_strptime_symmetry(self):
@@ -12028,6 +12035,20 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
     out = self.run_js('foo.js', assert_returncode=NON_ZERO)
     self.assertContained('native function `main` called after runtime exit', out)
 
+  def test_native_call_nargs(self):
+    self.set_setting('ASSERTIONS')
+    self.set_setting('EXPORTED_FUNCTIONS', ['_main', '_foo'])
+    create_file('foo.c', r'''
+      #include <emscripten.h>
+      void foo(int arg) {}
+      int main() {
+        EM_ASM(_foo(99, 100));
+      }
+    ''')
+    self.build('foo.c')
+    out = self.run_js('foo.js', assert_returncode=NON_ZERO)
+    self.assertContained('native function `foo` called with 2 args but expects 1', out)
+
   def test_metadce_wasm2js_i64(self):
     # handling i64 unsigned remainder brings in some i64 support code. metadce
     # must not remove it.
@@ -14055,10 +14076,10 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
       js = read_file('test_memops_bulk_memory.js')
       if expect_bulk_mem:
         self.assertNotContained('_emscripten_memcpy_js', js)
-        self.assertIn('$emscripten_memcpy_bulkmem', funcs)
+        self.assertIn('$_emscripten_memcpy_bulkmem', funcs)
       else:
         self.assertContained('_emscripten_memcpy_js', js)
-        self.assertNotIn('$emscripten_memcpy_bulkmem', funcs)
+        self.assertNotIn('$_emscripten_memcpy_bulkmem', funcs)
 
     # By default we expect to find `_emscripten_memcpy_js` in the generaed JS
     # and not to find the `emscripten_memcpy_bulkmem` function on the wasm

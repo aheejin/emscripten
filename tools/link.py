@@ -454,7 +454,7 @@ def make_js_executable(script):
 
 
 def do_split_module(wasm_file, options):
-  os.rename(wasm_file, wasm_file + '.orig')
+  os.replace(wasm_file, wasm_file + '.orig')
   args = ['--instrument']
   if options.requested_debug:
     # Tell wasm-split to preserve function names.
@@ -1343,6 +1343,9 @@ def phase_linker_setup(options, state, newargs):
 
   if '-lembind' in [x for _, x in state.link_flags]:
     settings.EMBIND = 1
+
+  if options.embind_emit_tsd or options.emit_tsd:
+    settings.EMIT_TSD = True
 
   if settings.PTHREADS:
     setup_pthreads(target)

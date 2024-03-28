@@ -550,6 +550,7 @@ jobs:
             lto2.test_dylink_syslibs_all
             lto2.test_float_builtins
             lto0.test_exceptions_allowed_uncaught
+            lto0.test_longjmp_standalone_standalone
             core3
             core2g.test_externref
             corez.test_dylink_iostream
@@ -918,9 +919,7 @@ jobs:
           python: "$EMSDK_PYTHON"
       - run-tests:
           title: "crossplatform tests"
-          # Skipping test_strftime_zZ_gb_locale since this test forces the
-          # locale to one that is not necessarily available on macOS.
-          test_targets: "--crossplatform-only skip:other.test_strftime_zZ_gb_locale"
+          test_targets: "--crossplatform-only"
       - upload-test-results
 
   test-mac-arm64:
@@ -942,9 +941,7 @@ jobs:
       # are currently missing arm64 macos binaries.
       - run-tests:
           title: "crossplatform tests"
-          # Skipping test_strftime_zZ_gb_locale since this test forces the
-          # locale to one that is not necessarily available on macOS.
-          test_targets: "--crossplatform-only skip:other.test_strftime_zZ_gb_locale"
+          test_targets: "--crossplatform-only"
       - upload-test-results
 
 workflows:
