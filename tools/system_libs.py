@@ -2437,6 +2437,7 @@ def install_system_headers(stamp):
     ('lib', 'libc', 'musl', 'include'): '',
     ('lib', 'libcxx', 'include'): os.path.join('c++', 'v1'),
     ('lib', 'libcxxabi', 'include'): os.path.join('c++', 'v1'),
+    ('lib', 'mimalloc', 'include'): '',
   }
 
   target_include_dir = cache.get_include_dir()
