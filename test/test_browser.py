@@ -23,7 +23,7 @@ from urllib.request import urlopen
 from common import BrowserCore, RunnerCore, path_from_root, has_browser, EMTEST_BROWSER, Reporting
 from common import create_file, parameterized, ensure_dir, disabled, test_file, WEBIDL_BINDER
 from common import read_file, also_with_minimal_runtime, EMRUN, no_wasm64, no_2gb, no_4gb
-from common import requires_wasm2js
+from common import requires_wasm2js, also_with_wasm2js
 from tools import shared
 from tools import ports
 from tools import utils
@@ -111,23 +111,6 @@ def no_wasmfs(note):
       f(self, *args, **kwargs)
     return decorated
   return decorator
-
-
-def also_with_wasm2js(f):
-  assert callable(f)
-
-  def metafunc(self, with_wasm2js, *args, **kwargs):
-    assert self.get_setting('WASM') is None
-    if with_wasm2js:
-      self.require_wasm2js()
-      self.set_setting('WASM', 0)
-      f(self, *args, **kwargs)
-    else:
-      f(self, *args, **kwargs)
-
-  metafunc._parameterize = {'': (False,),
-                            'wasm2js': (True,)}
-  return metafunc
 
 
 def shell_with_script(shell_file, output_file, replacement):
@@ -441,14 +424,15 @@ If manually bisecting:
     'pthreads': (['-pthread', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
   })
   def test_preload_file_with_manual_data_download(self, args):
-    create_file('file.txt', '''Hello!''')
+    create_file('file.txt', 'Hello!')
 
-    self.compile_btest('manual_download_data.cpp', ['-o', 'manual_download_data.js', '--preload-file', 'file.txt@/file.txt'] + args)
+    self.compile_btest('manual_download_data.cpp', ['-o', 'out.js', '--preload-file', 'file.txt@/file.txt'] + args)
     shutil.copyfile(test_file('manual_download_data.html'), 'manual_download_data.html')
 
     # Move .data file out of server root to ensure that getPreloadedPackage is actually used
     os.mkdir('test')
-    shutil.move('manual_download_data.data', 'test/manual_download_data.data')
+    shutil.move('out.js', 'test/manual_download_data.js')
+    shutil.move('out.data', 'test/manual_download_data.data')
 
     self.run_browser('manual_download_data.html', '/report_result?1')
 
@@ -3875,9 +3859,7 @@ Module["preRun"] = () => {
   @parameterized({
     '': ([],),
     'O3': (['-O3'],),
-    # TODO: re-enable minimal runtime once the flakiness is figured out,
-    # https://github.com/emscripten-core/emscripten/issues/12368
-    # 'minimal_runtime': (['-sMINIMAL_RUNTIME'],),
+    'minimal_runtime': (['-sMINIMAL_RUNTIME'],),
   })
   def test_pthread_create(self, args):
     self.btest_exit('pthread/test_pthread_create.c',
@@ -4819,11 +4801,16 @@ Module["preRun"] = () => {
   def test_pthread_reltime(self):
     self.btest_exit('pthread/test_pthread_reltime.cpp', args=['-pthread', '-sPTHREAD_POOL_SIZE'])
 
-  # Tests that it is possible to load the main .js file of the application manually via a Blob URL, and still use pthreads.
+  # Tests that it is possible to load the main .js file of the application manually via a Blob URL,
+  # and still use pthreads.
   def test_load_js_from_blob_with_pthreads(self):
     # TODO: enable this with wasm, currently pthreads/atomics have limitations
     self.set_setting('EXIT_RUNTIME')
-    self.compile_btest('pthread/hello_thread.c', ['-pthread', '-o', 'hello_thread_with_blob_url.js'], reporting=Reporting.JS_ONLY)
+    self.compile_btest('pthread/hello_thread.c', ['-pthread', '-o', 'out.js'], reporting=Reporting.JS_ONLY)
+
+    # Now run the test with the JS file renamed and with its content
+    # stored in Module['mainScriptUrlOrBlob'].
+    shutil.move('out.js', 'hello_thread_with_blob_url.js')
     shutil.copyfile(test_file('pthread/main_js_as_blob_loader.html'), 'hello_thread_with_blob_url.html')
     self.run_browser('hello_thread_with_blob_url.html', '/report_result?exit:0')
 

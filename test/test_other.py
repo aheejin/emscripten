@@ -35,7 +35,7 @@ from common import env_modify, no_mac, no_windows, only_windows, requires_native
 from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
 from common import compiler_for, EMBUILDER, requires_v8, requires_node, requires_wasm64, requires_node_canary
 from common import requires_wasm_eh, crossplatform, with_both_eh_sjlj, with_both_sjlj
-from common import also_with_standalone_wasm, also_with_env_modify
+from common import also_with_standalone_wasm, also_with_env_modify, also_with_wasm2js
 from common import also_with_minimal_runtime, also_with_wasm_bigint, also_with_wasm64, flaky
 from common import EMTEST_BUILD_VERBOSE, PYTHON, WEBIDL_BINDER
 from common import requires_network
@@ -2463,11 +2463,13 @@ int f() {
       self.skipTest("test doesn't work with frozen cache")
     external_port_path = test_file("other/ports/external.py")
     # testing no option
-    self.do_runf('other/test_external_ports.c', 'value1=0&value2=0\n', emcc_args=[f'--use-port={external_port_path}'])
+    self.do_runf('other/test_external_ports.c', 'value1=0&value2=0&value3=v3\n', emcc_args=[f'--use-port={external_port_path}'])
     # testing 1 option
-    self.do_runf('other/test_external_ports.c', 'value1=12&value2=0\n', emcc_args=[f'--use-port={external_port_path}:value1=12'])
+    self.do_runf('other/test_external_ports.c', 'value1=12&value2=0&value3=v3\n', emcc_args=[f'--use-port={external_port_path}:value1=12'])
     # testing 2 options
-    self.do_runf('other/test_external_ports.c', 'value1=12&value2=36\n', emcc_args=[f'--use-port={external_port_path}:value1=12:value2=36'])
+    self.do_runf('other/test_external_ports.c', 'value1=12&value2=36&value3=v3\n', emcc_args=[f'--use-port={external_port_path}:value1=12:value2=36'])
+    # testing ':' escape
+    self.do_runf('other/test_external_ports.c', 'value1=12&value2=36&value3=v:3\n', emcc_args=[f'--use-port={external_port_path}:value1=12:value3=v::3:value2=36'])
     # testing dependency
     self.do_runf('other/test_external_ports.c', 'mpg123=45\n', emcc_args=[f'--use-port={external_port_path}:dependency=mpg123'])
     # testing invalid dependency
@@ -2481,6 +2483,7 @@ Test Description
 Options:
 * value1: Value for define TEST_VALUE_1
 * value2: Value for define TEST_VALUE_2
+* value3: String value
 * dependency: A dependency
 More info: https://emscripten.org
 ''', stdout)
@@ -3113,6 +3116,7 @@ More info: https://emscripten.org
     'no_dynamic': ['-sDYNAMIC_EXECUTION=0'],
     'aot_js': ['-sDYNAMIC_EXECUTION=0', '-sEMBIND_AOT', '-DSKIP_UNBOUND_TYPES'],
     'wasm64': ['-sMEMORY64', '-Wno-experimental'],
+    '2gb': ['-sINITIAL_MEMORY=2200mb', '-sGLOBAL_BASE=2gb'],
   })
   @parameterized({
     # With no arguments we are effectively testing c++17 since it is the default.
@@ -3200,6 +3204,11 @@ More info: https://emscripten.org
     # expected.
     self.do_runf('other/embind_tsgen.cpp', 'main ran',
                  emcc_args=['-lembind', '--emit-tsd', 'embind_tsgen.d.ts'])
+
+    # Test that the output compiles with a TS file that uses the defintions.
+    cmd = shared.get_npm_cmd('tsc') + ['embind_tsgen.d.ts', '--noEmit']
+    shared.check_call(cmd)
+
     actual = read_file('embind_tsgen.d.ts')
     self.assertFileContents(test_file('other/embind_tsgen.d.ts'), actual)
 
@@ -4903,7 +4912,12 @@ Waste<3> *getMore() {
     'O2': [['-O2']],
     'O3': [['-O3']],
   })
-  def test_symbol_map(self, opts):
+  @parameterized({
+    '': [1],
+    'wasm2js': [0],
+    'wasm2js_2': [2],
+  })
+  def test_symbol_map(self, wasm, opts):
     def get_symbols_lines(symbols_file):
       self.assertTrue(os.path.isfile(symbols_file), "Symbols file %s isn't created" % symbols_file)
       # check that the map is correct
@@ -4930,10 +4944,8 @@ Waste<3> *getMore() {
     UNMINIFIED_HEAP8 = 'var HEAP8 = new '
     UNMINIFIED_MIDDLE = 'function middle'
 
-    for wasm in [0, 1, 2]:
-      print(opts, wasm)
-      self.clear()
-      create_file('src.c', r'''
+    self.clear()
+    create_file('src.c', r'''
 #include <emscripten.h>
 
 EM_JS(int, run_js, (), {
@@ -4953,47 +4965,48 @@ int main() {
 EM_ASM({ _middle() });
 }
 ''')
-      cmd = [EMCC, 'src.c', '--emit-symbol-map'] + opts
-      if wasm != 1:
-        cmd.append(f'-sWASM={wasm}')
-      self.run_process(cmd)
+    cmd = [EMCC, 'src.c', '--emit-symbol-map'] + opts
+    if wasm != 1:
+      cmd.append(f'-sWASM={wasm}')
+    self.run_process(cmd)
 
-      minified_middle = get_minified_middle('a.out.js.symbols')
-      self.assertNotEqual(minified_middle, None, "Missing minified 'middle' function")
-      if wasm:
-        # stack traces are standardized enough that we can easily check that the
-        # minified name is actually in the output
-        stack_trace_reference = 'wasm-function[%s]' % minified_middle
-        out = self.run_js('a.out.js')
-        self.assertContained(stack_trace_reference, out)
-        # make sure there are no symbols in the wasm itself
-        wat = self.get_wasm_text('a.out.wasm')
-        for func_start in ('(func $middle', '(func $_middle'):
-          self.assertNotContained(func_start, wat)
+    minified_middle = get_minified_middle('a.out.js.symbols')
+    self.assertNotEqual(minified_middle, None, "Missing minified 'middle' function")
+    if wasm:
+      # stack traces are standardized enough that we can easily check that the
+      # minified name is actually in the output
+      stack_trace_reference = 'wasm-function[%s]' % minified_middle
+      out = self.run_js('a.out.js')
+      self.assertContained(stack_trace_reference, out)
+      # make sure there are no symbols in the wasm itself
+      wat = self.get_wasm_text('a.out.wasm')
+      for func_start in ('(func $middle', '(func $_middle'):
+        self.assertNotContained(func_start, wat)
 
-      # Ensure symbols file type according to `-sWASM=` mode
-      if wasm == 0:
-        self.assertEqual(guess_symbols_file_type('a.out.js.symbols'), 'js', 'Primary symbols file should store JS mappings')
-      elif wasm == 1:
-        self.assertEqual(guess_symbols_file_type('a.out.js.symbols'), 'wasm', 'Primary symbols file should store Wasm mappings')
-      elif wasm == 2:
-        # special case when both JS and Wasm targets are created
-        minified_middle_2 = get_minified_middle('a.out.wasm.js.symbols')
-        self.assertNotEqual(minified_middle_2, None, "Missing minified 'middle' function")
-        self.assertEqual(guess_symbols_file_type('a.out.js.symbols'), 'wasm', 'Primary symbols file should store Wasm mappings')
-        self.assertEqual(guess_symbols_file_type('a.out.wasm.js.symbols'), 'js', 'Secondary symbols file should store JS mappings')
+    # Ensure symbols file type according to `-sWASM=` mode
+    if wasm == 0:
+      self.assertEqual(guess_symbols_file_type('a.out.js.symbols'), 'js', 'Primary symbols file should store JS mappings')
+    elif wasm == 1:
+      self.assertEqual(guess_symbols_file_type('a.out.js.symbols'), 'wasm', 'Primary symbols file should store Wasm mappings')
+    elif wasm == 2:
+      # special case when both JS and Wasm targets are created
+      minified_middle_2 = get_minified_middle('a.out.wasm.js.symbols')
+      self.assertNotEqual(minified_middle_2, None, "Missing minified 'middle' function")
+      self.assertEqual(guess_symbols_file_type('a.out.js.symbols'), 'wasm', 'Primary symbols file should store Wasm mappings')
+      self.assertEqual(guess_symbols_file_type('a.out.wasm.js.symbols'), 'js', 'Secondary symbols file should store JS mappings')
+    return
 
-      # check we don't keep unnecessary debug info with wasm2js when emitting
-      # a symbol map
-      if wasm == 0 and '-O' in str(opts):
-        js = read_file('a.out.js')
-        self.assertNotContained(UNMINIFIED_HEAP8, js)
-        self.assertNotContained(UNMINIFIED_MIDDLE, js)
-        # verify those patterns would exist with more debug info
-        self.run_process(cmd + ['--profiling-funcs'])
-        js = read_file('a.out.js')
-        self.assertContained(UNMINIFIED_HEAP8, js)
-        self.assertContained(UNMINIFIED_MIDDLE, js)
+    # check we don't keep unnecessary debug info with wasm2js when emitting
+    # a symbol map
+    if wasm == 0 and '-O' in str(opts):
+      js = read_file('a.out.js')
+      self.assertNotContained(UNMINIFIED_HEAP8, js)
+      self.assertNotContained(UNMINIFIED_MIDDLE, js)
+      # verify those patterns would exist with more debug info
+      self.run_process(cmd + ['--profiling-funcs'])
+      js = read_file('a.out.js')
+      self.assertContained(UNMINIFIED_HEAP8, js)
+      self.assertContained(UNMINIFIED_MIDDLE, js)
 
   @parameterized({
     '': [[]],
@@ -7922,7 +7935,7 @@ int main() {}
     err = self.run_process([EMXX, 'src.cpp', '--js-library', 'lib.js', '-O2', '-sEVAL_CTORS'], stderr=PIPE).stderr
     # logging should show we failed, and why
     self.assertNotContained('ctor_evaller: not successful', err)
-    self.assertContained('stopping since could not eval: call import: env.external_thing', err)
+    self.assertContained('could not eval: call import: env.external_thing', err)
 
   def test_override_js_execution_environment(self):
     create_file('main.c', r'''
@@ -9082,30 +9095,29 @@ int main() {
 
   @is_slow_test
   @parameterized({
-    '': (False,),
-    'wasm2js': (True,),
+    '': (True,),
+    'disabled': (False,),
   })
-  def test_single_file(self, wasm2js):
-    for (single_file_enabled,
-         debug_enabled,
-         closure_enabled) in itertools.product([True, False], repeat=3):
+  @also_with_wasm2js
+  def test_single_file(self, single_file_enabled):
+    for (debug_enabled,
+         closure_enabled) in itertools.product([True, False], repeat=2):
       # skip unhelpful option combinations
       if closure_enabled and debug_enabled:
         continue
 
-      expect_wasm = not wasm2js
-
-      cmd = [EMCC, test_file('hello_world.c')]
+      cmd = [EMCC, test_file('hello_world.c')] + self.get_emcc_args()
 
       if single_file_enabled:
         expect_wasm = False
         cmd += ['-sSINGLE_FILE']
+      else:
+        expect_wasm = self.is_wasm()
+
       if debug_enabled:
         cmd += ['-g']
       if closure_enabled:
-        cmd += ['--closure=1']
-      if wasm2js:
-        cmd += ['-sWASM=0']
+        cmd += ['--closure=1', '-Wno-closure']
 
       self.clear()
 
@@ -9113,8 +9125,11 @@ int main() {
         print(' '.join(cmd))
         self.run_process(cmd)
         print(os.listdir('.'))
-        assert expect_wasm == os.path.exists('a.out.wasm')
-        assert not os.path.exists('a.out.wat')
+        if expect_wasm:
+          self.assertExists('a.out.wasm')
+        else:
+          self.assertNotExists('a.out.wasm')
+        self.assertNotExists('a.out.wat')
         self.assertContained('hello, world!', self.run_js('a.out.js'))
 
       do_test(cmd)
@@ -9123,7 +9138,7 @@ int main() {
 
       if debug_enabled:
         separate_dwarf_cmd = cmd + ['-gseparate-dwarf']
-        if wasm2js:
+        if self.is_wasm2js():
           self.expect_fail(separate_dwarf_cmd)
         else:
           do_test(separate_dwarf_cmd)
@@ -9136,6 +9151,18 @@ int main() {
   @requires_v8
   def test_single_file_shell_sync_compile(self):
     self.do_runf('hello_world.c', emcc_args=['-sSINGLE_FILE', '-sWASM_ASYNC_COMPILATION=0'])
+
+  def test_single_file_no_clobber_wasm(self):
+    create_file('hello_world.wasm', 'not wasm')
+    self.do_runf('hello_world.c', emcc_args=['-sSINGLE_FILE'])
+    self.assertExists('hello_world.js')
+    self.assertFileContents('hello_world.wasm', 'not wasm')
+
+  def test_wasm2js_no_clobber_wasm(self):
+    create_file('hello_world.wasm', 'not wasm')
+    self.do_runf('hello_world.c', emcc_args=['-sWASM=0'])
+    self.assertExists('hello_world.js')
+    self.assertFileContents('hello_world.wasm', 'not wasm')
 
   def test_emar_M(self):
     create_file('file1', ' ')
@@ -10711,6 +10738,8 @@ int main () {
       return ' ({:+.2f}%)'.format((actual - expected) * 100.0 / expected)
 
     outputs = ['a.html', 'a.js']
+    if '-sWASM_WORKERS' in sources:
+      outputs += ['a.ww.js']
 
     args = smallest_code_size_args[:]
 
@@ -13134,7 +13163,6 @@ void foo() {}
     self.set_setting('NODERAWFS')
     create_file('pre.js', f'''
 const {{ execSync }} = require('child_process');
-const process = require('process');
 
 const cmd = 'find /proc/' + process.pid + '/fd -lname "{self.get_dir()}*" -printf "%l\\\\n" || true';
 let openFilesPre;
