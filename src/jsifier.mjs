@@ -661,8 +661,8 @@ function(${args}) {
 
       if (EMIT_TSD) {
         LibraryManager.libraryDefinitions[mangled] = {
-          docs: docs || '',
-          snippet,
+          docs: docs ?? null,
+          snippet: snippet ?? null,
         };
       }
 
@@ -742,6 +742,10 @@ var proxiedFunctionTable = [
 
     for (const fileName of POST_JS_FILES) {
       includeFile(fileName, shouldPreprocess(fileName));
+    }
+
+    if (MODULARIZE) {
+      includeFile('postamble_modularize.js');
     }
 
     print(

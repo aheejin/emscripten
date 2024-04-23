@@ -58,6 +58,24 @@ emsymbolizer = shared.bat_suffix(path_from_root('emsymbolizer'))
 wasm_opt = Path(building.get_binaryen_bin(), 'wasm-opt')
 
 
+def is_bitcode(filename):
+  try:
+    # look for magic signature
+    b = open(filename, 'rb').read(4)
+    if b[:2] == b'BC':
+      return True
+    # on macOS, there is a 20-byte prefix which starts with little endian
+    # encoding of 0x0B17C0DE
+    elif b == b'\xDE\xC0\x17\x0B':
+      b = bytearray(open(filename, 'rb').read(22))
+      return b[20:] == b'BC'
+  except IndexError:
+    # not enough characters in the input
+    # note that logging will be done on the caller function
+    pass
+  return False
+
+
 def uses_canonical_tmp(func):
   """Decorator that signals the use of the canonical temp by a test method.
 
@@ -3294,7 +3312,7 @@ More info: https://emscripten.org
   def test_emit_tsd(self):
     self.run_process([EMCC, test_file('other/test_emit_tsd.c'),
                       '--emit-tsd', 'test_emit_tsd.d.ts', '-sEXPORT_ES6',
-                      '-sMODULARIZE', '-sEXPORTED_RUNTIME_METHODS=UTF8ArrayToString',
+                      '-sMODULARIZE', '-sEXPORTED_RUNTIME_METHODS=UTF8ArrayToString,wasmTable',
                       '-Wno-experimental', '-o', 'test_emit_tsd.js'] +
                      self.get_emcc_args())
     self.assertFileContents(test_file('other/test_emit_tsd.d.ts'), read_file('test_emit_tsd.d.ts'))
@@ -5048,7 +5066,7 @@ EM_ASM({ _middle() });
     self.run_process([EMCC, '-flto', '-c', test_file('hello_world.c')])
     self.assertExists('hello_world.o')
     self.run_process([EMCC, '-flto', '-r', 'hello_world.o', '-o', 'hello_world2.o'])
-    building.is_bitcode('hello_world.o')
+    is_bitcode('hello_world.o')
     building.is_wasm('hello_world2.o')
 
   @parameterized({
@@ -5588,7 +5606,7 @@ int main() {
 
   def test_emit_llvm(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-c', '-emit-llvm'])
-    self.assertTrue(building.is_bitcode('hello_world.bc'))
+    self.assertTrue(is_bitcode('hello_world.bc'))
 
   def test_compile_ll_file(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-S', '-emit-llvm'])
@@ -6416,11 +6434,11 @@ int main(void) {
 console.log('before');
 var result = Module();
 // It should be an object.
-console.log(typeof result);
+console.log('typeof result: ' + typeof result);
 // And it should have the exports that Module has, showing it is Module in fact.
-console.log(typeof result._main);
+console.log('typeof _main: ' + typeof result._main);
 // And it should not be a Promise.
-console.log(typeof result.then);
+console.log('typeof result.then: ' + typeof result.then);
 console.log('after');
 ''')
     self.run_process([EMCC, test_file('hello_world.c'),
@@ -6430,11 +6448,24 @@ console.log('after');
     self.assertContained('''\
 before
 hello, world!
-object
-function
-undefined
+typeof result: object
+typeof _main: function
+typeof result.then: undefined
 after
 ''', self.run_js('a.out.js'))
+
+  def test_modularize_argument_misuse(self):
+    create_file('test.c', '''
+      #include <emscripten.h>
+      EMSCRIPTEN_KEEPALIVE int foo() { return 42; }''')
+
+    create_file('post.js', r'''
+      var arg = { bar: 1 };
+      var promise = Module(arg);
+      arg._foo();''')
+
+    expected = "Aborted(Access to module property ('_foo') is no longer possible via the module constructor argument; Instead, use the result of the module constructor"
+    self.do_runf('test.c', expected, assert_returncode=NON_ZERO, emcc_args=['--no-entry', '-sMODULARIZE', '--extern-post-js=post.js'])
 
   def test_export_all_3142(self):
     create_file('src.cpp', r'''
@@ -6970,7 +7001,7 @@ int main() {
     out = self.run_js('a.out.js')
     self.assertContained('invalid mode for dlopen(): Either RTLD_LAZY or RTLD_NOW is required', out)
 
-  def test_dlopen_contructors(self):
+  def test_dlopen_constructors(self):
     create_file('side.c', r'''
       #include <stdio.h>
       #include <assert.h>
@@ -6985,7 +7016,7 @@ int main() {
       __attribute__((constructor)) void ctor(void) {
         printf("foo address: %p\n", ptr);
         // Check that relocations have already been applied by the time
-        // contructor functions run.
+        // constructor functions run.
         check_relocations();
         printf("done ctor\n");
       }
@@ -8762,12 +8793,12 @@ int main() {
       print('wasm in object')
       self.run_process([EMXX, src] + args + ['-c', '-o', 'hello_obj.o'])
       self.assertTrue(building.is_wasm('hello_obj.o'))
-      self.assertFalse(building.is_bitcode('hello_obj.o'))
+      self.assertFalse(is_bitcode('hello_obj.o'))
 
       print('bitcode in object')
       self.run_process([EMXX, src] + args + ['-c', '-o', 'hello_bitcode.o', '-flto'])
       self.assertFalse(building.is_wasm('hello_bitcode.o'))
-      self.assertTrue(building.is_bitcode('hello_bitcode.o'))
+      self.assertTrue(is_bitcode('hello_bitcode.o'))
 
       print('use bitcode object (LTO)')
       self.run_process([EMXX, 'hello_bitcode.o'] + args + ['-flto'])
@@ -8800,7 +8831,7 @@ int main() {
       (['-sWASM_OBJECT_FILES'], False),
     ]:
       self.run_process([EMCC, test_file('hello_world.c')] + flags + ['-c', '-o', 'a.o'])
-      seen_bitcode = building.is_bitcode('a.o')
+      seen_bitcode = is_bitcode('a.o')
       self.assertEqual(expect_bitcode, seen_bitcode, 'must emit LTO-capable bitcode when flags indicate so (%s)' % str(flags))
 
   # We have LTO tests covered in 'wasmltoN' targets in test_core.py, but they
@@ -10168,17 +10199,17 @@ test_module().then((test_module_instance) => {
 
     with open(fname, 'wb') as f:
       f.write(b'foo')
-    self.assertFalse(building.is_bitcode(fname))
+    self.assertFalse(is_bitcode(fname))
 
     with open(fname, 'wb') as f:
       f.write(b'\xDE\xC0\x17\x0B')
       f.write(16 * b'\x00')
       f.write(b'BC')
-    self.assertTrue(building.is_bitcode(fname))
+    self.assertTrue(is_bitcode(fname))
 
     with open(fname, 'wb') as f:
       f.write(b'BC')
-    self.assertTrue(building.is_bitcode(fname))
+    self.assertTrue(is_bitcode(fname))
 
   def test_is_ar(self):
     fname = 'tmp.a'
@@ -11974,7 +12005,7 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
     # Verify that bitcode files are accepted as input
     create_file('main.c', 'void foo(); int main() { return 0; }')
     self.run_process([EMCC, '-emit-llvm', '-c', '-o', 'main.bc', 'main.c'])
-    self.assertTrue(building.is_bitcode('main.bc'))
+    self.assertTrue(is_bitcode('main.bc'))
     self.run_process([EMCC, '-c', '-o', 'main.o', 'main.bc'])
     self.assertTrue(building.is_wasm('main.o'))
 
