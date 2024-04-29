@@ -57,15 +57,14 @@ def compute_minimal_runtime_initializer_and_exports(post, exports, receiving):
   # Declare all exports out to global JS scope so that JS library functions can access them in a
   # way that minifies well with Closure
   # e.g. var a,b,c,d,e,f;
-  exports_that_are_not_initializers = [x for x in exports if x not in building.WASM_CALL_CTORS]
-  # In Wasm backend the exports are still unmangled at this point, so mangle the names here
-  exports_that_are_not_initializers = [asmjs_mangle(x) for x in exports_that_are_not_initializers]
+
+  exports = [asmjs_mangle(x) for x in exports if x != building.WASM_CALL_CTORS]
 
   # Decide whether we should generate the global dynCalls dictionary for the dynCall() function?
-  if settings.DYNCALLS and '$dynCall' in settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE and len([x for x in exports_that_are_not_initializers if x.startswith('dynCall_')]) > 0:
-    exports_that_are_not_initializers += ['dynCalls = {}']
+  if settings.DYNCALLS and '$dynCall' in settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE and len([x for x in exports if x.startswith('dynCall_')]) > 0:
+    exports += ['dynCalls = {}']
 
-  declares = 'var ' + ',\n '.join(exports_that_are_not_initializers) + ';'
+  declares = 'var ' + ',\n '.join(exports) + ';'
   post = shared.do_replace(post, '<<< WASM_MODULE_EXPORTS_DECLARES >>>', declares)
 
   # Generate assignments from all wasm exports out to the JS variables above: e.g. a = wasmExports['a']; b = wasmExports['b'];
@@ -778,17 +777,14 @@ def create_em_js(metadata):
 def add_standard_wasm_imports(send_items_map):
   extra_sent_items = []
 
-  if settings.IMPORTED_MEMORY:
-    memory_import = 'wasmMemory'
-    if settings.MODULARIZE and settings.PTHREADS:
-      # Pthreads assign wasmMemory in their worker startup. In MODULARIZE mode, they cannot assign inside the
-      # Module scope, so lookup via Module as well.
-      memory_import += " || Module['wasmMemory']"
-    send_items_map['memory'] = memory_import
-
   if settings.SAFE_HEAP:
     extra_sent_items.append('segfault')
     extra_sent_items.append('alignfault')
+
+  # Special case for importing memory and table
+  # TODO(sbc): can we make these into normal library symbols?
+  if settings.IMPORTED_MEMORY:
+    send_items_map['memory'] = 'wasmMemory'
 
   if settings.RELOCATABLE:
     send_items_map['__indirect_function_table'] = 'wasmTable'
@@ -1080,6 +1076,7 @@ def create_pointer_conversion_wrappers(metadata):
     'emscripten_main_runtime_thread_id': 'p',
     '_emscripten_set_offscreencanvas_size_on_thread': '_pp__',
     'fileno': '_p',
+    '_emscripten_run_callback_on_thread': '_pp_pp',
   }
 
   for function in settings.SIGNATURE_CONVERSIONS:
