@@ -85,9 +85,8 @@ def write_binary(file_path, contents):
 def delete_file(filename):
   """Delete a file (if it exists)."""
   return
-  if not os.path.exists(filename):
-    return
-  os.remove(filename)
+  if os.path.lexists(filename):
+    os.remove(filename)
 
 
 def delete_dir(dirname):
