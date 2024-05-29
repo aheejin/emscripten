@@ -199,6 +199,17 @@ def requires_pkg_config(func):
   return decorated
 
 
+def requires_jspi(func):
+  assert callable(func)
+
+  @wraps(func)
+  def decorated(self, *args, **kwargs):
+    self.require_jspi()
+    return func(self, *args, **kwargs)
+
+  return decorated
+
+
 def llvm_nm(file):
   output = shared.run_process([LLVM_NM, file], stdout=PIPE).stdout
 
@@ -806,6 +817,16 @@ f.close()
     libdir = cache.get_lib_dir(absolute=True)
     expected = os.path.join(libdir, 'libcompiler_rt.a')
     self.assertEqual(output.strip(), expected)
+
+  @crossplatform
+  def test_print_resource_dir(self):
+    output = self.run_process([EMCC, '-print-resource-dir'], stdout=PIPE).stdout
+    print(output)
+    lines = output.strip().splitlines()
+    self.assertEqual(len(lines), 1)
+    resource_dir = os.path.normcase(lines[0])
+    llvm_root = os.path.normcase(os.path.dirname(config.LLVM_ROOT))
+    self.assertContained(llvm_root, resource_dir)
 
   @crossplatform
   @parameterized({
@@ -2831,7 +2852,7 @@ More info: https://emscripten.org
     self.run_process([PYTHON, path_from_root('tools/js_optimizer.py'), 'huge.js', '--minify-whitespace'])
 
   @parameterized({
-    'wasm2js': ('wasm2js', ['minifyNames', 'last']),
+    'wasm2js': ('wasm2js', ['minifyNames']),
     'constructor': ('constructor', ['minifyNames'])
   })
   @crossplatform
@@ -3061,8 +3082,8 @@ More info: https://emscripten.org
     '': ['-sDYNAMIC_EXECUTION=1'],
     'no_dynamic': ['-sDYNAMIC_EXECUTION=0'],
   })
+  @requires_jspi
   def test_embind_jspi(self, extra):
-    self.require_jspi()
     self.emcc_args += ['-lembind', '-g']
     self.emcc_args += [extra]
 
@@ -3202,19 +3223,19 @@ More info: https://emscripten.org
 
     self.do_runf('embind/test_return_value_policy.cpp')
 
+  @requires_jspi
   @parameterized({
     '': [['-sJSPI_EXPORTS=async*']],
     'deprecated': [['-Wno-deprecated', '-sASYNCIFY_EXPORTS=async*']]
   })
   def test_jspi_wildcard(self, opts):
-    self.require_jspi()
     self.emcc_args += opts
 
     self.do_runf('other/test_jspi_wildcard.c', 'done')
 
+  @requires_jspi
   def test_jspi_add_function(self):
     # make sure synchronous functions in the wasmTable aren't processed with Asyncify.makeAsyncFunction
-    self.require_jspi()
     self.emcc_args += [
       '-sASYNCIFY=2',
       '-sEXPORTED_RUNTIME_METHODS=addFunction,dynCall',
@@ -4942,7 +4963,6 @@ Waste<3> *getMore() {
     else:
       abs_include_path = '/nowhere/at/all'
     cmd = [EMCC, test_file('hello_world.c'), '--valid-abspath', abs_include_path, '-I%s' % abs_include_path]
-    print(' '.join(cmd))
     self.run_process(cmd)
     self.assertContained('hello, world!', self.run_js('a.out.js'))
 
