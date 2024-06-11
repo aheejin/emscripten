@@ -5423,11 +5423,7 @@ Module = {
 
     create_file('test.file', 'some data')
 
-    def clean(out):
-      return '\n'.join([line for line in out.split('\n') if 'binaryen' not in line and 'wasm' not in line and 'so not running' not in line])
-
-    self.do_runf('files.cpp', ('size: 7\ndata: 100,-56,50,25,10,77,123\nloop: 100 -56 50 25 10 77 123 \ninput:hi there!\ntexto\n$\n5 : 10,30,20,11,88\nother=some data.\nseeked=me da.\nseeked=ata.\nseeked=ta.\nfscanfed: 10 - hello\n5 bytes to dev/null: 5\nok.\ntexte\n', 'size: 7\ndata: 100,-56,50,25,10,77,123\nloop: 100 -56 50 25 10 77 123 \ninput:hi there!\ntexto\ntexte\n$\n5 : 10,30,20,11,88\nother=some data.\nseeked=me da.\nseeked=ata.\nseeked=ta.\nfscanfed: 10 - hello\n5 bytes to dev/null: 5\nok.\n'),
-                 output_nicerizer=clean)
+    self.do_run_in_out_file_test('test_files.c')
 
   def test_files_m(self):
     # Test for Module.stdin etc.
@@ -6817,12 +6813,11 @@ void* operator new(size_t size) {
     # See https://github.com/emscripten-core/emscripten/issues/20757
     self.emcc_args.append('-Wno-deprecated-declarations')
     poppler = self.get_poppler_library()
-    pdf_data = read_binary(test_file('poppler/paper.pdf'))
-    create_file('paper.pdf.js', str(list(bytearray(pdf_data))))
+    shutil.copyfile(test_file('poppler/paper.pdf'), 'paper.pdf')
 
     create_file('pre.js', '''
     Module.preRun = () => {
-      FS.createDataFile('/', 'paper.pdf', eval(read_('paper.pdf.js')), true, false, false);
+      FS.createDataFile('/', 'paper.pdf', readBinary('paper.pdf'), true, false, false);
     };
     Module.postRun = () => {
       var FileData = Array.from(MEMFS.getFileDataAsTypedArray(FS.root.contents['filename-1.ppm']));
@@ -9417,13 +9412,17 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.emcc_args += args
     self.emcc_args += ['--pre-js', 'pre.js']
     self.emcc_args += ['--js-library', 'lib.js']
-    # This test is for setting dynamicLibraries at runtime so we don't
+    # This test is for setting dynamicLibraries at runtime, so we don't
     # want emscripten loading `liblib.so` automatically (which it would
-    # do without this setting.
+    # do without this setting)
     self.set_setting('NO_AUTOLOAD_DYLIBS')
 
     create_file('pre.js', '''
-      Module['dynamicLibraries'] = ['liblib.so'];
+      if (typeof ENVIRONMENT_IS_PTHREAD == 'undefined' || !ENVIRONMENT_IS_PTHREAD) {
+        // Load liblib.so on the main thread, this would be equivalent to
+        // defining it outside the module (e.g. in MODULARIZE mode).
+        Module['dynamicLibraries'] = ['liblib.so'];
+      }
     ''')
 
     create_file('lib.js', '''
