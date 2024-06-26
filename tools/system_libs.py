@@ -1071,9 +1071,10 @@ class libc(MuslInternalLibrary,
       path='system/lib/libc/musl/src/string',
       filenames=['strlen.c'])
 
+    # Transitively required by many system call imports
     errno_files = files_in_path(
       path='system/lib/libc/musl/src/errno',
-      filenames=['__errno_location.c'])
+      filenames=['__errno_location.c', 'strerror.c'])
 
     return math_files + exit_files + other_files + iprintf_files + errno_files
 
@@ -1227,6 +1228,11 @@ class libc(MuslInternalLibrary,
           'timespec_get.c',
           'utime.c',
           '__map_file.c',
+          'strftime.c',
+          '__tz.c',
+          '__tm_to_secs.c',
+          '__year_to_secs.c',
+          '__month_to_secs.c',
         ])
     libc_files += files_in_path(
         path='system/lib/libc/musl/src/legacy',
@@ -1285,7 +1291,6 @@ class libc(MuslInternalLibrary,
           'emscripten_scan_stack.c',
           'emscripten_time.c',
           'mktime.c',
-          'tzset.c',
           'kill.c',
           'lookup_name.c',
           'pthread_sigmask.c',
@@ -2192,12 +2197,7 @@ class libstandalonewasm(MuslInternalLibrary):
     # It is more efficient to use JS methods for time, normally.
     files += files_in_path(
         path='system/lib/libc/musl/src/time',
-        filenames=['strftime.c',
-                   '__month_to_secs.c',
-                   '__secs_to_tm.c',
-                   '__tm_to_secs.c',
-                   '__tz.c',
-                   '__year_to_secs.c',
+        filenames=['__secs_to_tm.c',
                    'clock.c',
                    'clock_gettime.c',
                    'gettimeofday.c',
