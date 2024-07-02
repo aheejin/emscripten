@@ -20,6 +20,8 @@ See docs/process.md for more on how version tagging works.
 
 3.1.62 (in development)
 -----------------------
+- The `EM_BOOL` type changed from `int/u32` to `bool/u8`.  This changes the
+  layout and size of some structs in the emscripten API. (#22157)
 - The `EMSCRIPTEN_FETCH_WAITABLE` flag along with the `emscripten_fetch_wait`
   API were marked a deprecated.  These feature have not functions for several
   years now. (#22138)
@@ -29,6 +31,7 @@ See docs/process.md for more on how version tagging works.
   upstream LLVM change (https://github.com/llvm/llvm-project/pull/93261).
 - Emscripten now uses `strftime` from musl rather than using a custom
   JavaScript implementation. (#21379)
+- Embind now supports return value policies for properties.
 
 3.1.61 - 05/31/24
 -----------------
