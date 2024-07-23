@@ -41,7 +41,7 @@ logger = logging.getLogger('building')
 
 #  Building
 binaryen_checked = False
-EXPECTED_BINARYEN_VERSION = 117
+EXPECTED_BINARYEN_VERSION = 118
 
 _is_ar_cache: Dict[str, bool] = {}
 # the exports the user requested
@@ -196,6 +196,12 @@ def lld_flags_for_executable(external_symbols):
   if settings.RELOCATABLE:
     cmd.append('--experimental-pic')
     cmd.append('--unresolved-symbols=import-dynamic')
+    if not settings.WASM_BIGINT:
+      # When we don't have WASM_BIGINT available, JS signature legalization
+      # in binaryen will mutate the signatures of the imports/exports of our
+      # shared libraries.  Because of this we need to disabled signature
+      # checking of shared library functions in this case.
+      cmd.append('--no-shlib-sigcheck')
     if settings.SIDE_MODULE:
       cmd.append('-shared')
     else:
@@ -260,7 +266,7 @@ def link_lld(args, target, external_symbols=None):
     args.insert(0, '--whole-archive')
     args.append('--no-whole-archive')
 
-  if settings.STRICT:
+  if settings.STRICT and '--no-fatal-warnings' not in args:
     args.append('--fatal-warnings')
 
   if any(a in args for a in ('--strip-all', '-s')):
@@ -723,7 +729,10 @@ def minify_wasm_js(js_file, wasm_file, expensive_optimizations, debug_info):
     # if we are optimizing for size, shrink the combined wasm+JS
     # TODO: support this when a symbol map is used
     if expensive_optimizations:
-      js_file = metadce(js_file, wasm_file, debug_info=debug_info)
+      js_file = metadce(js_file,
+                        wasm_file,
+                        debug_info=debug_info,
+                        last=not settings.MINIFY_WASM_IMPORTS_AND_EXPORTS)
       # now that we removed unneeded communication between js and wasm, we can clean up
       # the js some more.
       passes = ['AJSDCE']
@@ -747,8 +756,16 @@ def is_internal_global(name):
   return name in internal_start_stop_symbols or any(name.startswith(p) for p in internal_prefixes)
 
 
+# get the flags to pass into the very last binaryen tool invocation, that runs
+# the final set of optimizations
+def get_last_binaryen_opts():
+  return [f'--optimize-level={settings.OPT_LEVEL}',
+          f'--shrink-level={settings.SHRINK_LEVEL}',
+          '--optimize-stack-ir']
+
+
 # run binaryen's wasm-metadce to dce both js and wasm
-def metadce(js_file, wasm_file, debug_info):
+def metadce(js_file, wasm_file, debug_info, last):
   logger.debug('running meta-DCE')
   temp_files = shared.get_temp_files()
   # first, get the JS part of the graph
@@ -814,10 +831,13 @@ def metadce(js_file, wasm_file, debug_info):
   temp = temp_files.get('.json', prefix='emcc_dce_graph_').name
   utils.write_file(temp, json.dumps(graph, indent=2))
   # run wasm-metadce
+  args = ['--graph-file=' + temp]
+  if last:
+    args += get_last_binaryen_opts()
   out = run_binaryen_command('wasm-metadce',
                              wasm_file,
                              wasm_file,
-                             ['--graph-file=' + temp],
+                             args,
                              debug=debug_info,
                              stdout=PIPE)
   # find the unused things in js
@@ -882,23 +902,19 @@ def asyncify_lazy_load_code(wasm_target, debug):
 def minify_wasm_imports_and_exports(js_file, wasm_file, minify_exports, debug_info):
   logger.debug('minifying wasm imports and exports')
   # run the pass
+  args = []
   if minify_exports:
     # standalone wasm mode means we need to emit a wasi import module.
     # otherwise, minify even the imported module names.
     if settings.MINIFY_WASM_IMPORTED_MODULES:
-      pass_name = '--minify-imports-and-exports-and-modules'
+      args.append('--minify-imports-and-exports-and-modules')
     else:
-      pass_name = '--minify-imports-and-exports'
+      args.append('--minify-imports-and-exports')
   else:
-    pass_name = '--minify-imports'
-  out = run_wasm_opt(wasm_file, wasm_file,
-                     [pass_name],
-                     debug=debug_info,
-                     stdout=PIPE)
-  # TODO this is the last tool we run, after normal opts and metadce. it
-  # might make sense to run Stack IR optimizations here or even -O (as
-  # metadce which runs before us might open up new general optimization
-  # opportunities). however, the benefit is less than 0.5%.
+    args.append('--minify-imports')
+  # this is always the last tool we run (if we run it)
+  args += get_last_binaryen_opts()
+  out = run_wasm_opt(wasm_file, wasm_file, args, debug=debug_info, stdout=PIPE)
 
   # get the mapping
   SEP = ' => '
@@ -1062,15 +1078,18 @@ def handle_final_wasm_symbols(wasm_file, symbols_file, debug_info):
   args = []
   if symbols_file:
     args += ['--print-function-map']
-  if not debug_info:
-    # to remove debug info, we just write to that same file, and without -g
-    args += ['-o', wasm_file]
   else:
     # suppress the wasm-opt warning regarding "no output file specified"
     args += ['--quiet']
   output = run_wasm_opt(wasm_file, args=args, stdout=PIPE)
   if symbols_file:
     utils.write_file(symbols_file, output)
+  if not debug_info:
+    # strip the names section using llvm-objcopy. this is slightly slower than
+    # using wasm-opt (we could run wasm-opt without -g here and just tell it to
+    # write the file back out), but running wasm-opt would undo StackIR
+    # optimizations, if we did those.
+    strip(wasm_file, wasm_file, sections=['name'])
 
 
 def is_ar(filename):

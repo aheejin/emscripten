@@ -795,6 +795,11 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       self.skipTest('no dynamic linking support in wasm2js yet')
     if '-fsanitize=undefined' in self.emcc_args:
       self.skipTest('no dynamic linking support in UBSan yet')
+    # MEMORY64=2 mode doesn't currently support dynamic linking because
+    # The side modules are lowered to wasm32 when they are built, making
+    # them unlinkable with wasm64 binaries.
+    if self.get_setting('MEMORY64') == 2:
+      self.skipTest('MEMORY64=2 + dynamic linking is not currently supported')
 
   def require_v8(self):
     if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:

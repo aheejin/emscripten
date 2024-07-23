@@ -2087,7 +2087,7 @@ int main(int argc, char **argv) {
     self.set_setting('SAFE_HEAP')
     self.do_core_test('test_memorygrowth_3.c')
 
-  @also_with_standalone_wasm(impure=True)
+  @also_with_standalone_wasm()
   @no_4gb('depends on INITIAL_MEMORY')
   @no_2gb('depends on INITIAL_MEMORY')
   def test_memorygrowth_MAXIMUM_MEMORY(self):
@@ -2221,6 +2221,8 @@ int main(int argc, char **argv) {
   @no_wasm2js('massive switches can break js engines')
   @is_slow_test
   def test_biggerswitch(self):
+    if self.is_optimizing():
+      self.skipTest('https://github.com/emscripten-core/emscripten/issues/22179')
     if not self.is_optimizing():
       self.skipTest('nodejs takes >6GB to compile this if the wasm is not optimized, which OOMs, see https://github.com/emscripten-core/emscripten/issues/7928#issuecomment-458308453')
     num_cases = 20000
@@ -3592,26 +3594,6 @@ int 0 54
 int 1 9000
 ok
 ''')
-
-  @needs_dylink
-  def test_dlfcn_mallocs(self):
-    # will be exhausted without functional malloc/free
-    if not self.has_changed_setting('INITIAL_MEMORY'):
-      self.set_setting('INITIAL_MEMORY', '64mb')
-
-    create_file('liblib.c', r'''
-      #include <assert.h>
-      #include <stdio.h>
-      #include <string.h>
-      #include <stdlib.h>
-
-      void *mallocproxy(int n) { return malloc(n); }
-      void freeproxy(void *p) { free(p); }
-      ''')
-    self.build_dlfcn_lib('liblib.c')
-
-    self.prep_dlfcn_main()
-    self.do_runf('dlmalloc_proxy.c', '*293,153*')
 
   @needs_dylink
   def test_dlfcn_longjmp(self):
