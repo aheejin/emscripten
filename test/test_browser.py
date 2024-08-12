@@ -776,6 +776,14 @@ If manually bisecting:
       '-lSDL', '-lGL',
     ])
 
+  def test_sdl_image_webp(self):
+    shutil.copyfile(test_file('screenshot.webp'), 'screenshot.webp')
+    self.btest_exit('test_sdl_image.c', args=[
+      '--preload-file', 'screenshot.webp',
+      '-DSCREENSHOT_DIRNAME="/"', '-DSCREENSHOT_BASENAME="screenshot.webp"', '--use-preload-plugins',
+      '-lSDL', '-lGL',
+    ])
+
   @also_with_wasmfs
   @also_with_proxying
   def test_sdl_image_prepare(self):
@@ -3183,7 +3191,7 @@ Module["preRun"] = () => {
     'O3': (['-O3'],),
   })
   def test_async_mainloop(self, args):
-    self.btest_exit('async_mainloop.cpp', args=args + ['-sASYNCIFY'])
+    self.btest_exit('test_async_mainloop.c', args=args + ['-sASYNCIFY'])
 
   @requires_sound_hardware
   @parameterized({

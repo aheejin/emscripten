@@ -20,6 +20,10 @@ See docs/process.md for more on how version tagging works.
 
 3.1.65 (in development)
 -----------------------
+- The `NODEJS_CATCH_EXIT` setting is now disabled by default.  This setting
+  is only useful under very specific circumstances, and has some downsides, so
+  disabling it by default makes sense. (#22257)
+- Add WebP (`.webp`) decoding support in file preloading. (#22282)
 
 3.1.64 - 07/22/24
 -----------------------

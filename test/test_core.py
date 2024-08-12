@@ -3,7 +3,6 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
-import hashlib
 import json
 import logging
 import os
@@ -28,6 +27,7 @@ from common import skip_if, no_windows, no_mac, is_slow_test, parameterized, par
 from common import env_modify, with_env_modify, disabled, flaky, node_pthreads, also_with_wasm_bigint
 from common import read_file, read_binary, requires_v8, requires_node, requires_wasm2js, requires_node_canary
 from common import compiler_for, crossplatform, no_4gb, no_2gb, also_with_minimal_runtime
+from common import also_with_noderawfs, also_with_wasmfs
 from common import with_all_eh_sjlj, with_all_sjlj, also_with_standalone_wasm, can_do_standalone, no_wasm64, requires_wasm_exnref
 from common import NON_ZERO, WEBIDL_BINDER, EMBUILDER, PYTHON
 import clang_native
@@ -146,36 +146,6 @@ def only_wasm2js(note=''):
 
   def decorated(f):
     return skip_if(f, 'is_wasm2js', note, negate=True)
-  return decorated
-
-
-def also_with_noderawfs(func):
-  assert callable(func)
-
-  def metafunc(self, rawfs):
-    if rawfs:
-      self.require_node()
-      self.emcc_args += ['-DNODERAWFS']
-      self.set_setting('NODERAWFS')
-    func(self)
-
-  parameterize(metafunc, {'': (False,),
-                          'rawfs': (True,)})
-  return metafunc
-
-
-def also_with_wasmfs(func):
-  def decorated(self):
-    func(self)
-    if self.get_setting('WASMFS'):
-      # Nothing more to test.
-      return
-    print('wasmfs')
-    if self.get_setting('STANDALONE_WASM'):
-      self.skipTest("test currently cannot run both with WASMFS and STANDALONE_WASM")
-    self.set_setting('WASMFS')
-    self.emcc_args = self.emcc_args.copy() + ['-DWASMFS']
-    func(self)
   return decorated
 
 
@@ -2669,16 +2639,23 @@ The current type of b is: 9
   def test_tcgetattr(self):
     self.do_runf('termios/test_tcgetattr.c', 'success')
 
+  @also_with_standalone_wasm()
   def test_time(self):
     self.do_core_test('test_time.c')
-    for tz in ['EST+05EDT', 'UTC+0', 'CET']:
-      print('extra tz test:', tz)
-      with env_modify({'TZ': tz}):
-        # Run the test with different time zone settings if
-        # possible. It seems that the TZ environment variable does not
-        # work all the time (at least it's not well respected by
-        # Node.js on Windows), but it does no harm either.
-        self.do_core_test('test_time.c')
+
+  @parameterized({
+    '1': ('EST+05EDT',),
+    '2': ('UTC+0',),
+    '3': ('CET',),
+  })
+  def test_time_tz(self, tz):
+    print('testing with TZ=%s' % tz)
+    with env_modify({'TZ': tz}):
+      # Run the test with different time zone settings if
+      # possible. It seems that the TZ environment variable does not
+      # work all the time (at least it's not well respected by
+      # Node.js on Windows), but it does no harm either.
+      self.do_core_test('test_time.c')
 
   def test_timeb(self):
     # Confirms they are called in reverse order
@@ -2690,13 +2667,19 @@ The current type of b is: 9
   def test_gmtime(self):
     self.do_core_test('test_gmtime.c')
 
+  @also_with_standalone_wasm()
   def test_strptime_tm(self):
+    if self.get_setting('STANDALONE_WASM'):
+      self.emcc_args += ['-DSTANDALONE']
     self.do_core_test('test_strptime_tm.c')
 
   def test_strptime_days(self):
     self.do_core_test('test_strptime_days.c')
 
+  @also_with_standalone_wasm()
   def test_strptime_reentrant(self):
+    if self.get_setting('STANDALONE_WASM'):
+      self.emcc_args += ['-DSTANDALONE']
     self.do_core_test('test_strptime_reentrant.c')
 
   @crossplatform
@@ -2714,13 +2697,6 @@ The current type of b is: 9
     # memcpy for assignments, with hardcoded numbers of bytes
     # (llvm-gcc copies items one by one).
     self.do_core_test('test_copyop.cpp')
-
-  def test_memcpy_memcmp(self):
-    def check(output):
-      output = output.replace('\n \n', '\n') # remove extra node output
-      return hashlib.sha1(output.encode('utf-8')).hexdigest()
-
-    self.do_core_test('test_memcpy_memcmp.c', output_nicerizer=check)
 
   def test_memcpy2(self):
     self.do_core_test('test_memcpy2.c')
@@ -3115,8 +3091,7 @@ The current type of b is: 9
         return 0;
       }
       '''
-    self.do_run(src, 'Sort with main comparison: 5 4 3 2 1 *Sort with lib comparison: 1 2 3 4 5 *',
-                output_nicerizer=lambda x: x.replace('\n', '*'))
+    self.do_run(src, 'Sort with main comparison: 5 4 3 2 1 \nSort with lib comparison: 1 2 3 4 5 \n')
 
   @needs_dylink
   def test_dlfcn_data_and_fptr(self):
@@ -5451,15 +5426,11 @@ Module = {
 
     self.do_run_in_out_file_test('test_files.c')
 
-  def test_files_m(self):
-    # Test for Module.stdin etc.
-    # needs to flush stdio streams
-    self.set_setting('EXIT_RUNTIME')
-
+  def test_module_stdin(self):
     create_file('pre.js', '''
+    var data = [10, 20, 40, 30];
     Module = {
-      data: [10, 20, 40, 30],
-      stdin: () => { return Module.data.pop() || null },
+      stdin: () => { return data.pop() || null },
       stdout: (x) => out('got: ' + x)
     };
     ''')
@@ -5471,18 +5442,22 @@ Module = {
 
       int main () {
         char c;
-        fprintf(stderr, "isatty? %d,%d,%d\n", isatty(fileno(stdin)), isatty(fileno(stdout)), isatty(fileno(stderr)));
+        fprintf(stderr, "isatty? in=%d,out=%d,err=%d\n", isatty(fileno(stdin)), isatty(fileno(stdout)), isatty(fileno(stderr)));
         while ((c = fgetc(stdin)) != EOF) {
-          putc(c+5, stdout);
+          putc(c, stdout);
         }
+        putc('\n', stdout);
         return 0;
       }
       '''
 
-    def clean(out):
-      return '\n'.join(l for l in out.splitlines() if 'warning' not in l and 'binaryen' not in l)
-
-    self.do_run(src, ('got: 35\ngot: 45\ngot: 25\ngot: 15\nisatty? 0,0,1\n', 'got: 35\ngot: 45\ngot: 25\ngot: 15\nisatty? 0,0,1', 'isatty? 0,0,1\ngot: 35\ngot: 45\ngot: 25\ngot: 15'), output_nicerizer=clean)
+    self.do_run(src, '''\
+isatty? in=0,out=0,err=1
+got: 30
+got: 40
+got: 20
+got: 10
+''')
 
   def test_mount(self):
     self.set_setting('FORCE_FILESYSTEM')
@@ -5957,7 +5932,7 @@ Module.onRuntimeInitialized = () => {
 
   @parameterized({
     'sigint': (EM_SIGINT, 128 + EM_SIGINT, True),
-    'sigabrt': (EM_SIGABRT, 7, False)
+    'sigabrt': (EM_SIGABRT, 1, False)
   })
   @crossplatform
   def test_sigaction_default(self, signal, exit_code, assert_identical):
@@ -6367,27 +6342,22 @@ int main(void) {
     output = read_file(test_file('raytrace.ppm'))
     self.do_run(src, output, args=['3', '16'])
 
-  def test_fasta(self):
-    results = [(1, '''GG*ctt**tgagc*'''),
-               (20, '''GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTT*cttBtatcatatgctaKggNcataaaSatgtaaaDcDRtBggDtctttataattcBgtcg**tacgtgtagcctagtgtttgtgttgcgttatagtctatttgtggacacagtatggtcaaa**tgacgtcttttgatctgacggcgttaacaaagatactctg*'''),
-               (50, '''GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA*TCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACAT*cttBtatcatatgctaKggNcataaaSatgtaaaDcDRtBggDtctttataattcBgtcg**tactDtDagcctatttSVHtHttKtgtHMaSattgWaHKHttttagacatWatgtRgaaa**NtactMcSMtYtcMgRtacttctWBacgaa**agatactctgggcaacacacatacttctctcatgttgtttcttcggacctttcataacct**ttcctggcacatggttagctgcacatcacaggattgtaagggtctagtggttcagtgagc**ggaatatcattcgtcggtggtgttaatctatctcggtgtagcttataaatgcatccgtaa**gaatattatgtttatttgtcggtacgttcatggtagtggtgtcgccgatttagacgtaaa**ggcatgtatg*''')]
+  @parameterized({
+    '': ('double',),
+    'float': ('float',),
+  })
+  def test_fasta(self, float_type):
+    results = [('1', '''GG\nctt\n\ntgagc\n'''),
+               ('20', '''GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTT\ncttBtatcatatgctaKggNcataaaSatgtaaaDcDRtBggDtctttataattcBgtcg\n\ntacgtgtagcctagtgtttgtgttgcgttatagtctatttgtggacacagtatggtcaaa\n\ntgacgtcttttgatctgacggcgttaacaaagatactctg\n'''),
+               ('50', '''GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGA\nTCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACAT\ncttBtatcatatgctaKggNcataaaSatgtaaaDcDRtBggDtctttataattcBgtcg\n\ntactDtDagcctatttSVHtHttKtgtHMaSattgWaHKHttttagacatWatgtRgaaa\n\nNtactMcSMtYtcMgRtacttctWBacgaa\n\nagatactctgggcaacacacatacttctctcatgttgtttcttcggacctttcataacct\n\nttcctggcacatggttagctgcacatcacaggattgtaagggtctagtggttcagtgagc\n\nggaatatcattcgtcggtggtgttaatctatctcggtgtagcttataaatgcatccgtaa\n\ngaatattatgtttatttgtcggtacgttcatggtagtggtgtcgccgatttagacgtaaa\n\nggcatgtatg\n''')]
 
     orig_src = read_file(test_file('fasta.cpp'))
 
-    def test(extra_args):
-      for t in ['float', 'double']:
-        print(t)
-        src = orig_src.replace('double', t)
-        create_file('fasta.cpp', src)
-        self.build('fasta.cpp', emcc_args=extra_args)
-        for arg, output in results:
-          self.do_run('fasta.js', output, args=[str(arg)],
-                      output_nicerizer=lambda x: x.replace('\n', '*'),
-                      no_build=True,
-                      emcc_args=extra_args)
-        shutil.copyfile('fasta.js', '%s.js' % t)
-
-    test([])
+    src = orig_src.replace('double', float_type)
+    create_file('fasta.cpp', src)
+    self.build('fasta.cpp')
+    for arg, output in results:
+      self.do_run('fasta.js', output, args=[arg], no_build=True)
 
   @needs_non_trapping_float_to_int
   def test_fasta_nontrapping(self):
@@ -6716,8 +6686,7 @@ void* operator new(size_t size) {
                 'hello lua world!\n17\n1\n2\n3\n4\n7',
                 args=['-e', '''print("hello lua world!");print(17);for x = 1,4 do print(x) end;print(10-3)'''],
                 libraries=libs,
-                includes=[test_file('lua')],
-                output_nicerizer=lambda output: output.replace('\n\n', '\n').replace('\n\n', '\n'))
+                includes=[test_file('lua')])
 
   @no_asan('issues with freetype itself')
   @needs_make('configure script')
@@ -8959,7 +8928,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.emcc_args.append('-fsanitize=address')
     self.set_setting('ALLOW_MEMORY_GROWTH')
     self.set_setting('INITIAL_MEMORY', '300mb')
-    self.do_runf(test_file('core', name), '', assert_returncode=NON_ZERO)
+    self.do_runf('core/' + name, '', assert_returncode=NON_ZERO)
 
   # note: these tests have things like -fno-builtin-memset in order to avoid
   # clang optimizing things away. for example, a memset might be optimized into
@@ -9037,7 +9006,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('INITIAL_MEMORY', '300mb')
     if cflags:
       self.emcc_args += cflags
-    self.do_runf(test_file('core', name),
+    self.do_runf('core/' + name,
                  expected_output=expected_output, assert_all=True,
                  check_for_error=False, assert_returncode=NON_ZERO)
 
@@ -9267,7 +9236,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
     # Check that an unhandled promise rejection is propagated to the main thread
     # as an error.
     self.set_setting('PROXY_TO_PTHREAD')
-    self.set_setting('NODEJS_CATCH_EXIT', 0)
     self.emcc_args += ['--post-js', test_file('pthread/test_pthread_unhandledrejection.post.js')]
     self.do_runf('pthread/test_pthread_unhandledrejection.c', 'passed')
 

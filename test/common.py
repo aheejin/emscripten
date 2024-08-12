@@ -363,6 +363,38 @@ def with_env_modify(updates):
   return decorated
 
 
+def also_with_wasmfs(f):
+  assert callable(f)
+
+  @wraps(f)
+  def metafunc(self, wasmfs, *args, **kwargs):
+    if wasmfs:
+      self.set_setting('WASMFS')
+      self.emcc_args.append('-DWASMFS')
+      f(self, *args, **kwargs)
+    else:
+      f(self, *args, **kwargs)
+
+  parameterize(metafunc, {'': (False,),
+                          'wasmfs': (True,)})
+  return metafunc
+
+
+def also_with_noderawfs(func):
+  assert callable(func)
+
+  def metafunc(self, rawfs, *args, **kwargs):
+    if rawfs:
+      self.require_node()
+      self.emcc_args += ['-DNODERAWFS']
+      self.set_setting('NODERAWFS')
+    func(self, *args, **kwargs)
+
+  parameterize(metafunc, {'': (False,),
+                          'rawfs': (True,)})
+  return metafunc
+
+
 # Decorator version of env_modify
 def also_with_env_modify(name_updates_mapping):
 
@@ -1288,10 +1320,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     long_lines = []
 
     def cleanup(line):
-      if len(line) > 2048:
-        # Sanity check that this is really the emscripten program/module on
-        # a single line.
-        assert line.startswith('var Module=typeof Module!="undefined"')
+      if len(line) > 2048 and line.startswith('var Module=typeof Module!="undefined"'):
         long_lines.append(line)
         line = '<REPLACED ENTIRE PROGRAM ON SINGLE LINE>'
       return line
@@ -1306,7 +1335,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     return '\n'.join(lines)
 
   def run_js(self, filename, engine=None, args=None,
-             output_nicerizer=None,
              assert_returncode=0,
              interleaved_output=True):
     # use files, as PIPE can get too full and hang us
@@ -1347,8 +1375,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     ret = read_file(stdout_file)
     if not interleaved_output:
       ret += read_file(stderr_file)
-    if output_nicerizer:
-      ret = output_nicerizer(ret)
     if assert_returncode != 0:
       ret = self.clean_js_output(ret)
     if error or timeout_error or EMTEST_VERBOSE:
@@ -1366,7 +1392,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       if assert_returncode == NON_ZERO:
         self.fail('JS subprocess unexpectedly succeeded (%s):  Output:\n%s' % (error.cmd, ret))
       else:
-        self.fail('JS subprocess failed (%s): %s.  Output:\n%s' % (error.cmd, error.returncode, ret))
+        self.fail('JS subprocess failed (%s): %s (expected=%s).  Output:\n%s' % (error.cmd, error.returncode, assert_returncode, ret))
 
     #  We should pass all strict mode checks
     self.assertNotContained('strict warning:', ret)
@@ -1739,7 +1765,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     return output
 
   ## Does a complete test - builds, runs, checks output, etc.
-  def _build_and_run(self, filename, expected_output, args=None, output_nicerizer=None,
+  def _build_and_run(self, filename, expected_output, args=None,
                      no_build=False,
                      libraries=None,
                      includes=None,
@@ -1772,7 +1798,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       self.fail('No JS engine present to run this test with. Check %s and the paths therein.' % config.EM_CONFIG)
     for engine in engines:
       js_output = self.run_js(js_file, engine, args,
-                              output_nicerizer=output_nicerizer,
                               assert_returncode=assert_returncode,
                               interleaved_output=interleaved_output)
       js_output = js_output.replace('\r\n', '\n')

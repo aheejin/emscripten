@@ -2198,12 +2198,14 @@ class libstandalonewasm(MuslInternalLibrary):
     files += files_in_path(
         path='system/lib/libc/musl/src/time',
         filenames=['__secs_to_tm.c',
+                   '__tz.c',
                    'clock.c',
                    'clock_gettime.c',
                    'gettimeofday.c',
                    'localtime_r.c',
                    'gmtime_r.c',
                    'mktime.c',
+                   'strptime.c',
                    'timegm.c',
                    'time.c'])
     # It is more efficient to use JS for __assert_fail, as it avoids always

@@ -72,7 +72,6 @@ from tools import config
 from tools import shared
 from tools import system_libs
 from tools import utils
-from tools.settings import settings
 from tools import mylog
 
 QUIET = (__name__ != '__main__')
@@ -240,7 +239,7 @@ def generate_c_code(headers):
   return code
 
 
-def generate_cmd(js_file_path, src_file_path, cflags, compiler_rt):
+def generate_cmd(js_file_path, src_file_path, cflags):
   # Compile the program.
   show('Compiling generated code...')
 
@@ -256,8 +255,7 @@ def generate_cmd(js_file_path, src_file_path, cflags, compiler_rt):
                                '-O0',
                                '-Werror',
                                '-Wno-format',
-                               '-nostdlib',
-                               compiler_rt,
+                               '-nolibc',
                                '-sBOOTSTRAPPING_STRUCT_INFO',
                                '-sINCOMING_MODULE_JS_API=',
                                '-sSTRICT',
@@ -271,14 +269,6 @@ def generate_cmd(js_file_path, src_file_path, cflags, compiler_rt):
   # TODO(sbc): Remove this one we remove the test_em_config_env_var test
   cmd += ['-Wno-deprecated']
 
-  if settings.LTO:
-    cmd += ['-flto=' + settings.LTO]
-
-  if settings.MEMORY64:
-    # Always use =2 here so that we don't generate binar that actually requires
-    # memeory64 to run.  All we care about is that the output is correct.
-    cmd += ['-sMEMORY64=2', '-Wno-experimental']
-
   show(shared.shlex_join(cmd))
   return cmd
 
@@ -291,21 +281,11 @@ def inspect_headers(headers, cflags):
   os.write(src_file_fd, '\n'.join(code).encode())
   os.close(src_file_fd)
 
-  # Check sanity early on before populating the cache with libcompiler_rt
-  # If we don't do this the parallel build of compiler_rt will run while holding the cache
-  # lock and with EM_EXCLUSIVE_CACHE_ACCESS set causing N processes to race to run sanity checks.
-  # While this is not in itself serious problem it is wasteful and noise on stdout.
-  # For the same reason we run this early in embuilder.py and emcc.py.
-  # TODO(sbc): If we can remove EM_EXCLUSIVE_CACHE_ACCESS then this would not longer be needed.
-  shared.check_sanity()
-
-  compiler_rt = system_libs.Library.get_usable_variations()['libcompiler_rt'].build()
-
   js_file_fd, js_file_path = tempfile.mkstemp('.js')
   # Close the unneeded FD.
   os.close(js_file_fd)
 
-  cmd = generate_cmd(js_file_path, src_file_path, cflags, compiler_rt)
+  cmd = generate_cmd(js_file_path, src_file_path, cflags)
 
   try:
     mylog.log_cmd(cmd)
@@ -316,10 +296,8 @@ def inspect_headers(headers, cflags):
 
   # Run the compiled program.
   show('Calling generated program... ' + js_file_path)
-  args = []
-  if settings.MEMORY64:
-    args += shared.node_bigint_flags(config.NODE_JS)
-  info = shared.run_js_tool(js_file_path, node_args=args, stdout=shared.PIPE).splitlines()
+  node_args = shared.node_bigint_flags(config.NODE_JS)
+  info = shared.run_js_tool(js_file_path, node_args=node_args, stdout=shared.PIPE).splitlines()
 
   if not DEBUG:
     # Remove all temporary files.
@@ -425,7 +403,9 @@ def main(args):
   extra_cflags = []
 
   if args.wasm64:
-    settings.MEMORY64 = 2
+    # Always use =2 here so that we don't generate a binary that actually requires
+    # memory64 to run.  All we care about is that the output is correct.
+    extra_cflags += ['-sMEMORY64=2', '-Wno-experimental']
 
   # Add the user options to the list as well.
   for path in args.includes:
