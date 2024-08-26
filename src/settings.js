@@ -1006,7 +1006,7 @@ var INCOMING_MODULE_JS_API = [
   'onRealloc', 'onRuntimeInitialized', 'postMainLoop', 'postRun', 'preInit',
   'preMainLoop', 'preRun',
   'preinitializedWebGLContext', 'preloadPlugins',
-  'print', 'printErr', 'quit', 'setStatus', 'statusMessage', 'stderr',
+  'print', 'printErr', 'setStatus', 'statusMessage', 'stderr',
   'stdin', 'stdout', 'thisProgram', 'wasm', 'wasmBinary', 'websocket'
 ];
 
@@ -2170,10 +2170,6 @@ var SIGNATURE_CONVERSIONS = [];
 // Internal (testing only): Disables the blitOffscreenFramebuffer VAO path.
 // [link]
 var OFFSCREEN_FRAMEBUFFER_FORBID_VAO_PATH = false;
-
-// Internal (testing only): Forces memory growing to fail.
-// [link]
-var TEST_MEMORY_GROWTH_FAILS = false;
 
 // For renamed settings the format is:
 // [OLD_NAME, NEW_NAME]

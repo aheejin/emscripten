@@ -182,10 +182,6 @@ addToLibrary({
   },
 #endif // ABORTING_MALLOC
 
-#if TEST_MEMORY_GROWTH_FAILS
-  $growMemory: (size) => false,
-#else
-
   // Grows the wasm memory to the given byte size, and updates the JS views to
   // it. Returns 1 on success, 0 on error.
   $growMemory: (size) => {
@@ -215,10 +211,10 @@ addToLibrary({
     // implicit 0 return to save code size (caller will cast "undefined" into 0
     // anyhow)
   },
-#endif // ~TEST_MEMORY_GROWTH_FAILS
 
   emscripten_resize_heap__deps: [
     '$getHeapMax',
+    '$alignMemory',
 #if ASSERTIONS == 2
     'emscripten_get_now',
 #endif
@@ -289,8 +285,6 @@ addToLibrary({
 #endif
     }
 
-    var alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
-
     // Loop through potential heap size increases. If we attempt a too eager
     // reservation that fails, cut down on the attempted size and reserve a
     // smaller bump instead. (max 3 times, chosen somewhat arbitrarily)
@@ -306,7 +300,7 @@ addToLibrary({
       var overGrownHeapSize = oldSize + {{{ MEMORY_GROWTH_LINEAR_STEP }}} / cutDown; // ensure linear growth
 #endif
 
-      var newSize = Math.min(maxHeapSize, alignUp(Math.max(requestedSize, overGrownHeapSize), {{{ WASM_PAGE_SIZE }}}));
+      var newSize = Math.min(maxHeapSize, alignMemory(Math.max(requestedSize, overGrownHeapSize), {{{ WASM_PAGE_SIZE }}}));
 
 #if ASSERTIONS == 2
       var t0 = _emscripten_get_now();
@@ -1862,14 +1856,21 @@ addToLibrary({
   },
 
 #if DYNCALLS || !WASM_BIGINT
-#if MAIN_MODULE == 1
-  $dynCallLegacy__deps: ['$createDyncallWrapper'],
+#if MINIMAL_RUNTIME
+  $dynCalls: '{}',
 #endif
+  $dynCallLegacy__deps: [
+#if MAIN_MODULE == 1
+    '$createDyncallWrapper'
+#endif
+#if MINIMAL_RUNTIME
+    '$dynCalls',
+#endif
+  ],
   $dynCallLegacy: (sig, ptr, args) => {
     sig = sig.replace(/p/g, {{{ MEMORY64 ? "'j'" : "'i'" }}})
 #if ASSERTIONS
 #if MINIMAL_RUNTIME
-    assert(typeof dynCalls != 'undefined', 'Global dynCalls dictionary was not generated in the build! Pass -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$dynCall linker flag to include it!');
     assert(sig in dynCalls, `bad function pointer type - sig is not in dynCalls: '${sig}'`);
 #else
     assert(('dynCall_' + sig) in Module, `bad function pointer type - dynCall function not found for sig '${sig}'`);
