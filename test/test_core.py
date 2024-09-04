@@ -20,7 +20,7 @@ if __name__ == '__main__':
 from tools.shared import PIPE
 from tools.shared import EMCC, EMAR, FILE_PACKAGER
 from tools.utils import WINDOWS, MACOS, write_file, delete_file
-from tools import shared, building, config, webassembly
+from tools import shared, building, config, utils, webassembly
 import common
 from common import RunnerCore, path_from_root, requires_native_clang, test_file, create_file
 from common import skip_if, no_windows, no_mac, is_slow_test, parameterized, parameterize
@@ -1802,7 +1802,7 @@ int main() {
     self.do_runf(src, 'You must build with -sRETAIN_COMPILER_SETTINGS', assert_returncode=NON_ZERO)
     self.clear_setting('ASSERTIONS')
     self.set_setting('RETAIN_COMPILER_SETTINGS')
-    self.do_runf(src, read_file(output).replace('waka', shared.EMSCRIPTEN_VERSION))
+    self.do_runf(src, read_file(output).replace('waka', utils.EMSCRIPTEN_VERSION))
 
   def test_emscripten_has_asyncify(self):
     src = r'''
@@ -5654,6 +5654,7 @@ got: 10
   def test_utime(self):
     self.do_runf('utime/test_utime.c', 'success')
 
+  @also_with_noderawfs
   def test_futimens(self):
     self.do_runf('utime/test_futimens.c', 'success')
 
@@ -9491,15 +9492,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   # Tests the operation of API found in #include <emscripten/math.h>
   def test_emscripten_math(self):
     self.do_core_test('test_emscripten_math.c')
-
-  # Tests that users can pass custom JS options from command line using
-  # the -jsDfoo=val syntax:
-  # See https://github.com/emscripten-core/emscripten/issues/10580.
-  def test_custom_js_options(self):
-    self.emcc_args += ['--js-library', test_file('core/test_custom_js_settings.js'), '-jsDCUSTOM_JS_OPTION=1']
-    self.do_core_test('test_custom_js_settings.c')
-
-    self.assertContained('cannot change built-in settings values with a -jsD directive', self.expect_fail([EMCC, '-jsDWASM=0']))
 
   # Tests <emscripten/stack.h> API
   @no_asan('stack allocation sizes are no longer predictable')

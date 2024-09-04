@@ -364,15 +364,14 @@ addToLibrary({
         var signalToNumber = (sig) => {
           // implement only the most common ones, and fallback to SIGINT
           switch (sig) {
-            case 'SIGHUP': return 1;
-            case 'SIGINT': return 2;
-            case 'SIGQUIT': return 3;
-            case 'SIGFPE': return 8;
-            case 'SIGKILL': return 9;
-            case 'SIGALRM': return 14;
-            case 'SIGTERM': return 15;
+            case 'SIGHUP': return {{{ cDefs.SIGHUP }}};
+            case 'SIGQUIT': return {{{ cDefs.SIGQUIT }}};
+            case 'SIGFPE': return {{{ cDefs.SIGFPE }}};
+            case 'SIGKILL': return {{{ cDefs.SIGKILL }}};
+            case 'SIGALRM': return {{{ cDefs.SIGALRM }}};
+            case 'SIGTERM': return {{{ cDefs.SIGTERM }}};
+            default: return {{{ cDefs.SIGINT }}};
           }
-          return 2; // SIGINT
         }
         return _W_EXITCODE(0, signalToNumber(ret.signal));
       }
@@ -2022,7 +2021,6 @@ addToLibrary({
     throw 'unwind';
   },
 
-  _emscripten_runtime_keepalive_clear__proxy: 'sync',
   _emscripten_runtime_keepalive_clear: () => {
 #if isSymbolNeeded('$noExitRuntime')
     noExitRuntime = false;
@@ -2061,6 +2059,10 @@ addToLibrary({
 #if ASSERTIONS || RUNTIME_DEBUG
   emscripten_dbg: (str) => dbg(UTF8ToString(str)),
   emscripten_dbgn: (str, len) => dbg(UTF8ToString(str, len)),
+
+  emscripten_dbg_backtrace: (str) => {
+    dbg(UTF8ToString(str) + '\n' + new Error().stack);
+  },
 #endif
 
   // Use program_invocation_short_name and program_invocation_name in compiled
@@ -2089,6 +2091,13 @@ addToLibrary({
     assert(typeof str == 'number');
 #endif
     console.error(UTF8ToString(str));
+  },
+
+  emscripten_console_trace: (str) => {
+#if ASSERTIONS
+    assert(typeof str == 'number');
+#endif
+    console.trace(UTF8ToString(str));
   },
 
   emscripten_throw_number: (number) => {

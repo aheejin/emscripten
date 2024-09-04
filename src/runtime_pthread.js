@@ -179,20 +179,23 @@ if (ENVIRONMENT_IS_PTHREAD) {
         wasmPromiseResolve(msgData['wasmModule']);
 #endif // MINIMAL_RUNTIME
       } else if (cmd === 'run') {
+#if ASSERTIONS
+        assert(msgData['pthread_ptr']);
+#endif
+        // Call inside JS module to set up the stack frame for this pthread in JS module scope.
+        // This needs to be the first thing that we do, as we cannot call to any C/C++ functions
+        // until the thread stack is initialized.
+        establishStackSpace(msgData['pthread_ptr']);
+
         // Pass the thread address to wasm to store it for fast access.
         __emscripten_thread_init(msgData['pthread_ptr'], /*is_main=*/0, /*is_runtime=*/0, /*can_block=*/1, 0, 0);
+
+        PThread.receiveObjectTransfer(msgData);
+        PThread.threadInitTLS();
 
         // Await mailbox notifications with `Atomics.waitAsync` so we can start
         // using the fast `Atomics.notify` notification path.
         __emscripten_thread_mailbox_await(msgData['pthread_ptr']);
-
-#if ASSERTIONS
-        assert(msgData['pthread_ptr']);
-#endif
-        // Also call inside JS module to set up the stack frame for this pthread in JS module scope
-        establishStackSpace();
-        PThread.receiveObjectTransfer(msgData);
-        PThread.threadInitTLS();
 
         if (!initializedJS) {
 #if EMBIND
@@ -218,10 +221,6 @@ if (ENVIRONMENT_IS_PTHREAD) {
 #if RUNTIME_DEBUG
           dbg(`worker: Pthread 0x${_pthread_self().toString(16)} completed its main entry point with an 'unwind', keeping the worker alive for asynchronous operation.`);
 #endif
-        }
-      } else if (cmd === 'cancel') { // Main thread is asking for a pthread_cancel() on this thread.
-        if (_pthread_self()) {
-          __emscripten_thread_exit({{{ cDefs.PTHREAD_CANCELED }}});
         }
       } else if (msgData.target === 'setimmediate') {
         // no-op

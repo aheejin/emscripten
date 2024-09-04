@@ -34,8 +34,8 @@ globalThis.MAX_PTR = (2 ** 32) - 1
 var LibraryPThread = {
   $PThread__postset: 'PThread.init();',
   $PThread__deps: ['_emscripten_thread_init',
-                   '$killThread',
-                   '$cancelThread', '$cleanupThread', '$zeroMemory',
+                   '$terminateWorker',
+                   '$cleanupThread', '$zeroMemory',
 #if MAIN_MODULE
                    '$markAsFinished',
 #endif
@@ -92,14 +92,10 @@ var LibraryPThread = {
 #if ASSERTIONS
       PThread.debugInit();
 #endif
-      if (ENVIRONMENT_IS_PTHREAD
-#if AUDIO_WORKLET
-        || ENVIRONMENT_IS_AUDIO_WORKLET
-#endif
-        ) {
-        PThread.initWorker();
-      } else {
+      if ({{{ ENVIRONMENT_IS_MAIN_THREAD() }}}) {
         PThread.initMainThread();
+      } else {
+        PThread.initWorker();
       }
     },
     initMainThread() {
@@ -166,7 +162,6 @@ var LibraryPThread = {
     },
 #endif
 
-    terminateAllThreads__deps: ['$terminateWorker'],
     terminateAllThreads: () => {
 #if ASSERTIONS
       assert(!ENVIRONMENT_IS_PTHREAD, 'Internal Error! terminateAllThreads() can only ever be called from main application thread!');
@@ -273,10 +268,6 @@ var LibraryPThread = {
         } else if (cmd === 'markAsFinished') {
           markAsFinished(d['thread']);
 #endif
-        } else if (cmd === 'killThread') {
-          killThread(d['thread']);
-        } else if (cmd === 'cancelThread') {
-          cancelThread(d['thread']);
         } else if (cmd === 'loaded') {
           worker.loaded = true;
 #if ENVIRONMENT_MAY_BE_NODE && PTHREAD_POOL_SIZE
@@ -533,25 +524,6 @@ var LibraryPThread = {
     };
   },
 
-  $killThread__deps: ['_emscripten_thread_free_data', '$terminateWorker'],
-  $killThread: (pthread_ptr) => {
-#if PTHREADS_DEBUG
-    dbg(`killThread ${ptrToString(pthread_ptr)}`);
-#endif
-#if ASSERTIONS
-    assert(!ENVIRONMENT_IS_PTHREAD, 'Internal Error! killThread() can only ever be called from main application thread!');
-    assert(pthread_ptr, 'Internal Error! Null pthread_ptr in killThread!');
-#endif
-    var worker = PThread.pthreads[pthread_ptr];
-    delete PThread.pthreads[pthread_ptr];
-    terminateWorker(worker);
-    __emscripten_thread_free_data(pthread_ptr);
-    // The worker was completely nuked (not just the pthread execution it was hosting), so remove it from running workers
-    // but don't put it back to the pool.
-    PThread.runningWorkers.splice(PThread.runningWorkers.indexOf(worker), 1); // Not a running Worker anymore.
-    worker.pthread_ptr = 0;
-  },
-
   _emscripten_thread_cleanup: (thread) => {
     // Called when a thread needs to be cleaned up so it can be reused.
     // A thread is considered reusable when it either returns from its
@@ -638,15 +610,6 @@ var LibraryPThread = {
 #else
   $registerTLSInit: (tlsInitFunc) => PThread.tlsInitFunctions.push(tlsInitFunc),
 #endif
-
-  $cancelThread: (pthread_ptr) => {
-#if ASSERTIONS
-    assert(!ENVIRONMENT_IS_PTHREAD, 'Internal Error! cancelThread() can only ever be called from main application thread!');
-    assert(pthread_ptr, 'Internal Error! Null pthread_ptr in cancelThread!');
-#endif
-    var worker = PThread.pthreads[pthread_ptr];
-    worker.postMessage({ 'cmd': 'cancel' });
-  },
 
   $spawnThread: (threadParams) => {
 #if ASSERTIONS
@@ -918,17 +881,6 @@ var LibraryPThread = {
 #endif
   },
 
-  __pthread_kill_js: (thread, signal) => {
-    if (signal === {{{ cDefs.SIGCANCEL }}}) { // Used by pthread_cancel in musl
-      if (!ENVIRONMENT_IS_PTHREAD) cancelThread(thread);
-      else postMessage({ 'cmd': 'cancelThread', 'thread': thread });
-    } else {
-      if (!ENVIRONMENT_IS_PTHREAD) killThread(thread);
-      else postMessage({ 'cmd': 'killThread', 'thread': thread });
-    }
-    return 0;
-  },
-
   // This function is call by a pthread to signal that exit() was called and
   // that the entire process should exit.
   // This function is always called from a pthread, but is executed on the
@@ -1063,8 +1015,12 @@ var LibraryPThread = {
 
   $establishStackSpace__internal: true,
   $establishStackSpace__deps: ['$stackRestore'],
-  $establishStackSpace: () => {
-    var pthread_ptr = _pthread_self();
+  $establishStackSpace: (pthread_ptr) => {
+#if ALLOW_MEMORY_GROWTH
+    // If memory growth is enabled, the memory views may have gotten out of date,
+    // so resync them before accessing the pthread ptr below.
+    updateMemoryViews();
+#endif
     var stackHigh = {{{ makeGetValue('pthread_ptr', C_STRUCTS.pthread.stack, '*') }}};
     var stackSize = {{{ makeGetValue('pthread_ptr', C_STRUCTS.pthread.stack_size, '*') }}};
     var stackLow = stackHigh - stackSize;

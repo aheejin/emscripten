@@ -484,7 +484,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     # -dumpversion
     output = self.run_process([compiler, '-dumpversion'], stdout=PIPE, stderr=PIPE)
-    self.assertEqual(shared.EMSCRIPTEN_VERSION, output.stdout.strip())
+    self.assertEqual(utils.EMSCRIPTEN_VERSION, output.stdout.strip())
 
     # properly report source code errors, and stop there
     self.clear()
@@ -2340,6 +2340,20 @@ Module['postRun'] = () => {
     self.run_process(cmd + ['-L.'])
     self.run_js('a.out.js')
 
+  def test_dylink_LEGACY_GL_EMULATION(self):
+    # LEGACY_GL_EMULATION wraps JS library functions. This test ensure that when it does
+    # so it preserves the `.sig` attributes needed by dynamic linking.
+    create_file('test.c', r'''
+#include <GLES2/gl2.h>
+#include <stdio.h>
+
+int main() {
+  printf("glUseProgram: %p\n", &glUseProgram);
+  printf("done\n");
+  return 0;
+}''')
+    self.do_runf('test.c', 'done\n', emcc_args=['-sLEGACY_GL_EMULATION', '-sMAIN_MODULE=2'])
+
   def test_js_link(self):
     create_file('main.c', '''
       #include <stdio.h>
@@ -2725,15 +2739,15 @@ More info: https://emscripten.org
 
   def test_GetProcAddress_LEGACY_GL_EMULATION(self):
     # without legacy gl emulation, getting a proc from there should fail
-    self.do_other_test('test_GetProcAddress_LEGACY_GL_EMULATION.cpp', args=['0'], emcc_args=['-sLEGACY_GL_EMULATION=0', '-sGL_ENABLE_GET_PROC_ADDRESS'])
+    self.do_other_test('test_GetProcAddress_LEGACY_GL_EMULATION.c', args=['0'], emcc_args=['-sLEGACY_GL_EMULATION=0', '-sGL_ENABLE_GET_PROC_ADDRESS'])
     # with it, it should work
-    self.do_other_test('test_GetProcAddress_LEGACY_GL_EMULATION.cpp', args=['1'], emcc_args=['-sLEGACY_GL_EMULATION', '-sGL_ENABLE_GET_PROC_ADDRESS'])
+    self.do_other_test('test_GetProcAddress_LEGACY_GL_EMULATION.c', args=['1'], emcc_args=['-sLEGACY_GL_EMULATION', '-sGL_ENABLE_GET_PROC_ADDRESS'])
 
   # Verifies that is user is building without -sGL_ENABLE_GET_PROC_ADDRESS, then
   # at link time they should get a helpful error message guiding them to enable
   # the option.
   def test_get_proc_address_error_message(self):
-    err = self.expect_fail([EMCC, '-sGL_ENABLE_GET_PROC_ADDRESS=0', test_file('other/test_GetProcAddress_LEGACY_GL_EMULATION.cpp')])
+    err = self.expect_fail([EMCC, '-sGL_ENABLE_GET_PROC_ADDRESS=0', test_file('other/test_GetProcAddress_LEGACY_GL_EMULATION.c')])
     self.assertContained('error: linker: Undefined symbol: SDL_GL_GetProcAddress(). Please pass -sGL_ENABLE_GET_PROC_ADDRESS at link time to link in SDL_GL_GetProcAddress().', err)
 
   def test_prepost(self):
@@ -4681,6 +4695,15 @@ int main() {
 ''')
     self.do_runf('src.c', 'main: 42\n', emcc_args=['--js-library', 'lib.js'])
 
+  # Tests that users can pass custom JS options from command line using
+  # the -jsDfoo=val syntax:
+  # See https://github.com/emscripten-core/emscripten/issues/10580.
+  def test_js_lib_custom_settings(self):
+    self.emcc_args += ['--js-library', test_file('core/test_custom_js_settings.js'), '-jsDCUSTOM_JS_OPTION=1']
+    self.do_other_test('test_js_lib_custom_settings.c')
+
+    self.assertContained('cannot change built-in settings values with a -jsD directive', self.expect_fail([EMCC, '-jsDWASM=0']))
+
   def test_EMCC_BUILD_DIR(self):
     # EMCC_BUILD_DIR env var contains the dir we were building in, when running the js compiler (e.g. when
     # running a js library). We force the cwd to be src/ for technical reasons, so this lets you find out
@@ -5768,7 +5791,7 @@ dir
 major: %d
 minor: %d
 tiny: %d
-''' % (shared.EMSCRIPTEN_VERSION_MAJOR, shared.EMSCRIPTEN_VERSION_MINOR, shared.EMSCRIPTEN_VERSION_TINY)
+''' % (utils.EMSCRIPTEN_VERSION_MAJOR, utils.EMSCRIPTEN_VERSION_MINOR, utils.EMSCRIPTEN_VERSION_TINY)
     self.do_runf('src.c', expected)
     self.do_runf('src.c', expected, emcc_args=['-sSTRICT'])
 
@@ -5848,7 +5871,7 @@ __EMSCRIPTEN_major__ __EMSCRIPTEN_minor__ __EMSCRIPTEN_tiny__ EMSCRIPTEN_KEEPALI
     def test(args):
       print(args)
       out = self.run_process([EMXX, 'src.cpp', '-E'] + args, stdout=PIPE).stdout
-      self.assertContained('%d %d %d __attribute__((used))' % (shared.EMSCRIPTEN_VERSION_MAJOR, shared.EMSCRIPTEN_VERSION_MINOR, shared.EMSCRIPTEN_VERSION_TINY), out)
+      self.assertContained('%d %d %d __attribute__((used))' % (utils.EMSCRIPTEN_VERSION_MAJOR, utils.EMSCRIPTEN_VERSION_MINOR, utils.EMSCRIPTEN_VERSION_TINY), out)
 
     test([])
     test(['-lembind'])
@@ -12407,7 +12430,10 @@ int main () {
     self.assertIdentical(one, two)
 
   def test_err(self):
-    self.do_other_test('test_err.cpp')
+    self.do_other_test('test_err.c')
+
+  def test_euidaccess(self):
+    self.do_other_test('test_euidaccess.c')
 
   def test_shared_flag(self):
     # Test that `-shared` flag causes object file generation but gives a warning
@@ -13385,6 +13411,10 @@ void foo() {}
     output = self.do_runf('pthread/test_pthread_trap.c', assert_returncode=NON_ZERO)
     self.assertContained('sent an error!', output)
     self.assertContained('at (test_pthread_trap.wasm.)?thread_main', output, regex=True)
+
+  @node_pthreads
+  def test_pthread_kill(self):
+    self.do_run_in_out_file_test('pthread/test_pthread_kill.c')
 
   @node_pthreads
   def test_emscripten_set_interval(self):
@@ -14671,7 +14701,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
 
   @also_with_standalone_wasm()
   def test_console_out(self):
-    self.do_other_test('test_console_out.c')
+    self.do_other_test('test_console_out.c', regex=True)
 
   @requires_wasm64
   def test_explicit_target(self):

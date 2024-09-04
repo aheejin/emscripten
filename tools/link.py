@@ -1760,7 +1760,7 @@ def phase_linker_setup(options, state, newargs):
                                   'emscripten_stack_get_base',
                                   'emscripten_stack_get_end']
 
-  settings.EMSCRIPTEN_VERSION = shared.EMSCRIPTEN_VERSION
+  settings.EMSCRIPTEN_VERSION = utils.EMSCRIPTEN_VERSION
   settings.SOURCE_MAP_BASE = options.source_map_base or ''
 
   settings.LINK_AS_CXX = (shared.run_via_emxx or settings.DEFAULT_TO_CXX) and '-nostdlib++' not in newargs
@@ -2415,7 +2415,7 @@ def modularize():
     else:
       script_url = "typeof document != 'undefined' ? document.currentScript?.src : undefined"
       if shared.target_environment_may_be('node'):
-        script_url_node = "if (typeof __filename != 'undefined') _scriptName ||= __filename;"
+        script_url_node = "if (typeof __filename != 'undefined') _scriptName = _scriptName || __filename;"
     src = '''%(node_imports)s
 var %(EXPORT_NAME)s = (() => {
   var _scriptName = %(script_url)s;
@@ -2597,7 +2597,6 @@ def minify_html(filename):
   # -g1 and greater retain whitespace and comments in source
   if settings.DEBUG_LEVEL == 0:
     opts += ['--collapse-whitespace',
-             '--collapse-inline-tag-whitespace',
              '--remove-comments',
              '--remove-tag-whitespace',
              '--sort-attributes',
@@ -2615,6 +2614,10 @@ def minify_html(filename):
              '--minify-js', 'true']
 
   # html-minifier also has the following options, but they look unsafe for use:
+  # '--collapse-inline-tag-whitespace': removes whitespace between inline tags in visible text,
+  #                                     causing words to be joined together. See
+  #                                     https://github.com/terser/html-minifier-terser/issues/179
+  #                                     https://github.com/emscripten-core/emscripten/issues/22188
   # '--remove-optional-tags': removes e.g. <head></head> and <body></body> tags from the page.
   #                           (Breaks at least browser.test_sdl2glshader)
   # '--remove-empty-attributes': removes all attributes with whitespace-only values.
