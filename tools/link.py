@@ -33,7 +33,7 @@ from . import system_libs
 from . import utils
 from . import webassembly
 from . import extract_metadata
-from .utils import read_file, read_binary, write_file, delete_file
+from .utils import read_file, write_file, delete_file
 from .utils import removeprefix, exit_with_error
 from .shared import in_temp, safe_copy, do_replace, OFormat
 from .shared import DEBUG, WINDOWS, DYNAMICLIB_ENDINGS, STATICLIB_ENDINGS
@@ -144,8 +144,9 @@ def save_intermediate_with_wasm(name, wasm_binary):
   building.save_intermediate(wasm_binary, name + '.wasm')
 
 
-def base64_encode(b):
-  b64 = base64.b64encode(b)
+def base64_encode(filename):
+  data = utils.read_binary(filename)
+  b64 = base64.b64encode(data)
   return b64.decode('ascii')
 
 
@@ -300,7 +301,14 @@ def fix_windows_newlines(text):
 
 
 def read_js_files(files):
-  contents = '\n'.join(read_file(f) for f in files)
+  contents = []
+  for f in files:
+    content = read_file(f)
+    if content.startswith('#preprocess\n'):
+      contents.append(shared.read_and_preprocess(f, expand_macros=True))
+    else:
+      contents.append(content)
+  contents = '\n'.join(contents)
   return fix_windows_newlines(contents)
 
 
@@ -393,10 +401,7 @@ def get_binaryen_passes():
       passes += ['--pass-arg=asyncify-onlylist@%s' % ','.join(settings.ASYNCIFY_ONLY)]
 
   if settings.MEMORY64 == 2:
-    passes += ['--memory64-lowering']
-
-  if settings.MEMORY64:
-    passes += ['--table64-lowering']
+    passes += ['--memory64-lowering', '--table64-lowering']
 
   if settings.BINARYEN_IGNORE_IMPLICIT_TRAPS:
     passes += ['--ignore-implicit-traps']
@@ -1368,17 +1373,6 @@ def phase_linker_setup(options, state, newargs):
   settings.SUPPORTS_PROMISE_ANY = feature_matrix.caniuse(feature_matrix.Feature.PROMISE_ANY)
   if not settings.BULK_MEMORY:
     settings.BULK_MEMORY = feature_matrix.caniuse(feature_matrix.Feature.BULK_MEMORY)
-    if settings.BULK_MEMORY and settings.MEMORY64 and settings.MIN_NODE_VERSION < 180000:
-      # Note that we do not update tools/feature_matrix.py for this, as this issue is
-      # wasm64-specific: bulk memory for wasm32 has shipped in Node.js 12.5, but
-      # bulk memory for wasm64 has shipped only in Node.js 18.
-      #
-      # Feature matrix currently cannot express such complex combinations of
-      # features, so the only options are to either choose the least common
-      # denominator and disable bulk memory altogether for Node.js < 18 or to
-      # special-case this situation here. The former would be limiting for
-      # wasm32 users, so instead we do the latter:
-      settings.BULK_MEMORY = 0
 
   if settings.AUDIO_WORKLET:
     if settings.AUDIO_WORKLET == 1:
@@ -1977,9 +1971,11 @@ def run_embind_gen(wasm_target, js_syms, extra_settings, linker_inputs):
   # Replace embind with the TypeScript generation version.
   embind_index = settings.JS_LIBRARIES.index('embind/embind.js')
   settings.JS_LIBRARIES[embind_index] = 'embind/embind_gen.js'
-  outfile_js = in_temp('tsgen_a.out.js')
+  if settings.MEMORY64:
+    settings.MIN_NODE_VERSION = 160000
+  outfile_js = in_temp('tsgen.js')
   # The Wasm outfile may be modified by emscripten.emscript, so use a temporary file.
-  outfile_wasm = in_temp('tsgen_a.out.wasm')
+  outfile_wasm = in_temp('tsgen.wasm')
   emscripten.emscript(wasm_target, outfile_wasm, outfile_js, js_syms, finalize=False)
   # Build the flags needed by Node.js to properly run the output file.
   node_args = []
@@ -2003,7 +1999,7 @@ def phase_emit_tsd(options, wasm_target, js_target, js_syms, metadata, linker_in
   filename = options.emit_tsd
   embind_tsd = ''
   if settings.EMBIND:
-    embind_tsd = run_embind_gen(wasm_target, js_syms, {'EMBIND_JS': False}, linker_inputs)
+    embind_tsd = run_embind_gen(wasm_target, js_syms, {'EMBIND_AOT': False}, linker_inputs)
   all_tsd = emscripten.create_tsd(metadata, embind_tsd)
   out_file = os.path.join(os.path.dirname(js_target), filename)
   write_file(out_file, all_tsd)
@@ -2083,7 +2079,7 @@ def phase_final_emitting(options, state, target, wasm_target):
     return
 
   target_dir = os.path.dirname(os.path.abspath(target))
-  if settings.PTHREADS and not settings.STRICT:
+  if settings.PTHREADS and not settings.STRICT and not settings.SINGLE_FILE:
     worker_file = shared.replace_suffix(target, get_worker_js_suffix())
     write_file(worker_file, '''\
 // This file is no longer used by emscripten and has been created as a placeholder
@@ -2110,7 +2106,10 @@ throw new Error('Dummy worker.js file should never be used');
   # optimize by Closure, or unoptimalities that were left behind by processing
   # steps that occurred after Closure.
   if settings.MINIMAL_RUNTIME == 2 and settings.USE_CLOSURE_COMPILER and settings.DEBUG_LEVEL == 0:
-    shared.run_js_tool(utils.path_from_root('tools/unsafe_optimizations.mjs'), [final_js, '-o', final_js], cwd=utils.path_from_root('.'))
+    args = [final_js, '-o', final_js]
+    if not settings.MINIFY_WHITESPACE:
+      args.append('--pretty')
+    shared.run_js_tool(utils.path_from_root('tools/unsafe_optimizations.mjs'), args, cwd=utils.path_from_root('.'))
     save_intermediate('unsafe-optimizations')
     # Finally, rerun Closure compile with simple optimizations. It will be able
     # to further minify the code. (n.b. it would not be safe to run in advanced
@@ -2339,7 +2338,7 @@ def phase_binaryen(target, options, wasm_target):
     js = read_file(final_js)
 
     if settings.MINIMAL_RUNTIME:
-      js = do_replace(js, '<<< WASM_BINARY_DATA >>>', base64_encode(read_binary(wasm_target)))
+      js = do_replace(js, '<<< WASM_BINARY_DATA >>>', base64_encode(wasm_target))
     else:
       js = do_replace(js, '<<< WASM_BINARY_FILE >>>', get_subresource_location(wasm_target))
     delete_file(wasm_target)
@@ -2536,7 +2535,20 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
     # Normal code generation path
     script.src = base_js_target
 
-  if not settings.SINGLE_FILE:
+  if settings.SINGLE_FILE:
+    # In SINGLE_FILE mode we either inline the script, or in the case
+    # of SHARED_MEMORY convert the entire thing into a data URL.
+    if settings.SHARED_MEMORY:
+      assert not script.inline
+      script.src = get_subresource_location(js_target)
+    else:
+      js_contents = script.inline or ''
+      if script.src:
+        js_contents += read_file(js_target)
+      script.src = None
+      script.inline = read_file(js_target)
+    delete_file(js_target)
+  else:
     if not settings.WASM_ASYNC_COMPILATION:
       # We need to load the wasm file before anything else, since it
       # has be synchronously ready.
@@ -2570,20 +2582,11 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
           }
 ''' % (script.inline, get_subresource_location(wasm_target) + '.js')
 
-  # inline script for SINGLE_FILE output
-  if settings.SINGLE_FILE:
-    js_contents = script.inline or ''
-    if script.src:
-      js_contents += read_file(js_target)
-    delete_file(js_target)
-    script.src = None
-    script.inline = js_contents
-
   shell = do_replace(shell, '{{{ SCRIPT }}}', script.replacement())
   shell = shell.replace('{{{ SHELL_CSS }}}', utils.read_file(utils.path_from_root('src/shell.css')))
-  shell_logo = utils.read_binary(utils.path_from_root('media/powered_by_logo_shell.png'))
-  shell_logo_b64 = base64_encode(shell_logo)
-  shell = shell.replace('{{{ SHELL_LOGO }}}', f'<img id="emscripten_logo" src="data:image/png;base64,{shell_logo_b64}">')
+  logo_filename = utils.path_from_root('media/powered_by_logo_shell.png')
+  logo_b64 = base64_encode(logo_filename)
+  shell = shell.replace('{{{ SHELL_LOGO }}}', f'<img id="emscripten_logo" src="data:image/png;base64,{logo_b64}">')
 
   check_output_file(target)
   write_file(target, shell)
@@ -2652,7 +2655,7 @@ def generate_html(target, options, js_target, target_basename, wasm_target):
 
 def generate_worker_js(target, js_target, target_basename):
   if settings.SINGLE_FILE:
-    # compiler output is embedded as base64
+    # compiler output is embedded as base64 data URL
     proxy_worker_filename = get_subresource_location(js_target)
   else:
     # compiler output goes in .worker.js file
@@ -2667,7 +2670,7 @@ def generate_worker_js(target, js_target, target_basename):
 def worker_js_script(proxy_worker_filename):
   web_gl_client_src = read_file(utils.path_from_root('src/webGLClient.js'))
   proxy_client_src = shared.read_and_preprocess(utils.path_from_root('src/proxyClient.js'), expand_macros=True)
-  if not os.path.dirname(proxy_worker_filename):
+  if not settings.SINGLE_FILE and not os.path.dirname(proxy_worker_filename):
     proxy_worker_filename = './' + proxy_worker_filename
   proxy_client_src = do_replace(proxy_client_src, '<<< filename >>>', proxy_worker_filename)
   return web_gl_client_src + '\n' + proxy_client_src
@@ -2719,11 +2722,13 @@ def map_to_js_libs(library_name):
     # This is the name of GNU's C++ standard library. We ignore it here
     # for compatibility with GNU toolchains.
     'stdc++': [],
+    'SDL2_mixer': [],
   }
   settings_map = {
     'glfw': {'USE_GLFW': 2},
     'glfw3': {'USE_GLFW': 3},
     'SDL': {'USE_SDL': 1},
+    'SDL2_mixer': {'USE_SDL_MIXER': 2},
   }
 
   if library_name in settings_map:
@@ -2739,26 +2744,6 @@ def map_to_js_libs(library_name):
     return [f'library_{library_name}']
 
   return None
-
-
-# Map a linker flag to a settings. This lets a user write -lSDL2 and it will
-# have the same effect as -sUSE_SDL=2.
-def map_and_apply_to_settings(library_name):
-  # most libraries just work, because the -l name matches the name of the
-  # library we build. however, if a library has variations, which cause us to
-  # build multiple versions with multiple names, then we need this mechanism.
-  library_map = {
-    # SDL2_mixer's built library name contains the specific codecs built in.
-    'SDL2_mixer': [('USE_SDL_MIXER', 2)],
-  }
-
-  if library_name in library_map:
-    for key, value in library_map[library_name]:
-      logger.debug('Mapping library `%s` to settings changes: %s = %s' % (library_name, key, value))
-      setattr(settings, key, value)
-    return True
-
-  return False
 
 
 def process_libraries(state, linker_inputs):
@@ -2789,9 +2774,6 @@ def process_libraries(state, linker_inputs):
       continue
 
     if js_libs is not None:
-      continue
-
-    if map_and_apply_to_settings(lib):
       continue
 
     path = None
@@ -2842,16 +2824,21 @@ class ScriptSource:
     """Returns the script tag to replace the {{{ SCRIPT }}} tag in the target"""
     assert (self.src or self.inline) and not (self.src and self.inline)
     if self.src:
-      quoted_src = quote(self.src)
+      src = self.src
+      if src.startswith('data:'):
+        filename = src
+      else:
+        src = quote(self.src)
+        filename = f'./{src}'
       if settings.EXPORT_ES6:
         return f'''
         <script type="module">
-          import initModule from "./{quoted_src}";
+          import initModule from "{filename}";
           initModule(Module);
         </script>
         '''
       else:
-        return f'<script async type="text/javascript" src="{quoted_src}"></script>'
+        return f'<script async type="text/javascript" src="{src}"></script>'
     else:
       return '<script>\n%s\n</script>' % self.inline
 
@@ -2984,8 +2971,7 @@ def move_file(src, dst):
 # Returns the subresource location for run-time access
 def get_subresource_location(path):
   if settings.SINGLE_FILE:
-    data = base64.b64encode(utils.read_binary(path))
-    return 'data:application/octet-stream;base64,' + data.decode('ascii')
+    return 'data:application/octet-stream;base64,' + base64_encode(path)
   else:
     return os.path.basename(path)
 
