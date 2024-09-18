@@ -426,8 +426,8 @@ def get_binaryen_passes():
     passes += [('--' + p) if p[0] != '-' else p for p in extras if p]
 
   # Run the translator to the new EH instructions with exnref
-  if settings.WASM_EXNREF:
-    passes += ['--emit-exnref']
+  if not settings.WASM_EXNREF:
+    passes += ['--emit-legacy-eh']
 
   # If we are going to run metadce then that means we will be running binaryen
   # tools after the main invocation, whose flags are determined here
