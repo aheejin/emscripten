@@ -439,11 +439,6 @@ class other(RunnerCore):
       Hello();
     ''')
 
-    if package_json:
-      # This makes node load all files in the directory as ES6 modules,
-      # including the worker.js file.
-      create_file('package.json', '{"type":"module"}')
-
     self.assertContained('hello, world!', self.run_js('runner.mjs'))
 
   def test_emcc_out_file(self):
@@ -2189,6 +2184,7 @@ Module['postRun'] = () => {
   def test_dylink_pthread_bigint_em_js(self):
     self.set_setting('MAIN_MODULE', 2)
     self.set_setting('WASM_BIGINT')
+    self.set_setting('EXPORTED_FUNCTIONS', '_malloc,_main')
     self.emcc_args += ['-Wno-experimental', '-pthread']
     self.do_runf('core/test_em_js.cpp')
 
@@ -2483,38 +2479,22 @@ int main() {
 
   @with_all_sjlj
   @requires_network
+  @crossplatform
   def test_freetype(self):
     # copy the Liberation Sans Bold truetype file located in the
     # <emscripten_root>/test/freetype to the compilation folder
     shutil.copy2(test_file('freetype/LiberationSansBold.ttf'), os.getcwd())
+    self.emcc_args += ['--embed-file', 'LiberationSansBold.ttf']
     # the test program will print an ascii representation of a bitmap where the
-    # 'w' character has been rendered using the Liberation Sans Bold font
-    expectedOutput = '                \n' + \
-                     '                \n' + \
-                     '                \n' + \
-                     '                \n' + \
-                     '***    +***+    \n' + \
-                     '***+   *****   +\n' + \
-                     '+**+   *****   +\n' + \
-                     '+***  +**+**+  *\n' + \
-                     ' ***+ ***+**+ +*\n' + \
-                     ' +**+ *** *** +*\n' + \
-                     ' +**++**+ +**+**\n' + \
-                     '  ***+**+ +**+**\n' + \
-                     '  ******   *****\n' + \
-                     '  +****+   +****\n' + \
-                     '  +****+   +****\n' + \
-                     '   ****     ****'
-    # build test program with the font file embed in it
-    self.do_runf('freetype_test.c', expectedOutput,
-                 emcc_args=['-sUSE_FREETYPE', '--embed-file', 'LiberationSansBold.ttf'])
-    self.do_runf('freetype_test.c', expectedOutput,
-                 emcc_args=['--use-port=freetype', '--embed-file', 'LiberationSansBold.ttf'])
+    # 'w' character has been rendered using the Liberation Sans Bold font.
+    # See test_freetype.out
+    self.do_run_in_out_file_test('test_freetype.c', emcc_args=['-sUSE_FREETYPE'])
+    self.do_run_in_out_file_test('test_freetype.c', emcc_args=['--use-port=freetype'])
 
   @requires_network
   def test_freetype_with_pthreads(self):
     # Verify that freetype supports compilation requiring pthreads
-    self.emcc(test_file('freetype_test.c'), ['-pthread', '-sUSE_FREETYPE'], output_filename='a.out.js')
+    self.emcc(test_file('test_freetype.c'), ['-pthread', '-sUSE_FREETYPE'], output_filename='a.out.js')
 
   @requires_network
   def test_icu(self):
@@ -7690,6 +7670,11 @@ int main() {
     self.run_process([EMCC, 'src.c'])
     self.assertContained('hello, world!', self.run_js('a.out.js'))
 
+  @crossplatform
+  @also_with_wasmfs
+  def test_umask(self):
+    self.do_runf('other/test_umask.c', 'success')
+
   def test_no_missing_symbols(self):
     # simple hello world should not show any missing symbols
     self.run_process([EMCC, test_file('hello_world.c')])
@@ -9752,6 +9737,11 @@ end
     ''')
     self.run_process([EMCC, 'access.c', '-sNODERAWFS'])
     self.run_js('a.out.js', args=[os.path.abspath('foo')])
+
+  def test_noderawfs_readfile_prerun(self):
+    create_file('foo', 'bar')
+    self.add_pre_run("console.log(FS.readFile('foo', { encoding: 'utf8' }));")
+    self.do_runf('hello_world.c', 'bar', emcc_args=['-sNODERAWFS', '-sFORCE_FILESYSTEM'])
 
   @disabled('https://github.com/nodejs/node/issues/18265')
   def test_node_code_caching(self):
@@ -14494,6 +14484,21 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
   def test_wasi_sched_yield(self):
     self.run_wasi_test_suite_test('wasi_sched_yield')
 
+  def test_wasi_with_sjlj(self):
+    # When PURE_WASI is set and Wasm exception is not being used, we turn off
+    # SUPPORT_LONGJMP by default because it uses a JS-based simulation of
+    # longjmp.
+    self.set_setting('PURE_WASI')
+    err = self.expect_fail([EMCC, test_file('core/test_longjmp.c')] + self.get_emcc_args())
+    self.assertContained('error: longjmp support was disabled (SUPPORT_LONGJMP=0)', err)
+
+    # When using Wasm exception, SUPPORT_LONGJMP defaults to 'wasm', which does
+    # not use the JS-based support. This should succeed.
+    self.emcc_args.append('-fwasm-exceptions')
+    # -fwasm-exceptions exports __cpp_exception, so this is necessary
+    self.set_setting('DEFAULT_TO_CXX')
+    self.do_runf(test_file('core/test_longjmp.c'), emcc_args=self.get_emcc_args())
+
   def test_memops_bulk_memory(self):
     self.emcc_args += ['--profiling-funcs', '-fno-builtin']
 
@@ -14892,20 +14897,9 @@ addToLibrary({
     create_file('b.cpp', '#include <emscripten/bind.h>')
     self.run_process([EMXX, '-std=c++23', '-lembind', 'a.cpp', 'b.cpp'])
 
-  def test_legacy_pthread_worker_js(self):
-    self.do_runf('hello_world.c', emcc_args=['-pthread', '-sSTRICT'])
-    self.assertNotExists('hello_world.worker.js')
-    self.do_runf('hello_world.c', emcc_args=['-pthread'])
-    self.assertExists('hello_world.worker.js')
-    os.mkdir('out')
-    self.do_runf('hello_world.c', output_basename='out/foo', emcc_args=['-pthread'])
-    self.assertExists('out/foo.js')
-    self.assertExists('out/foo.worker.js')
-
   def test_no_pthread(self):
     self.do_runf('hello_world.c', emcc_args=['-pthread', '-no-pthread'])
     self.assertExists('hello_world.js')
-    self.assertNotExists('hello_world.worker.js')
     self.assertNotContained('Worker', read_file('hello_world.js'))
 
   def test_sysroot_includes_first(self):
@@ -15140,3 +15134,16 @@ addToLibrary({
   def test_fs_writev_partial_write(self):
     self.set_setting('FORCE_FILESYSTEM')
     self.do_run_in_out_file_test('fs/test_writev_partial_write.c')
+
+  @requires_v8
+  @parameterized({
+    '': [[]],
+    'O3': [['-O3']]
+  })
+  def test_fp16(self, opts):
+    self.v8_args += ['--experimental-wasm-fp16']
+    # TODO Remove this. Liftoff is currently broken for this test.
+    # https://chromium-review.googlesource.com/c/v8/v8/+/5842546
+    self.v8_args += ['--no-liftoff']
+    self.emcc_args = ['-msimd128', '-mfp16', '-sENVIRONMENT=shell'] + opts
+    self.do_runf('test_fp16.c')
