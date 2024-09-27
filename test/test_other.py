@@ -3384,7 +3384,9 @@ More info: https://emscripten.org
     extra_args = ['-sMODULARIZE',
                   '--embed-file', 'fail.js',
                   '-sMINIMAL_RUNTIME=2',
-                  '-sEXPORT_ES6=1']
+                  '-sEXPORT_ES6=1',
+                  '-sASSERTIONS=0',
+                  '-sSTRICT=1']
     self.emcc(test_file('other/embind_tsgen.cpp'), extra_args)
     self.assertFileContents(test_file('other/embind_tsgen_ignore_2.d.ts'), read_file('embind_tsgen.d.ts'))
     # Also test this separately since it conflicts with other settings.
@@ -6510,15 +6512,15 @@ This locale is not the C locale.
     test(['-O3', '--closure=1', '-Wno-closure', '-sWASM=0'], 36000)
     test(['-O3', '--closure=2', '-Wno-closure', '-sWASM=0'], 33000) # might change now and then
 
-  def test_no_browser(self):
-    BROWSER_INIT = 'var Browser'
+  def test_no_main_loop(self):
+    MAINLOOP = 'var MainLoop'
 
     self.run_process([EMCC, test_file('hello_world.c')])
-    self.assertNotContained(BROWSER_INIT, read_file('a.out.js'))
+    self.assertNotContained(MAINLOOP, read_file('a.out.js'))
 
-    # uses emscripten_set_main_loop, which needs Browser
+    # uses emscripten_set_main_loop, which needs MainLoop
     self.run_process([EMCC, test_file('browser_main_loop.c')])
-    self.assertContained(BROWSER_INIT, read_file('a.out.js'))
+    self.assertContained(MAINLOOP, read_file('a.out.js'))
 
   def test_EXPORTED_RUNTIME_METHODS(self):
     def test(opts, has, not_has):
@@ -12080,6 +12082,14 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
     self.set_setting('PTHREAD_POOL_SIZE', 1)
     self.do_other_test('test_pthread_reuse.c')
 
+  @parameterized({
+    '': ([],),
+    'offscreen_canvas': (['-sOFFSCREENCANVAS_SUPPORT', '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$GL'],),
+  })
+  @node_pthreads
+  def test_pthread_hello(self, args):
+    self.do_other_test('test_pthread_hello.c', args)
+
   @node_pthreads
   def test_pthread_relocatable(self):
     self.do_run_in_out_file_test('hello_world.c', emcc_args=['-sRELOCATABLE'])
@@ -14722,8 +14732,13 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     self.emcc_args += ['-sSTANDALONE_WASM', '-pthread', '-Wl,--whole-archive', '-lbulkmemory', '-lstandalonewasm', '-Wl,--no-whole-archive']
     self.do_runf('hello_world.c')
 
-  def test_proxy_to_worker(self):
-    self.do_runf('hello_world.c', emcc_args=['--proxy-to-worker'])
+  @parameterized({
+    '':   ([],),
+    '_single_file': (['-sSINGLE_FILE'],),
+    '_single_file_es6': (['-sSINGLE_FILE', '-sEXPORT_ES6', '--extern-post-js', test_file('modularize_post_js.js')],),
+  })
+  def test_proxy_to_worker(self, args):
+    self.do_runf('hello_world.c', emcc_args=['--proxy-to-worker'] + args)
 
   @also_with_standalone_wasm()
   def test_console_out(self):

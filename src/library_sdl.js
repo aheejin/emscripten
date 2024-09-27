@@ -18,6 +18,7 @@
 var LibrarySDL = {
   $SDL__deps: [
     '$PATH', '$Browser', 'SDL_GetTicks', 'SDL_LockSurface',
+    '$MainLoop',
     // For makeCEvent().
     '$intArrayFromString',
     // Many SDL functions depend on malloc/free
@@ -290,10 +291,10 @@ var LibrarySDL = {
     },
     loadRect(rect) {
       return {
-        x: {{{ makeGetValue('rect + ' + C_STRUCTS.SDL_Rect.x, '0', 'i32') }}},
-        y: {{{ makeGetValue('rect + ' + C_STRUCTS.SDL_Rect.y, '0', 'i32') }}},
-        w: {{{ makeGetValue('rect + ' + C_STRUCTS.SDL_Rect.w, '0', 'i32') }}},
-        h: {{{ makeGetValue('rect + ' + C_STRUCTS.SDL_Rect.h, '0', 'i32') }}}
+        x: {{{ makeGetValue('rect', C_STRUCTS.SDL_Rect.x, 'i32') }}},
+        y: {{{ makeGetValue('rect', C_STRUCTS.SDL_Rect.y, 'i32') }}},
+        w: {{{ makeGetValue('rect', C_STRUCTS.SDL_Rect.w, 'i32') }}},
+        h: {{{ makeGetValue('rect', C_STRUCTS.SDL_Rect.h, 'i32') }}}
       };
     },
 
@@ -330,11 +331,11 @@ var LibrarySDL = {
 
     // Load SDL color into a CSS-style color specification
     loadColorToCSSRGB(color) {
-      var rgba = {{{ makeGetValue('color', '0', 'i32') }}};
+      var rgba = {{{ makeGetValue('color', 0, 'i32') }}};
       return 'rgb(' + (rgba&255) + ',' + ((rgba >> 8)&255) + ',' + ((rgba >> 16)&255) + ')';
     },
     loadColorToCSSRGBA(color) {
-      var rgba = {{{ makeGetValue('color', '0', 'i32') }}};
+      var rgba = {{{ makeGetValue('color', 0, 'i32') }}};
       return 'rgba(' + (rgba&255) + ',' + ((rgba >> 8)&255) + ',' + ((rgba >> 16)&255) + ',' + (((rgba >> 24)&255)/255) + ')';
     },
 
@@ -465,16 +466,16 @@ var LibrarySDL = {
       for (var y = startY; y < endY; ++y) {
         var base = y * fullWidth;
         for (var x = startX; x < endX; ++x) {
-          data32[base + x] = colors32[{{{ makeGetValue('buffer + base + x', '0', 'u8') }}}];
+          data32[base + x] = colors32[{{{ makeGetValue('buffer', 'base + x', 'u8') }}}];
         }
       }
     },
 
     freeSurface(surf) {
       var refcountPointer = surf + {{{ C_STRUCTS.SDL_Surface.refcount }}};
-      var refcount = {{{ makeGetValue('refcountPointer', '0', 'i32') }}};
+      var refcount = {{{ makeGetValue('refcountPointer', 0, 'i32') }}};
       if (refcount > 1) {
-        {{{ makeSetValue('refcountPointer', '0', 'refcount - 1', 'i32') }}};
+        {{{ makeSetValue('refcountPointer', 0, 'refcount - 1', 'i32') }}};
         return;
       }
 
@@ -789,10 +790,10 @@ var LibrarySDL = {
           event.preventDefault();
           break;
         case 'unload':
-          if (Browser.mainLoop.runner) {
+          if (MainLoop.runner) {
             SDL.events.push(event);
             // Force-run a main event loop, since otherwise this event will never be caught!
-            Browser.mainLoop.runner();
+            MainLoop.runner();
           }
           return;
         case 'resize':
@@ -1350,9 +1351,9 @@ var LibrarySDL = {
   SDL_Linked_Version: () => {
     if (SDL.version === null) {
       SDL.version = _malloc({{{ C_STRUCTS.SDL_version.__size__ }}});
-      {{{ makeSetValue('SDL.version + ' + C_STRUCTS.SDL_version.major, '0', '1', 'i8') }}};
-      {{{ makeSetValue('SDL.version + ' + C_STRUCTS.SDL_version.minor, '0', '3', 'i8') }}};
-      {{{ makeSetValue('SDL.version + ' + C_STRUCTS.SDL_version.patch, '0', '0', 'i8') }}};
+      {{{ makeSetValue('SDL.version', C_STRUCTS.SDL_version.major, '1', 'i8') }}};
+      {{{ makeSetValue('SDL.version', C_STRUCTS.SDL_version.minor, '3', 'i8') }}};
+      {{{ makeSetValue('SDL.version', C_STRUCTS.SDL_version.patch, '0', 'i8') }}};
     }
     return SDL.version;
   },
@@ -1692,7 +1693,7 @@ var LibrarySDL = {
         var base = y*width*4;
         for (var x = 0; x < width; x++) {
           // See comment above about signs
-          var val = {{{ makeGetValue('s++', '0', 'u8') }}} * 4;
+          var val = {{{ makeGetValue('s++', 0, 'u8') }}} * 4;
           var start = base + x*4;
           data[start]   = colors[val];
           data[start+1] = colors[val+1];
@@ -1768,8 +1769,8 @@ var LibrarySDL = {
 
   SDL_GetMouseState__proxy: 'sync',
   SDL_GetMouseState: (x, y) => {
-    if (x) {{{ makeSetValue('x', '0', 'Browser.mouseX', 'i32') }}};
-    if (y) {{{ makeSetValue('y', '0', 'Browser.mouseY', 'i32') }}};
+    if (x) {{{ makeSetValue('x', 0, 'Browser.mouseX', 'i32') }}};
+    if (y) {{{ makeSetValue('y', 0, 'Browser.mouseY', 'i32') }}};
     return SDL.buttonState;
   },
 
@@ -2093,13 +2094,13 @@ var LibrarySDL = {
     SDL.checkPixelFormat(fmt);
     // We assume the machine is little-endian.
     if (r) {
-      {{{ makeSetValue('r', '0', 'pixel&0xff', 'i8') }}};
+      {{{ makeSetValue('r', 0, 'pixel&0xff', 'i8') }}};
     }
     if (g) {
-      {{{ makeSetValue('g', '0', '(pixel>>8)&0xff', 'i8') }}};
+      {{{ makeSetValue('g', 0, '(pixel>>8)&0xff', 'i8') }}};
     }
     if (b) {
-      {{{ makeSetValue('b', '0', '(pixel>>16)&0xff', 'i8') }}};
+      {{{ makeSetValue('b', 0, '(pixel>>16)&0xff', 'i8') }}};
     }
   },
 
@@ -2108,16 +2109,16 @@ var LibrarySDL = {
     SDL.checkPixelFormat(fmt);
     // We assume the machine is little-endian.
     if (r) {
-      {{{ makeSetValue('r', '0', 'pixel&0xff', 'i8') }}};
+      {{{ makeSetValue('r', 0, 'pixel&0xff', 'i8') }}};
     }
     if (g) {
-      {{{ makeSetValue('g', '0', '(pixel>>8)&0xff', 'i8') }}};
+      {{{ makeSetValue('g', 0, '(pixel>>8)&0xff', 'i8') }}};
     }
     if (b) {
-      {{{ makeSetValue('b', '0', '(pixel>>16)&0xff', 'i8') }}};
+      {{{ makeSetValue('b', 0, '(pixel>>16)&0xff', 'i8') }}};
     }
     if (a) {
-      {{{ makeSetValue('a', '0', '(pixel>>24)&0xff', 'i8') }}};
+      {{{ makeSetValue('a', 0, '(pixel>>24)&0xff', 'i8') }}};
     }
   },
 
@@ -2310,8 +2311,13 @@ var LibrarySDL = {
 
   // SDL_Audio
 
-  SDL_OpenAudio__deps: ['$autoResumeAudioContext', '$safeSetTimeout'],
+  SDL_OpenAudio__deps: ['$autoResumeAudioContext', '$safeSetTimeout', '$registerPostMainLoop'],
   SDL_OpenAudio__proxy: 'sync',
+  SDL_OpenAudio__postset: `
+    // Queue new audio data. This is important to be right after the main loop
+    // invocation, so that we will immediately be able to queue the newest
+    // produced audio samples.
+    registerPostMainLoop(() => SDL.audio?.queueNewAudioData?.());`,
   SDL_OpenAudio: (desired, obtained) => {
     try {
       SDL.audio = {
@@ -2667,10 +2673,10 @@ var LibrarySDL = {
 
 #if USE_SDL == 2
     if (rwops === undefined) {
-      var type = {{{ makeGetValue('rwopsID + ' + 20 /*type*/, '0', 'i32') }}};
+      var type = {{{ makeGetValue('rwopsID', C_STRUCTS.SDL_RWops.type, 'i32') }}};
 
       if (type === 2/*SDL_RWOPS_STDFILE*/) {
-        var fp = {{{ makeGetValue('rwopsID + ' + 28 /*hidden.stdio.fp*/, '0', 'i32') }}};
+        var fp = {{{ makeGetValue('rwopsID', C_STRUCTS.SDL_RWops.hidden.stdio.fp, 'i32') }}};
         var fd = _fileno(fp);
         var stream = FS.getStream(fd);
         if (stream) {
@@ -2678,8 +2684,8 @@ var LibrarySDL = {
         }
       }
       else if (type === 4/*SDL_RWOPS_MEMORY*/ || type === 5/*SDL_RWOPS_MEMORY_RO*/) {
-        var base = {{{ makeGetValue('rwopsID + ' + 24 /*hidden.mem.base*/, '0', 'i32') }}};
-        var stop = {{{ makeGetValue('rwopsID + ' + 32 /*hidden.mem.stop*/, '0', 'i32') }}};
+        var base = {{{ makeGetValue('rwopsID', C_STRUCTS.SDL_RWops.hidden.mem.base, 'i32') }}};
+        var stop = {{{ makeGetValue('rwopsID', C_STRUCTS.SDL_RWops.hidden.mem.stop, 'i32') }}};
 
         rwops = { bytes: base, count: stop - base };
       }
@@ -3128,10 +3134,10 @@ var LibrarySDL = {
   TTF_SizeText: (font, text, w, h) => {
     var fontData = SDL.fonts[font];
     if (w) {
-      {{{ makeSetValue('w', '0', 'SDL.estimateTextWidth(fontData, UTF8ToString(text))', 'i32') }}};
+      {{{ makeSetValue('w', 0, 'SDL.estimateTextWidth(fontData, UTF8ToString(text))', 'i32') }}};
     }
     if (h) {
-      {{{ makeSetValue('h', '0', 'fontData.size', 'i32') }}};
+      {{{ makeSetValue('h', 0, 'fontData.size', 'i32') }}};
     }
     return 0;
   },
@@ -3142,19 +3148,19 @@ var LibrarySDL = {
     var width = SDL.estimateTextWidth(fontData,  String.fromCharCode(ch));
 
     if (advance) {
-      {{{ makeSetValue('advance', '0', 'width', 'i32') }}};
+      {{{ makeSetValue('advance', 0, 'width', 'i32') }}};
     }
     if (minx) {
-      {{{ makeSetValue('minx', '0', '0', 'i32') }}};
+      {{{ makeSetValue('minx', 0, '0', 'i32') }}};
     }
     if (maxx) {
-      {{{ makeSetValue('maxx', '0', 'width', 'i32') }}};
+      {{{ makeSetValue('maxx', 0, 'width', 'i32') }}};
     }
     if (miny) {
-      {{{ makeSetValue('miny', '0', '0', 'i32') }}};
+      {{{ makeSetValue('miny', 0, '0', 'i32') }}};
     }
     if (maxy) {
-      {{{ makeSetValue('maxy', '0', 'fontData.size', 'i32') }}};
+      {{{ makeSetValue('maxy', 0, 'fontData.size', 'i32') }}};
     }
   },
 
@@ -3301,7 +3307,7 @@ var LibrarySDL = {
       abort('Unknown SDL GL attribute (' + attr + '). Please check if your SDL version is supported.');
     }
 
-    if (value) {{{ makeSetValue('value', '0', 'SDL.glAttributes[attr]', 'i32') }}};
+    if (value) {{{ makeSetValue('value', 0, 'SDL.glAttributes[attr]', 'i32') }}};
 
     return 0;
   },
@@ -3337,7 +3343,7 @@ var LibrarySDL = {
 
   SDL_GL_GetSwapInterval__proxy: 'sync',
   SDL_GL_GetSwapInterval: () => {
-    if (Browser.mainLoop.timingMode == {{{ cDefs.EM_TIMING_RAF }}}) return Browser.mainLoop.timingValue;
+    if (MainLoop.timingMode == {{{ cDefs.EM_TIMING_RAF }}}) return MainLoop.timingValue;
     else return 0;
   },
 
@@ -3355,8 +3361,8 @@ var LibrarySDL = {
   SDL_GetWindowSize: (window, width, height) => {
     var w = Module['canvas'].width;
     var h = Module['canvas'].height;
-    if (width) {{{ makeSetValue('width', '0', 'w', 'i32') }}};
-    if (height) {{{ makeSetValue('height', '0', 'h', 'i32') }}};
+    if (width) {{{ makeSetValue('width', 0, 'w', 'i32') }}};
+    if (height) {{{ makeSetValue('height', 0, 'h', 'i32') }}};
   },
 
   SDL_LogSetOutputFunction: (callback, userdata) => {},
