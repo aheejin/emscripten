@@ -376,6 +376,15 @@ def get_clang_flags(user_args):
   if settings.INLINING_LIMIT:
     flags.append('-fno-inline-functions')
 
+  if settings.PTHREADS:
+    if '-pthread' not in user_args:
+      flags.append('-pthread')
+  elif settings.SHARED_MEMORY:
+    if '-matomics' not in user_args:
+      flags.append('-matomics')
+    if '-mbulk-memory' not in user_args:
+      flags.append('-mbulk-memory')
+
   if settings.RELOCATABLE and '-fPIC' not in user_args:
     flags.append('-fPIC')
 
@@ -843,14 +852,6 @@ def phase_setup(options, state, newargs):
   if settings.PTHREADS or settings.WASM_WORKERS:
     settings.SHARED_MEMORY = 1
 
-  if settings.PTHREADS and '-pthread' not in newargs:
-    newargs += ['-pthread']
-  elif settings.SHARED_MEMORY:
-    if '-matomics' not in newargs:
-      newargs += ['-matomics']
-    if '-mbulk-memory' not in newargs:
-      newargs += ['-mbulk-memory']
-
   if settings.SHARED_MEMORY:
     settings.BULK_MEMORY = 1
 
@@ -938,6 +939,28 @@ def get_clang_output_extension(state):
     return '.o'
 
 
+def filter_out_link_flags(args):
+  rtn = []
+
+  def is_link_flag(flag):
+    if flag in ('-nostdlib', '-nostartfiles', '-nolibc', '-nodefaultlibs', '-s'):
+      return True
+    return flag.startswith(('-l', '-L', '-Wl,', '-z'))
+
+  skip = False
+  for arg in args:
+    if skip:
+      skip = False
+      continue
+    if is_link_flag(arg):
+      continue
+    if arg == '-Xlinker':
+      skip = True
+      continue
+    rtn.append(arg)
+  return rtn
+
+
 @ToolchainProfiler.profile_block('compile inputs')
 def phase_compile_inputs(options, state, newargs, input_files):
   if shared.run_via_emxx:
@@ -1017,13 +1040,7 @@ def phase_compile_inputs(options, state, newargs, input_files):
 
   # In COMPILE_AND_LINK we need to compile source files too, but we also need to
   # filter out the link flags
-
-  def is_link_flag(flag):
-    if flag in ('-nostdlib', '-nostartfiles', '-nolibc', '-nodefaultlibs', '-s'):
-      return True
-    return flag.startswith(('-l', '-L', '-Wl,', '-z'))
-
-  compile_args = [a for a in compile_args if a and not is_link_flag(a)]
+  compile_args = filter_out_link_flags(compile_args)
   linker_inputs = []
   seen_names = {}
 

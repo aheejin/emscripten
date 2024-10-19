@@ -1915,12 +1915,10 @@ simulateKeyUp(100);
   def test_glframebufferattachmentinfo(self):
     self.btest('glframebufferattachmentinfo.c', '1', args=['-lGLESv2', '-lEGL'])
 
-  @no_wasm64('TODO: LEGACY_GL_EMULATION + wasm64')
   @requires_graphics_hardware
   def test_sdl_glshader(self):
     self.reftest('test_sdl_glshader.c', 'test_sdl_glshader.png', args=['-O2', '--closure=1', '-sLEGACY_GL_EMULATION', '-lGL', '-lSDL', '-sGL_ENABLE_GET_PROC_ADDRESS'])
 
-  @no_wasm64('TODO: LEGACY_GL_EMULATION + wasm64')
   @requires_graphics_hardware
   @also_with_proxying
   def test_sdl_glshader2(self):
@@ -3052,8 +3050,6 @@ Module["preRun"] = () => {
     # SDL, OpenGL, readPixels
     self.btest_exit('test_sdl2_gl_read.c', args=['-sUSE_SDL=2'])
 
-  @no_4gb('https://github.com/libsdl-org/SDL/issues/9052')
-  @no_2gb('https://github.com/libsdl-org/SDL/issues/9052')
   @requires_graphics_hardware
   def test_sdl2_glmatrixmode_texture(self):
     self.reftest('test_sdl2_glmatrixmode_texture.c', 'test_sdl2_glmatrixmode_texture.png',
@@ -3107,8 +3103,6 @@ Module["preRun"] = () => {
   def test_sdl2_unwasteful(self):
     self.btest_exit('test_sdl2_unwasteful.c', args=['-sUSE_SDL=2', '-O1'])
 
-  @no_2gb('https://github.com/libsdl-org/SDL/issues/9052')
-  @no_4gb('https://github.com/libsdl-org/SDL/issues/9052')
   def test_sdl2_canvas_write(self):
     self.btest_exit('test_sdl2_canvas_write.c', args=['-sUSE_SDL=2'])
 
@@ -3849,11 +3843,12 @@ Module["preRun"] = () => {
 
   # Test that pthreads are able to do printf.
   @parameterized({
-    '': (False,),
-    'debug': (True,),
+    '': ([],),
+    'O3': (['-O3'],),
+    'debug': (['-sLIBRARY_DEBUG'],),
   })
-  def test_pthread_printf(self, debug):
-     self.btest_exit('pthread/test_pthread_printf.c', args=['-O3', '-pthread', '-sPTHREAD_POOL_SIZE', '-sLIBRARY_DEBUG=%d' % debug])
+  def test_pthread_printf(self, args):
+     self.btest_exit('pthread/test_pthread_printf.c', args=['-pthread', '-sPTHREAD_POOL_SIZE'] + args)
 
   # Test that pthreads are able to do cout. Failed due to https://bugzilla.mozilla.org/show_bug.cgi?id=1154858.
   def test_pthread_iostream(self):
@@ -5012,9 +5007,13 @@ Module["preRun"] = () => {
 
   # Tests Wasm Worker thread stack setup
   @also_with_minimal_runtime
-  def test_wasm_worker_thread_stack(self):
-    for mode in (0, 1, 2):
-      self.btest('wasm_worker/thread_stack.c', expected='0', args=['-sWASM_WORKERS', f'-sSTACK_OVERFLOW_CHECK={mode}'])
+  @parameterized({
+    '0': (0,),
+    '1': (1,),
+    '2': (2,),
+  })
+  def test_wasm_worker_thread_stack(self, mode):
+    self.btest('wasm_worker/thread_stack.c', expected='0', args=['-sWASM_WORKERS', f'-sSTACK_OVERFLOW_CHECK={mode}'])
 
   # Tests emscripten_malloc_wasm_worker() and emscripten_current_thread_is_wasm_worker() functions
   @also_with_minimal_runtime
@@ -5060,10 +5059,7 @@ Module["preRun"] = () => {
   # Tests emscripten_terminate_wasm_worker()
   @also_with_minimal_runtime
   def test_wasm_worker_terminate(self):
-    self.set_setting('WASM_WORKERS')
-    # Test uses the dynCall library function in its EM_ASM code
-    self.set_setting('DEFAULT_LIBRARY_FUNCS_TO_INCLUDE', ['$dynCall'])
-    self.btest('wasm_worker/terminate_wasm_worker.c', expected='0')
+    self.btest('wasm_worker/terminate_wasm_worker.c', expected='0', args=['-sWASM_WORKERS'])
 
   # Tests emscripten_terminate_all_wasm_workers()
   @also_with_minimal_runtime

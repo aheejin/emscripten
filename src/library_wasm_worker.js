@@ -110,6 +110,12 @@ addToLibrary({
     ___set_stack_limits(_emscripten_stack_get_base(), _emscripten_stack_get_end());
 #endif
 
+#if STACK_OVERFLOW_CHECK
+    // Write the stack cookie last, after we have set up the proper bounds and
+    // current position of the stack.
+    writeStackCookie();
+#endif
+
 #if AUDIO_WORKLET
     // Audio Worklets do not have postMessage()ing capabilities.
     if (typeof AudioWorkletGlobalScope === 'undefined') {
@@ -137,12 +143,14 @@ addToLibrary({
   // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/script-src#unsafe_eval_expressions
   $_wasmWorkerBlobUrl: "URL.createObjectURL(new Blob(['onmessage=function(d){onmessage=null;d=d.data;{{{ captureModuleArg() }}}{{{ instantiateWasm() }}}importScripts(d.js);{{{ instantiateModule() }}}d.wasm=d.mem=d.js=0;}'],{type:'application/javascript'}))",
 #endif
-
   _emscripten_create_wasm_worker__deps: [
     '$_wasmWorkers', '$_wasmWorkersID',
     '$_wasmWorkerAppendToQueue', '$_wasmWorkerRunPostMessage',
 #if WASM_WORKERS == 2
     '$_wasmWorkerBlobUrl',
+#endif
+#if ASSERTIONS
+    'emscripten_has_threading_support',
 #endif
   ],
   _emscripten_create_wasm_worker__postset: `
@@ -156,6 +164,12 @@ if (ENVIRONMENT_IS_WASM_WORKER
   addEventListener("message", _wasmWorkerAppendToQueue);
 }`,
   _emscripten_create_wasm_worker: (stackLowestAddress, stackSize) => {
+#if ASSERTIONS
+    if (!_emscripten_has_threading_support()) {
+      err('create_wasm_worker: environment does not support SharedArrayBuffer, wasm workers are not available');
+      return 0;
+    }
+#endif
     let worker = _wasmWorkers[_wasmWorkersID] = new Worker(
 #if WASM_WORKERS == 2
       // WASM_WORKERS=2 mode embeds .ww.js file contents into the main .js file

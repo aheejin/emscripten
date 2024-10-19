@@ -253,7 +253,7 @@ def exec_process(cmd):
     sys.stdout.flush()
     sys.stderr.flush()
     mylog.log_cmd(cmd)
-    os.execv(cmd[0], cmd)
+    os.execvp(cmd[0], cmd)
 
 
 def run_js_tool(filename, jsargs=[], node_args=[], **kw):  # noqa: mutable default args

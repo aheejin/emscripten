@@ -1,6 +1,8 @@
 #include <emscripten/webaudio.h>
 #include <emscripten/em_math.h>
 
+#include <stdio.h>
+
 // This program tests that sharing the WebAssembly Memory works between the
 // audio generator thread and the main browser UI thread.  Two sliders,
 // frequency and volume, can be adjusted on the HTML page, and the audio thread
@@ -25,7 +27,7 @@ float currentVolume = 0.3; // [local variable to the audio thread]
 volatile int audioProcessedCount = 0;
 #endif
 
-// This function will be called for every fixed 128 samples of audio to be processed.
+// This function will be called for every fixed-size buffer of audio samples to be processed.
 bool ProcessAudio(int numInputs, const AudioSampleFrame *inputs, int numOutputs, AudioSampleFrame *outputs, int numParams, const AudioParamFrame *params, void *userData) {
 #ifdef REPORT_RESULT
   ++audioProcessedCount;
@@ -38,12 +40,12 @@ bool ProcessAudio(int numInputs, const AudioSampleFrame *inputs, int numOutputs,
 
   // Produce a sine wave tone of desired frequency to all output channels.
   for(int o = 0; o < numOutputs; ++o)
-    for(int i = 0; i < 128; ++i)
+    for(int i = 0; i < outputs[o].samplesPerChannel; ++i)
     {
       float s = emscripten_math_sin(phase);
       phase += phaseIncrement;
       for(int ch = 0; ch < outputs[o].numberOfChannels; ++ch)
-        outputs[o].data[ch*128 + i] = s * currentVolume;
+        outputs[o].data[ch*outputs[o].samplesPerChannel + i] = s * currentVolume;
     }
 
   // Range reduce to keep precision around zero.
@@ -82,17 +84,15 @@ void AudioWorkletProcessorCreated(EMSCRIPTEN_WEBAUDIO_T audioContext, bool succe
   // Instantiate the noise-generator Audio Worklet Processor.
   EMSCRIPTEN_AUDIO_WORKLET_NODE_T wasmAudioWorklet = emscripten_create_wasm_audio_worklet_node(audioContext, "tone-generator", &options, &ProcessAudio, 0);
 
+  // Connect the audio worklet node to the graph.
+  emscripten_audio_node_connect(wasmAudioWorklet, audioContext, 0, 0);
   EM_ASM({
-    let audioContext = emscriptenGetAudioObject($0);
-    let audioWorkletNode = emscriptenGetAudioObject($1);
-    // Connect the audio worklet node to the graph.
-    audioWorkletNode.connect(audioContext.destination);
-
     // Add a button on the page to toggle playback as a response to user click.
     let startButton = document.createElement('button');
     startButton.innerHTML = 'Toggle playback';
     document.body.appendChild(startButton);
 
+    let audioContext = emscriptenGetAudioObject($0);
     startButton.onclick = () => {
       if (audioContext.state != 'running') {
         audioContext.resume();
@@ -100,7 +100,7 @@ void AudioWorkletProcessorCreated(EMSCRIPTEN_WEBAUDIO_T audioContext, bool succe
         audioContext.suspend();
       }
     };
-  }, audioContext, wasmAudioWorklet);
+  }, audioContext);
 
 #ifdef REPORT_RESULT
   emscripten_set_timeout_loop(observe_test_end, 10, 0);
@@ -149,6 +149,12 @@ int main() {
   };
 
   EMSCRIPTEN_WEBAUDIO_T context = emscripten_create_audio_context(&attrs);
+
+  // Get the context's render quantum size. Once the audio API allows this to be
+  // user defined or exposes the hardware's own value, this will be needed to
+  // determine the worklet stack size.
+  int quantumSize = emscripten_audio_context_quantum_size(context);
+  printf("Context render quantum size: %d\n", quantumSize);
 
   // and kick off Audio Worklet scope initialization, which shares the Wasm
   // Module and Memory to the AudioWorklet scope and initializes its stack.
