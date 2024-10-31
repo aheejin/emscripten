@@ -1928,7 +1928,7 @@ Module['postRun'] = () => {
   @parameterized({
     'embed': (['--embed-file', 'somefile.txt'],),
     'embed_twice': (['--embed-file', 'somefile.txt', '--embed-file', 'somefile.txt'],),
-    'preload': (['--preload-file', 'somefile.txt'],),
+    'preload': (['--preload-file', 'somefile.txt', '-sSTRICT'],),
     'preload_closure': (['--preload-file', 'somefile.txt', '-O2', '--closure=1'],),
     'preload_and_embed': (['--preload-file', 'somefile.txt', '--embed-file', 'hello.txt'],)
   })
@@ -3372,6 +3372,11 @@ More info: https://emscripten.org
     self.emcc(test_file('other/embind_tsgen.cpp'), extra_args)
     self.assertFileContents(test_file('other/embind_tsgen_ignore_3.d.ts'), read_file('embind_tsgen.d.ts'))
 
+    extra_args = ['-fsanitize=undefined',
+                  '-gsource-map']
+    self.emcc(test_file('other/embind_tsgen.cpp'), extra_args)
+    self.assertFileContents(test_file('other/embind_tsgen_ignore_3.d.ts'), read_file('embind_tsgen.d.ts'))
+
   def test_embind_tsgen_worker_env(self):
     self.emcc_args += ['-lembind', '--emit-tsd', 'embind_tsgen.d.ts']
     # Passing -sWASM_WORKERS or -sPROXY_TO_WORKER requires the 'worker' environment
@@ -3588,8 +3593,11 @@ More info: https://emscripten.org
 
     self.assertTextDataIdentical(clean(proc.stdout), clean(proc2.stdout))
 
+  def test_file_packager_separate_metadata(self):
     # verify '--separate-metadata' option produces separate metadata file
-    os.chdir('..')
+    ensure_dir('subdir')
+    create_file('data1.txt', 'data1')
+    create_file('subdir/data2.txt', 'data2')
 
     self.run_process([FILE_PACKAGER, 'test.data', '--quiet', '--preload', 'data1.txt', '--preload', 'subdir/data2.txt', '--js-output=immutable.js', '--separate-metadata', '--use-preload-cache'])
     self.assertExists('immutable.js.metadata')
@@ -3611,6 +3619,21 @@ More info: https://emscripten.org
     assert metadata['remote_package_size'] == len('data1') + len('data2')
 
     self.assertEqual(metadata['package_uuid'], 'sha256-53ddc03623f867c7d4a631ded19c2613f2cb61d47b6aa214f47ff3cc15445bcd')
+
+    create_file('src.c', r'''
+    #include <assert.h>
+    #include <sys/stat.h>
+    #include <stdio.h>
+
+    int main() {
+      struct stat buf;
+      assert(stat("data1.txt", &buf) == 0);
+      assert(stat("subdir/data2.txt", &buf) == 0);
+      printf("done\n");
+      return 0;
+    }
+    ''')
+    self.do_runf('src.c', emcc_args=['--pre-js=immutable.js', '-sFORCE_FILESYSTEM'])
 
   def test_file_packager_unicode(self):
     unicode_name = 'unicode…☃'
@@ -5631,6 +5654,7 @@ int main(int argc, char **argv) {
 
   def test_readdir_r_silly(self):
     create_file('src.cpp', r'''
+#include <cassert>
 #include <iostream>
 #include <cstring>
 #include <cerrno>
@@ -5640,29 +5664,23 @@ int main(int argc, char **argv) {
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
 using std::endl;
+
 namespace
 {
-  void check(const bool result)
-  {
-    if(not result) {
-      std::cout << "Check failed!" << endl;
-      throw "bad";
-    }
-  }
   // Do a recursive directory listing of the directory whose path is specified
   // by \a name.
-  void ls(const std::string& name, std::size_t indent = 0)
-  {
-    ::DIR *dir;
-    struct ::dirent *entry;
-    if(indent == 0) {
+  void ls(const std::string& name, size_t indent = 0) {
+    DIR *dir;
+    struct dirent *entry;
+    if (indent == 0) {
       std::cout << name << endl;
       ++indent;
     }
     // Make sure we can open the directory.  This should also catch cases where
     // the empty string is passed in.
-    if (not (dir = ::opendir(name.c_str()))) {
+    if (not (dir = opendir(name.c_str()))) {
       const int error = errno;
       std::cout
         << "Failed to open directory: " << name << "; " << error << endl;
@@ -5673,17 +5691,17 @@ namespace
       std::cout
         << "Managed to open a directory whose name was the empty string.."
         << endl;
-      check(::closedir(dir) != -1);
+      assert(closedir(dir) != -1);
       return;
     }
     // Iterate over the entries in the directory.
-    while ((entry = ::readdir(dir))) {
-      const std::string entryName(entry->d_name);
+    while ((entry = readdir(dir))) {
+      std::string entryName(entry->d_name);
       if (entryName == "." || entryName == "..") {
         // Skip the dot entries.
         continue;
       }
-      const std::string indentStr(indent * 2, ' ');
+      std::string indentStr(indent * 2, ' ');
       if (entryName.empty()) {
         std::cout
           << indentStr << "\"\": Found empty string as a "
@@ -5701,18 +5719,18 @@ namespace
       }
     }
     // Close our handle.
-    check(::closedir(dir) != -1);
+    assert(closedir(dir) != -1);
   }
-  void touch(const std::string &path)
-  {
-    const int fd = ::open(path.c_str(), O_CREAT | O_TRUNC, 0644);
-    check(fd != -1);
-    check(::close(fd) != -1);
+
+  void touch(const char* path) {
+    int fd = open(path, O_CREAT | O_TRUNC, 0644);
+    assert(fd != -1);
+    assert(close(fd) != -1);
   }
 }
-int main()
-{
-  check(::mkdir("dir", 0755) == 0);
+
+int main() {
+  assert(mkdir("dir", 0755) == 0);
   touch("dir/a");
   touch("dir/b");
   touch("dir/c");
@@ -5722,26 +5740,25 @@ int main()
   ls("dir");
   std::cout << endl;
   // Attempt to delete entries as we walk the (single) directory.
-  ::DIR * const dir = ::opendir("dir");
-  check(dir != NULL);
-  struct ::dirent *entry;
-  while((entry = ::readdir(dir)) != NULL) {
-    const std::string name(entry->d_name);
+  DIR* dir = opendir("dir");
+  assert(dir != NULL);
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != NULL) {
+    std::string name(entry->d_name);
     // Skip "." and "..".
-    if(name == "." || name == "..") {
+    if (name == "." || name == "..") {
       continue;
     }
     // Unlink it.
     std::cout << "Unlinking " << name << endl;
-    check(::unlink(("dir/" + name).c_str()) != -1);
+    assert(unlink(("dir/" + name).c_str()) != -1);
   }
-  check(::closedir(dir) != -1);
+  assert(closedir(dir) != -1);
   std::cout << "After:" << endl;
   ls("dir");
-  std::cout << endl;
+  std::cout << "done" << endl;
   return 0;
-}
-    ''')
+}''')
     # cannot symlink nonexistents
     self.do_runf('src.cpp', r'''Before:
 dir
@@ -5758,6 +5775,7 @@ Unlinking d
 Unlinking e
 After:
 dir
+done
 ''', args=['', 'abc'])
 
   def test_emversion(self):
@@ -6043,6 +6061,53 @@ int main()
     self.do_runf('hello_world.c')
     # See https://github.com/emscripten-core/emscripten/issues/22161
     self.do_runf('hello_world.c', emcc_args=['-sWASM_BIGINT'])
+
+  @also_with_standalone_wasm()
+  def test_time(self):
+    self.do_other_test('test_time.c')
+
+  @parameterized({
+    '1': ('EST+05EDT',),
+    '2': ('UTC+0',),
+    '3': ('CET',),
+  })
+  def test_time_tz(self, tz):
+    print('testing with TZ=%s' % tz)
+    with env_modify({'TZ': tz}):
+      # Run the test with different time zone settings if
+      # possible. It seems that the TZ environment variable does not
+      # work all the time (at least it's not well respected by
+      # Node.js on Windows), but it does no harm either.
+      self.do_other_test('test_time.c')
+
+  def test_timeb(self):
+    # Confirms they are called in reverse order
+    self.do_other_test('test_timeb.c')
+
+  def test_time_c(self):
+    self.do_other_test('test_time_c.c')
+
+  def test_gmtime(self):
+    self.do_other_test('test_gmtime.c')
+
+  @also_with_standalone_wasm()
+  def test_strptime_tm(self):
+    if self.get_setting('STANDALONE_WASM'):
+      self.emcc_args += ['-DSTANDALONE']
+    self.do_other_test('test_strptime_tm.c')
+
+  def test_strptime_days(self):
+    self.do_other_test('test_strptime_days.c')
+
+  @also_with_standalone_wasm()
+  def test_strptime_reentrant(self):
+    if self.get_setting('STANDALONE_WASM'):
+      self.emcc_args += ['-DSTANDALONE']
+    self.do_other_test('test_strptime_reentrant.c')
+
+  @crossplatform
+  def test_strftime(self):
+    self.do_other_test('test_strftime.c')
 
   @crossplatform
   def test_strftime_zZ(self):
@@ -12859,7 +12924,9 @@ exec "$@"
     self.assertExists('profile.data')
 
     wasm_split = os.path.join(building.get_binaryen_bin(), 'wasm-split')
-    wasm_split_run = [wasm_split, '-g', '--enable-mutable-globals', '--export-prefix=%', 'test_split_module.wasm.orig', '-o1', 'primary.wasm', '-o2', 'secondary.wasm', '--profile=profile.data']
+    wasm_split_run = [wasm_split, '-g',
+                      '--enable-mutable-globals', '--enable-bulk-memory', '--enable-nontrapping-float-to-int',
+                      '--export-prefix=%', 'test_split_module.wasm.orig', '-o1', 'primary.wasm', '-o2', 'secondary.wasm', '--profile=profile.data']
     if jspi:
       wasm_split_run += ['--jspi', '--enable-reference-types']
     self.run_process(wasm_split_run)
@@ -14903,6 +14970,9 @@ addToLibrary({
   def test_hello_world_argv(self):
     self.do_runf('hello_world_argv.c', 'hello, world! (1)')
 
+  def test_strict_closure(self):
+    self.emcc(test_file('hello_world.c'), ['-sSTRICT', '--closure=1'])
+
   def test_arguments_global(self):
     self.emcc(test_file('hello_world_argv.c'), ['-sENVIRONMENT=web', '-sSTRICT', '--closure=1', '-O2'])
 
@@ -14962,7 +15032,7 @@ addToLibrary({
   def test_no_pthread(self):
     self.do_runf('hello_world.c', emcc_args=['-pthread', '-no-pthread'])
     self.assertExists('hello_world.js')
-    self.assertNotContained('Worker', read_file('hello_world.js'))
+    self.assertNotContained('new Worker(', read_file('hello_world.js'))
 
   def test_sysroot_includes_first(self):
     self.do_other_test('test_stdint_limits.c', emcc_args=['-std=c11', '-iwithsysroot/include'])
