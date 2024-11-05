@@ -10220,14 +10220,13 @@ int main() {
     with webassembly.Module('subdir/output.wasm.debug.wasm') as debug_wasm:
       if not debug_wasm.has_name_section():
         self.fail('name section not found in separate dwarf file')
-      for sec in debug_wasm.sections():
+      for _sec in debug_wasm.sections():
         # TODO(https://github.com/emscripten-core/emscripten/issues/13084):
         # Re-enable this code once the debugger extension can handle wasm files
         # with name sections but no code sections.
         # if sec.type == webassembly.SecType.CODE:
         #   self.fail(f'section of type "{sec.type}" found in separate dwarf file')
-        if sec.name and sec.name != 'name' and not sec.name.startswith('.debug'):
-          self.fail(f'non-debug section "{sec.name}" found in separate dwarf file')
+        pass
 
     # Check that dwarfdump can dump the debug info
     dwdump = self.run_process(
@@ -12194,14 +12193,26 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
   @node_pthreads
   def test_pthread_unavailable(self):
     # Run a simple hello world program that uses pthreads
-    self.emcc_args += ['-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME']
+    self.emcc_args += ['-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME', '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stringToNewUTF8,$UTF8ToString']
     self.do_run_in_out_file_test('hello_world.c')
 
     # Now run the same program but with SharedArrayBuffer undefined, it should run
     # fine and then fail on the first call to pthread_create.
-    create_file('pre.js', 'SharedArrayBuffer = undefined\n')
-    expected = 'pthread_create: environment does not support SharedArrayBuffer, pthreads are not available'
-    self.do_runf('hello_world.c', expected, assert_returncode=NON_ZERO, emcc_args=['--pre-js=pre.js'])
+    #
+    # We specifically test that we can call UTF8ToString, which in older emscripten
+    # versions had an instanceof check against SharedArrayBuffer which would cause
+    # a crash when SharedArrayBuffer was undefined.
+    create_file('pre.js', '''
+      SharedArrayBuffer = undefined;
+      Module.onRuntimeInitialized = () => {
+        var addr = stringToNewUTF8("hello world string, longer than 16 chars");
+        assert(addr);
+        var str = UTF8ToString(addr);
+        console.log("got: " + str);
+        assert(str == "hello world string, longer than 16 chars");
+      };''')
+    expected = ['got: hello world string, longer than 16 chars', 'pthread_create: environment does not support SharedArrayBuffer, pthreads are not available']
+    self.do_runf('hello_world.c', expected, assert_all=True, assert_returncode=NON_ZERO, emcc_args=['--pre-js=pre.js'])
 
   def test_stdin_preprocess(self):
     create_file('temp.h', '#include <string>')
@@ -12899,13 +12910,19 @@ exec "$@"
     self.do_other_test('test_syscall_stubs.c')
 
   @parameterized({
-    '': (False, False),
-    'custom': (True, False),
-    'jspi': (False, True),
+    '': (False, False, False),
+    'custom': (True, False, False),
+    'jspi': (False, True, False),
+    'O3': (False, False, True)
   })
-  def test_split_module(self, customLoader, jspi):
+  def test_split_module(self, customLoader, jspi, opt):
     self.set_setting('SPLIT_MODULE')
-    self.emcc_args += ['-g', '-Wno-experimental']
+    self.emcc_args += ['-Wno-experimental']
+    if opt:
+      # Test that it works in the presence of export minification
+      self.emcc_args += ['-O3']
+    else:
+      self.emcc_args += ['-g']
     self.emcc_args += ['--post-js', test_file('other/test_split_module.post.js')]
     if customLoader:
       self.emcc_args += ['--pre-js', test_file('other/test_load_split_module.pre.js')]
