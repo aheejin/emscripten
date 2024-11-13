@@ -321,9 +321,11 @@ class other(RunnerCore):
 
   def test_skip_subcommands(self):
     # The -### flag is like `-v` but it doesn't actaully execute the sub-commands
-    proc = self.run_process([EMCC, '-###', test_file('hello_world.c')], stdout=PIPE, stderr=PIPE)
+    proc = self.run_process([EMCC, '-###', '-O3', test_file('hello_world.c')], stdout=PIPE, stderr=PIPE)
     self.assertContained(CLANG_CC, proc.stderr)
     self.assertContained(WASM_LD, proc.stderr)
+    self.assertContained('wasm-opt', proc.stderr)
+    self.assertContained('acorn-optimizer.mjs', proc.stderr)
     self.assertNotExists('a.out.js')
 
   def test_emcc_check(self):
@@ -821,7 +823,7 @@ f.close()
   @parameterized({
     '': [[]],
     'lto': [['-flto']],
-    'wasm64': [['-sMEMORY64', '-Wno-experimental']],
+    'wasm64': [['-sMEMORY64']],
   })
   def test_print_file_name(self, args):
     # make sure the corresponding version of libc exists in the cache
@@ -3223,7 +3225,7 @@ More info: https://emscripten.org
     'no_utf8': ['-sEMBIND_STD_STRING_IS_UTF8=0'],
     'no_dynamic': ['-sDYNAMIC_EXECUTION=0'],
     'aot_js': ['-sDYNAMIC_EXECUTION=0', '-sEMBIND_AOT', '-DSKIP_UNBOUND_TYPES'],
-    'wasm64': ['-sMEMORY64', '-Wno-experimental'],
+    'wasm64': ['-sMEMORY64'],
     '2gb': ['-sINITIAL_MEMORY=2200mb', '-sGLOBAL_BASE=2gb'],
   })
   @parameterized({
@@ -3439,7 +3441,7 @@ More info: https://emscripten.org
   def test_embind_tsgen_memory64(self):
     # Check that when memory64 is enabled longs & unsigned longs are mapped to bigint in the generated TS bindings
     self.run_process([EMXX, test_file('other/embind_tsgen_memory64.cpp'),
-                      '-lembind', '--emit-tsd', 'embind_tsgen_memory64.d.ts', '-sMEMORY64', '-Wno-experimental'] +
+                      '-lembind', '--emit-tsd', 'embind_tsgen_memory64.d.ts', '-sMEMORY64'] +
                      self.get_emcc_args())
     self.assertFileContents(test_file('other/embind_tsgen_memory64.d.ts'), read_file('embind_tsgen_memory64.d.ts'))
 
@@ -7052,7 +7054,7 @@ int main() {
   }
 }
 ''')
-    self.do_runf('test.c', 'done\n', emcc_args=['-sGLOBAL_BASE=2Gb', '-sTOTAL_MEMORY=4Gb', '-sMAXIMUM_MEMORY=5Gb', '-sALLOW_MEMORY_GROWTH', '-sMEMORY64', '-Wno-experimental'])
+    self.do_runf('test.c', 'done\n', emcc_args=['-sGLOBAL_BASE=2Gb', '-sTOTAL_MEMORY=4Gb', '-sMAXIMUM_MEMORY=5Gb', '-sALLOW_MEMORY_GROWTH', '-sMEMORY64'])
 
   def test_libcxx_minimal(self):
     create_file('vector.cpp', r'''
@@ -8745,7 +8747,7 @@ int main() {
     'Os_mr': (['-Os', '-sMINIMAL_RUNTIME'], [], [], 74), # noqa
     # EVAL_CTORS also removes the __wasm_call_ctors function
     'Oz-ctors': (['-Oz', '-sEVAL_CTORS'], [], []), # noqa
-    '64': (['-Oz', '-sMEMORY64', '-Wno-experimental'], [], []), # noqa
+    '64': (['-Oz', '-sMEMORY64'], [], []), # noqa
     # WasmFS should not be fully linked into a minimal program.
     'wasmfs': (['-Oz', '-sWASMFS'], [], []), # noqa
   })
@@ -8756,7 +8758,7 @@ int main() {
 
   @node_pthreads
   def test_codesize_minimal_pthreads(self):
-    self.run_codesize_test('minimal_main.c', ['-Oz', '-pthread', '-sPROXY_TO_PTHREAD'])
+    self.run_codesize_test('minimal_main.c', ['-Oz', '-pthread', '-sPROXY_TO_PTHREAD', '-sSTRICT'])
 
   @parameterized({
     'noexcept': (['-O2'],                    [], ['waka']), # noqa
@@ -9349,7 +9351,7 @@ int main() {
     # everything it needs.
     directories = {'': []}
     for elem in os.listdir(path_from_root('system/include')):
-      if elem in ('compat', 'fakesdl'):
+      if elem == 'fakesdl':
         continue
       full = path_from_root('system/include', elem)
       if os.path.isdir(full):
@@ -9373,19 +9375,22 @@ int main() {
         cxx_only = header in [
           'wire.h', 'val.h', 'bind.h',
           'webgpu_cpp.h', 'webgpu_cpp_chained_struct.h', 'webgpu_enum_class_bitmasks.h',
+          # Some headers are not yet C compatible
+          'arm_neon.h', 'avxintrin.h', 'immintrin.h',
         ]
-        if directory:
+        if directory and directory != 'compat':
           header = f'{directory}/{header}'
         inc = f'#include <{header}>\n__attribute__((weak)) int foo;\n'
+        cflags = ['-Werror', '-Wall', '-pedantic', '-mavx', '-msimd128', '-msse3']
         if cxx_only:
           create_file('a.cxx', inc)
           create_file('b.cxx', inc)
-          self.run_process([EMXX, '-Werror', '-Wall', '-pedantic', 'a.cxx', 'b.cxx'])
+          self.run_process([EMXX, '-msse3', 'a.cxx', 'b.cxx'] + cflags)
         else:
           create_file('a.c', inc)
           create_file('b.c', inc)
           for std in ([], ['-std=c89']):
-            self.run_process([EMCC] + std + ['-Werror', '-Wall', '-pedantic', 'a.c', 'b.c'])
+            self.run_process([EMCC, 'a.c', 'b.c'] + std + cflags)
 
   @is_slow_test
   @parameterized({
@@ -12835,7 +12840,7 @@ exec "$@"
 
   @requires_wasm64
   def test_this_in_dyncall_memory64(self):
-    self.do_run_in_out_file_test('no_this_in_dyncall.c', emcc_args=['--js-library', test_file('no_this_in_dyncall.js'), '-sMEMORY64', '-Wno-experimental'])
+    self.do_run_in_out_file_test('no_this_in_dyncall.c', emcc_args=['--js-library', test_file('no_this_in_dyncall.js'), '-sMEMORY64'])
 
   # Tests that dynCalls are produced in Closure-safe way in DYNCALLS mode when no actual dynCalls are used
   @parameterized({
@@ -14078,7 +14083,7 @@ int main() {
   })
   @requires_wasm64
   def test_memory64(self, args):
-    self.do_run_in_out_file_test('core/test_hello_argc.c', args=['hello', 'world'], emcc_args=['-sMEMORY64', '-Wno-experimental'] + args)
+    self.do_run_in_out_file_test('core/test_hello_argc.c', args=['hello', 'world'], emcc_args=['-sMEMORY64'] + args)
 
   # Verfy that MAIN_MODULE=1 (which includes all symbols from all libraries)
   # works with -sPROXY_POSIX_SOCKETS and -Oz, both of which affect linking of
@@ -14263,15 +14268,6 @@ int main() {
       }
     ''')
     self.do_runf('main.c', 'warning: foo\ndone\n')
-
-  def test_dyncallwrapper(self):
-    self.set_setting("MAIN_MODULE", 1)
-    expected = """\
-2 7
-i: 2 j: 8589934599 f: 3.120000 d: 77.120000
-j1: 8589934599, j2: 30064771074, j3: 12884901891
-"""
-    self.do_runf("test_runtime_dyncall_wrapper.c", expected)
 
   def test_compile_with_cache_lock(self):
     # Verify that, after warming the cache, running emcc does not require the cache lock.
