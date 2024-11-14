@@ -696,7 +696,7 @@ var LibrarySDL = {
           // won't fire. However, it's fine (and in some cases necessary) to
           // preventDefault for keys that don't generate a character. Otherwise,
           // preventDefault is the right thing to do in general.
-          if (event.type !== 'keydown' || (!SDL.unicode && !SDL.textInput) || (event.keyCode === 8 /* backspace */ || event.keyCode === 9 /* tab */)) {
+          if (event.type !== 'keydown' || (!SDL.unicode && !SDL.textInput) || (event.key == 'Backspace' || event.key == 'Tab')) {
             event.preventDefault();
           }
 
@@ -826,6 +826,9 @@ var LibrarySDL = {
       if (code >= 65 && code <= 90) {
         code += 32; // make lowercase for SDL
       } else {
+#if RUNTIME_DEBUG
+        if (!(event.keyCode in SDL.keyCodes)) dbg('unknown keyCode: ', event.keyCode);
+#endif
         code = SDL.keyCodes[event.keyCode] || event.keyCode;
         // If this is one of the modifier keys (224 | 1<<10 - 227 | 1<<10), and the event specifies that it is
         // a right key, add 4 to get the right key SDL key code.
@@ -859,7 +862,8 @@ var LibrarySDL = {
 #endif
           {{{ makeSetValue('SDL.keyboardState', 'code', 'down', 'i8') }}};
           // TODO: lmeta, rmeta, numlock, capslock, KMOD_MODE, KMOD_RESERVED
-          SDL.modState = ({{{ makeGetValue('SDL.keyboardState', '1248', 'i8') }}} ? {{{ cDefs.KMOD_LCTRL }}} : 0) |
+          SDL.modState =
+            ({{{ makeGetValue('SDL.keyboardState', cDefs.SDLK_LCTRL, 'i8') }}} ? {{{ cDefs.KMOD_LCTRL }}} : 0) |
             ({{{ makeGetValue('SDL.keyboardState', cDefs.SDLK_LSHIFT, 'i8') }}} ? {{{ cDefs.KMOD_LSHIFT }}} : 0) |
             ({{{ makeGetValue('SDL.keyboardState', cDefs.SDLK_LALT, 'i8') }}} ? {{{ cDefs.KMOD_LALT }}} : 0) |
             ({{{ makeGetValue('SDL.keyboardState', cDefs.SDLK_RCTRL, 'i8') }}} ? {{{ cDefs.KMOD_RCTRL }}} : 0) |
@@ -930,7 +934,9 @@ var LibrarySDL = {
       switch (event.type) {
         case 'keydown': case 'keyup': {
           var down = event.type === 'keydown';
-          //dbg('Received key event: ' + event.keyCode);
+#if RUNTIME_DEBUG
+          dbg(`received ${event.type} event: keyCode=${event.keyCode}, key=${event.key}, code=${event.code}`);
+#endif
           var key = SDL.lookupKeyCodeForEvent(event);
           var scan;
           if (key >= 1024) {
@@ -1761,9 +1767,16 @@ var LibrarySDL = {
   SDL_GetKeyState: () => _SDL_GetKeyboardState(0),
 
   SDL_GetKeyName__proxy: 'sync',
-  SDL_GetKeyName__deps: ['$stringToNewUTF8'],
+  SDL_GetKeyName__deps: ['$stringToUTF8', 'realloc'],
   SDL_GetKeyName: (key) => {
-    SDL.keyName ||= stringToNewUTF8('unknown key');
+    var name = '';
+    /* ASCII A-Z or 0-9 */
+    if ((key >= 97 && key <= 122) || (key >= 48 && key <= 57)) {
+      name = String.fromCharCode(key);
+    }
+    var size = lengthBytesUTF8(name) + 1;
+    SDL.keyName = _realloc(SDL.keyName, size);
+    stringToUTF8(name, SDL.keyName, size);
     return SDL.keyName;
   },
 
