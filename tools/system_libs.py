@@ -1224,7 +1224,10 @@ class libc(MuslInternalLibrary,
           'gmtime.c',
           'localtime.c',
           'nanosleep.c',
+          'clock.c',
           'clock_nanosleep.c',
+          'clock_getres.c',
+          'clock_gettime.c',
           'ctime_r.c',
           'timespec_get.c',
           'utime.c',
@@ -1234,7 +1237,9 @@ class libc(MuslInternalLibrary,
           '__tm_to_secs.c',
           '__year_to_secs.c',
           '__month_to_secs.c',
+          'wcsftime.c',
         ])
+
     libc_files += files_in_path(
         path='system/lib/libc/musl/src/legacy',
         filenames=['getpagesize.c', 'err.c', 'euidaccess.c'])
@@ -1711,7 +1716,7 @@ class libmalloc(MTLibrary):
 
   cflags = ['-fno-builtin', '-Wno-unused-function', '-Wno-unused-but-set-variable', '-Wno-unused-variable']
   # malloc/free/calloc are runtime functions and can be generated during LTO
-  # Therefor they cannot themselves be part of LTO.
+  # Therefore they cannot themselves be part of LTO.
   force_object_files = True
 
   def __init__(self, **kwargs):
@@ -1793,6 +1798,9 @@ class libmimalloc(MTLibrary):
 
   cflags = [
     '-fno-builtin',
+    '-Wno-unused-function',
+    '-Wno-unused-but-set-variable',
+    '-Wno-unused-variable',
     '-Wno-deprecated-pragma',
     # build emmalloc as only a system allocator, without exporting itself onto
     # malloc/free in the global scope
@@ -1801,10 +1809,14 @@ class libmimalloc(MTLibrary):
     '-DMI_MALLOC_OVERRIDE',
     # TODO: add build modes that include debug checks 1,2,3
     '-DMI_DEBUG=0',
+    # disable `assert()` in the underlying emmalloc allocator
+    '-DNDEBUG',
+    # avoid use of `__builtin_thread_pointer()`
+    '-DMI_LIBC_MUSL',
   ]
 
   # malloc/free/calloc are runtime functions and can be generated during LTO
-  # Therefor they cannot themselves be part of LTO.
+  # Therefore they cannot themselves be part of LTO.
   force_object_files = True
 
   includes = ['system/lib/mimalloc/include']
@@ -1816,7 +1828,7 @@ class libmimalloc(MTLibrary):
     path='system/lib/mimalloc/src',
     glob_pattern='*.c',
     # mimalloc includes some files at the source level, so exclude them here.
-    excludes=['alloc-override.c', 'page-queue.c', 'static.c']
+    excludes=['alloc-override.c', 'free.c', 'page-queue.c', 'static.c']
   )
   src_files += [utils.path_from_root('system/lib/mimalloc/src/prim/prim.c')]
   src_files += [utils.path_from_root('system/lib/emmalloc.c')]
@@ -2208,8 +2220,6 @@ class libstandalonewasm(MuslInternalLibrary):
         path='system/lib/libc/musl/src/time',
         filenames=['__secs_to_tm.c',
                    '__tz.c',
-                   'clock.c',
-                   'clock_gettime.c',
                    'gettimeofday.c',
                    'localtime_r.c',
                    'gmtime_r.c',
