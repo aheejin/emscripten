@@ -386,14 +386,6 @@ def get_clang_flags(user_args):
     if '-mbulk-memory' not in user_args:
       flags.append('-mbulk-memory')
 
-  # In emscripten we currently disable bulk memory by default.
-  # This should be removed/updated when we als update the default browser targets.
-  if '-mbulk-memory' not in user_args and '-mno-bulk-memory' not in user_args:
-    # Bulk memory may be enabled via threads or directly via -s.
-    if not settings.BULK_MEMORY:
-      flags.append('-mno-bulk-memory')
-      flags.append('-mno-bulk-memory-opt')
-
   if settings.RELOCATABLE and '-fPIC' not in user_args:
     flags.append('-fPIC')
 
@@ -669,7 +661,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       exit_with_error('--post-link requires a single input file')
     # Delay import of link.py to avoid processing this file when only compiling
     from tools import link
-    link.run_post_link(input_files[0][1], options, state, newargs)
+    link.run_post_link(input_files[0][1], options, state)
     return 0
 
   ## Compile source code to object files
@@ -678,7 +670,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
   if state.mode == Mode.COMPILE_AND_LINK:
     # Delay import of link.py to avoid processing this file when only compiling
     from tools import link
-    return link.run(linker_inputs, options, state, newargs)
+    return link.run(linker_inputs, options, state)
   else:
     logger.debug('stopping after compile phase')
     return 0
