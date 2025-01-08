@@ -89,6 +89,15 @@ LINK_ONLY_FLAGS = {
     '--proxy-to-worker', '--shell-file', '--source-map-base',
     '--threadprofiler', '--use-preload-plugins'
 }
+CLANG_FLAGS_WITH_ARGS = {
+    '-MT', '-MF', '-MJ', '-MQ', '-D', '-U', '-o', '-x',
+    '-Xpreprocessor', '-include', '-imacros', '-idirafter',
+    '-iprefix', '-iwithprefix', '-iwithprefixbefore',
+    '-isysroot', '-imultilib', '-A', '-isystem', '-iquote',
+    '-install_name', '-compatibility_version', '-mllvm',
+    '-current_version', '-I', '-L', '-include-pch',
+    '-undefined', '-target', '-Xlinker', '-Xclang', '-z'
+}
 
 
 @unique
@@ -195,7 +204,7 @@ def create_reproduce_file(name, args):
           if arg.startswith('--reproduce='):
             continue
 
-          if arg.startswith('-o='):
+          if len(arg) > 2 and arg.startswith('-o'):
             rsp.write('-o\n')
             arg = arg[3:]
             output_arg = True
@@ -219,13 +228,7 @@ def create_reproduce_file(name, args):
           if ignore:
             continue
 
-          if arg in ('-MT', '-MF', '-MJ', '-MQ', '-D', '-U', '-o', '-x',
-                     '-Xpreprocessor', '-include', '-imacros', '-idirafter',
-                     '-iprefix', '-iwithprefix', '-iwithprefixbefore',
-                     '-isysroot', '-imultilib', '-A', '-isystem', '-iquote',
-                     '-install_name', '-compatibility_version',
-                     '-current_version', '-I', '-L', '-include-pch',
-                     '-Xlinker', '-Xclang'):
+          if arg in CLANG_FLAGS_WITH_ARGS:
             ignore_next = True
 
           if arg == '-o':
@@ -766,14 +769,7 @@ def phase_setup(options, state, newargs):
       continue
 
     arg = newargs[i]
-    if arg in {'-MT', '-MF', '-MJ', '-MQ', '-D', '-U', '-o', '-x',
-               '-Xpreprocessor', '-include', '-imacros', '-idirafter',
-               '-iprefix', '-iwithprefix', '-iwithprefixbefore',
-               '-isysroot', '-imultilib', '-A', '-isystem', '-iquote',
-               '-install_name', '-compatibility_version',
-               '-current_version', '-I', '-L', '-include-pch',
-               '-undefined', '-target',
-               '-Xlinker', '-Xclang', '-z'}:
+    if arg in CLANG_FLAGS_WITH_ARGS:
       skip = True
 
     if not arg.startswith('-'):
@@ -1039,6 +1035,8 @@ def phase_compile_inputs(options, state, newargs, input_files):
 
   # In COMPILE_AND_LINK we need to compile source files too, but we also need to
   # filter out the link flags
+  assert state.mode == Mode.COMPILE_AND_LINK
+  assert not state.has_dash_c
   compile_args = filter_out_link_flags(compile_args)
   linker_inputs = []
   seen_names = {}
@@ -1063,10 +1061,7 @@ def phase_compile_inputs(options, state, newargs, input_files):
       cmd = get_clang_command()
       if get_file_suffix(input_file) in ['.pcm']:
         cmd = [c for c in cmd if not c.startswith('-fprebuilt-module-path=')]
-    cmd += [input_file]
-    if not state.has_dash_c:
-      cmd += ['-c']
-    cmd += ['-o', output_file]
+    cmd += ['-c', input_file, '-o', output_file]
     if state.mode == Mode.COMPILE_AND_LINK and '-gsplit-dwarf' in newargs:
       # When running in COMPILE_AND_LINK mode we compile to temporary location
       # but we want the `.dwo` file to be generated in the current working directory,
