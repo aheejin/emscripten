@@ -36,7 +36,7 @@ from . import extract_metadata
 from .utils import read_file, write_file, delete_file
 from .utils import removeprefix, exit_with_error
 from .shared import in_temp, safe_copy, do_replace, OFormat
-from .shared import DEBUG, WINDOWS, DYNAMICLIB_ENDINGS, STATICLIB_ENDINGS
+from .shared import DEBUG, WINDOWS, DYNAMICLIB_ENDINGS
 from .shared import unsuffixed, unsuffixed_basename, get_file_suffix
 from .settings import settings, default_setting, user_settings, JS_ONLY_SETTINGS, DEPRECATED_SETTINGS
 from .minimal_runtime_shell import generate_minimal_runtime_html
@@ -1240,7 +1240,7 @@ def phase_linker_setup(options, state):  # noqa: C901, PLR0912, PLR0915
       state.append_link_flag('--no-whole-archive')
     settings.FILESYSTEM = 1
     settings.SYSCALLS_REQUIRE_FILESYSTEM = 0
-    settings.JS_LIBRARIES.append((0, 'library_wasmfs.js'))
+    settings.JS_LIBRARIES.append('library_wasmfs.js')
     if settings.ASSERTIONS:
       # used in assertion checks for unflushed content
       settings.REQUIRED_EXPORTS += ['wasmfs_flush']
@@ -1362,14 +1362,14 @@ def phase_linker_setup(options, state):  # noqa: C901, PLR0912, PLR0915
 
   if settings.PTHREADS:
     setup_pthreads()
-    settings.JS_LIBRARIES.append((0, 'library_pthread.js'))
+    settings.JS_LIBRARIES.append('library_pthread.js')
     if settings.PROXY_TO_PTHREAD:
       settings.PTHREAD_POOL_SIZE_STRICT = 0
       settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$runtimeKeepalivePush']
   else:
     if settings.PROXY_TO_PTHREAD:
       exit_with_error('-sPROXY_TO_PTHREAD requires -pthread to work!')
-    settings.JS_LIBRARIES.append((0, 'library_pthread_stub.js'))
+    settings.JS_LIBRARIES.append('library_pthread_stub.js')
 
   if settings.MEMORY64:
     # Any "pointers" passed to JS will now be i64's, in both modes.
@@ -1383,7 +1383,7 @@ def phase_linker_setup(options, state):  # noqa: C901, PLR0912, PLR0915
     # set location of Wasm Worker bootstrap JS file
     if settings.WASM_WORKERS == 1:
       settings.WASM_WORKER_FILE = unsuffixed(os.path.basename(target)) + '.ww.js'
-    settings.JS_LIBRARIES.append((0, 'library_wasm_worker.js'))
+    settings.JS_LIBRARIES.append('library_wasm_worker.js')
 
   # Set min browser versions based on certain settings such as WASM_BIGINT,
   # PTHREADS, AUDIO_WORKLET
@@ -1401,7 +1401,7 @@ def phase_linker_setup(options, state):  # noqa: C901, PLR0912, PLR0915
   if settings.AUDIO_WORKLET:
     if settings.AUDIO_WORKLET == 1:
       settings.AUDIO_WORKLET_FILE = unsuffixed(os.path.basename(target)) + '.aw.js'
-    settings.JS_LIBRARIES.append((0, shared.path_from_root('src', 'library_webaudio.js')))
+    settings.JS_LIBRARIES.append(shared.path_from_root('src', 'library_webaudio.js'))
     if not settings.MINIMAL_RUNTIME:
       # If we are in the audio worklet environment, we can only access the Module object
       # and not the global scope of the main JS script. Therefore we need to export
@@ -2001,6 +2001,11 @@ def run_embind_gen(wasm_target, js_syms, extra_settings, linker_inputs):
   setup_environment_settings()
   # Use a separate Wasm file so the JS does not need to be modified after emscripten.emscript.
   settings.SINGLE_FILE = False
+  if settings.ASYNCIFY == 2:
+    # JSPI is not needed to generate the definitions.
+    # TODO: when the emsdk node version supports JSPI, it probably makes more sense
+    # to enable it in node than disabling the setting here.
+    settings.ASYNCIFY = 0
   # Embind may be included multiple times, de-duplicate the list first.
   settings.JS_LIBRARIES = dedup_list(settings.JS_LIBRARIES)
   # Replace embind with the TypeScript generation version.
@@ -2799,6 +2804,9 @@ def map_to_js_libs(library_name):
     logger.debug('Mapping library `%s` to JS libraries: %s' % (library_name, libs))
     return libs
 
+  # TODO(sbc): Remove this special handling for system libraries by renaming
+  # the system libraries from `library_foo.js` to `libfoo.js` (the latter is
+  # the more standard name by which `-l` flags resolve libraries).
   if library_name.endswith('.js') and os.path.isfile(utils.path_from_root('src', f'library_{library_name}')):
     return [f'library_{library_name}']
 
@@ -2807,12 +2815,14 @@ def map_to_js_libs(library_name):
 
 def process_libraries(state):
   new_flags = []
-  libraries = []
-  suffixes = STATICLIB_ENDINGS + DYNAMICLIB_ENDINGS
   system_libs_map = system_libs.Library.get_usable_variations()
 
-  # Find library files
+  # Process `-l` and `--js-library` flags
   for i, flag in state.link_flags:
+    if flag.startswith('--js-library='):
+      js_lib = os.path.abspath(flag.split('=', 1)[1])
+      settings.JS_LIBRARIES.append(js_lib)
+      continue
     if not flag.startswith('-l'):
       new_flags.append((i, flag))
       continue
@@ -2822,7 +2832,7 @@ def process_libraries(state):
 
     js_libs = map_to_js_libs(lib)
     if js_libs is not None:
-      libraries += [(i, js_lib) for js_lib in js_libs]
+      settings.JS_LIBRARIES += js_libs
 
     # We don't need to resolve system libraries to absolute paths here, we can just
     # let wasm-ld handle that.  However, we do want to map to the correct variant.
@@ -2835,25 +2845,34 @@ def process_libraries(state):
     if js_libs is not None:
       continue
 
-    path = None
-    for suff in suffixes:
-      name = 'lib' + lib + suff
+    if lib.endswith('.js'):
+      name = 'lib' + lib
       path = find_library(name, state.lib_dirs)
-      if path:
-        break
-
-    if path:
-      new_flags.append((i, path))
+      if not path:
+        exit_with_error(f'unable to find library {flag}')
+      settings.JS_LIBRARIES.append(os.path.abspath(path))
       continue
+
+    if not settings.RELOCATABLE:
+      # Normally we can rely on the native linker to expand `-l` args.
+      # However, emscripten also supports `.so` files that are actually just
+      # regular object file.  This means we need to support `.so` files even
+      # when statically linking.  The native linker (wasm-ld) will otherwise
+      # ignore .so files in this mode.
+      found_dylib = False
+      for ext in DYNAMICLIB_ENDINGS:
+        name = 'lib' + lib + ext
+        path = find_library(name, state.lib_dirs)
+        if path:
+          found_dylib = True
+          new_flags.append((i, path))
+          break
+
+      if found_dylib:
+        continue
 
     new_flags.append((i, flag))
 
-  settings.JS_LIBRARIES += libraries
-
-  # At this point processing JS_LIBRARIES is finished, no more items will be added to it.
-  # Sort the input list from (order, lib_name) pairs to a flat array in the right order.
-  settings.JS_LIBRARIES.sort(key=lambda lib: lib[0])
-  settings.JS_LIBRARIES = [lib[1] for lib in settings.JS_LIBRARIES]
   state.link_flags = new_flags
 
 
