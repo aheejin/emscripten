@@ -637,7 +637,7 @@ def with_all_eh_sjlj(f):
   def metafunc(self, mode, *args, **kwargs):
     if DEBUG:
       print('parameterize:eh_mode=%s' % mode)
-    if mode == 'wasm' or mode == 'wasm_exnref':
+    if mode in {'wasm', 'wasm_exnref'}:
       # Wasm EH is currently supported only in wasm backend and V8
       if self.is_wasm2js():
         self.skipTest('wasm2js does not support wasm EH/SjLj')
@@ -674,7 +674,7 @@ def with_all_sjlj(f):
 
   @wraps(f)
   def metafunc(self, mode, *args, **kwargs):
-    if mode == 'wasm' or mode == 'wasm_exnref':
+    if mode in {'wasm', 'wasm_exnref'}:
       if self.is_wasm2js():
         self.skipTest('wasm2js does not support wasm SjLj')
       # FIXME Temporarily disabled. Enable this later when the bug is fixed.
@@ -733,6 +733,17 @@ def create_file(name, contents, binary=False, absolute=False):
     # python test code.
     contents = textwrap.dedent(contents)
     name.write_text(contents, encoding='utf-8')
+
+
+@contextlib.contextmanager
+def chdir(dir):
+  """A context manager that performs actions in the given directory."""
+  orig_cwd = os.getcwd()
+  os.chdir(dir)
+  try:
+    yield
+  finally:
+    os.chdir(orig_cwd)
 
 
 def make_executable(name):

@@ -172,7 +172,9 @@ FS.staticInit();
     // paths
     //
     lookupPath(path, opts = {}) {
-      if (!path) return { path: '', node: null };
+      if (!path) {
+        throw new FS.ErrnoError({{{ cDefs.ENOENT }}});
+      }
       opts.follow_mount ??= true
 
       if (!PATH.isAbs(path)) {
@@ -691,9 +693,18 @@ FS.staticInit();
       return parent.node_ops.mknod(parent, name, mode, dev);
     },
     statfs(path) {
-
+      return FS.statfsNode(FS.lookupPath(path, {follow: true}).node);
+    },
+    statfsStream(stream) {
+      // We keep a separate statfsStream function because noderawfs overrides
+      // it. In noderawfs, stream.node is sometimes null. Instead, we need to
+      // look at stream.path.
+      return FS.statfsNode(stream.node);
+    },
+    statfsNode(node) {
       // NOTE: None of the defaults here are true. We're just returning safe and
-      //       sane values.
+      //       sane values. Currently nodefs and rawfs replace these defaults,
+      //       other file systems leave them alone.
       var rtn = {
         bsize: 4096,
         frsize: 4096,
@@ -707,9 +718,8 @@ FS.staticInit();
         namelen: 255,
       };
 
-      var parent = FS.lookupPath(path, {follow: true}).node;
-      if (parent?.node_ops.statfs) {
-        Object.assign(rtn, parent.node_ops.statfs(parent.mount.opts.root));
+      if (node.node_ops.statfs) {
+        Object.assign(rtn, node.node_ops.statfs(node.mount.opts.root));
       }
       return rtn;
     },
@@ -952,9 +962,6 @@ FS.staticInit();
     stat(path, dontFollow) {
       var lookup = FS.lookupPath(path, { follow: !dontFollow });
       var node = lookup.node;
-      if (!node) {
-        throw new FS.ErrnoError({{{ cDefs.ENOENT }}});
-      }
       var getattr = FS.checkOpExists(node.node_ops.getattr, {{{ cDefs.EPERM }}});
       return getattr(node);
     },

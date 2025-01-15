@@ -36,7 +36,7 @@ from common import env_modify, no_mac, no_windows, only_windows, requires_native
 from common import create_file, parameterized, NON_ZERO, node_pthreads, TEST_ROOT, test_file
 from common import compiler_for, EMBUILDER, requires_v8, requires_node, requires_wasm64, requires_node_canary
 from common import requires_wasm_eh, crossplatform, with_all_eh_sjlj, with_all_sjlj
-from common import also_with_standalone_wasm, also_with_wasm2js, also_with_noderawfs, also_with_wasmfs
+from common import also_with_standalone_wasm, also_with_wasm2js, also_with_noderawfs, also_with_wasmfs, with_all_fs
 from common import also_with_minimal_runtime, also_with_wasm_bigint, also_with_wasm64, flaky
 from common import EMTEST_BUILD_VERBOSE, PYTHON, WEBIDL_BINDER
 from common import requires_network, parameterize
@@ -939,7 +939,7 @@ f.close()
       cmakelistsdir = test_file('cmake', test_dir)
       builddir = 'out_' + generator.replace(' ', '_').lower()
       os.mkdir(builddir)
-      with utils.chdir(builddir):
+      with common.chdir(builddir):
         # Run Cmake
         cmd = [EMCMAKE, 'cmake'] + cmake_args + ['-G', generator, cmakelistsdir]
 
@@ -1152,7 +1152,7 @@ f.close()
         i = os.path.normpath(i)
         # we also allow for the cache include directory and llvm's own builtin includes.
         # all other include paths should be inside the sysroot.
-        if i.startswith(cachedir) or i.startswith(llvmroot):
+        if i.startswith((cachedir, llvmroot)):
           continue
         self.assertContained(path_from_root('system'), i)
 
@@ -3119,7 +3119,7 @@ More info: https://emscripten.org
     # this test copies the site_scons directory alongside the test
     shutil.copytree(test_file('scons/simple'), 'test')
     shutil.copytree(path_from_root('tools/scons/site_scons'), Path('test/site_scons'))
-    with utils.chdir('test'):
+    with common.chdir('test'):
       self.run_process(['scons'])
       output = self.run_js('scons_integration.js', assert_returncode=5)
     self.assertContained('If you see this - the world is all right!', output)
@@ -3146,7 +3146,7 @@ More info: https://emscripten.org
       }
     })
 
-    with utils.chdir('test'):
+    with common.chdir('test'):
       self.run_process(['scons', '--expected-env', expected_to_propagate])
 
   @requires_scons
@@ -3165,13 +3165,13 @@ More info: https://emscripten.org
       }
     })
 
-    with utils.chdir('test'):
+    with common.chdir('test'):
       self.run_process(['scons', '--expected-env', expected_to_propagate])
 
   @requires_scons
   def test_emscons(self):
     shutil.copytree(test_file('scons/simple'), 'test')
-    with utils.chdir('test'):
+    with common.chdir('test'):
       self.run_process([path_from_root('emscons'), 'scons'])
       output = self.run_js('scons_integration.js', assert_returncode=5)
     self.assertContained('If you see this - the world is all right!', output)
@@ -3192,7 +3192,7 @@ More info: https://emscripten.org
       }
     })
 
-    with utils.chdir('test'):
+    with common.chdir('test'):
       self.run_process([path_from_root('emscons'), 'scons', '--expected-env', expected_to_propagate])
 
   def test_embind_fail(self):
@@ -11374,7 +11374,7 @@ int main () {
       obtained_results[f] = size
       obtained_results[f_gz] = size_gz
 
-      if size != expected_size and (f.endswith('.js') or f.endswith('.html')):
+      if size != expected_size and (f.endswith(('.js', '.html'))):
         print('Contents of ' + f + ': ')
         print(read_file(f))
 
@@ -13741,8 +13741,11 @@ void foo() {}
   def test_unistd_sleep(self):
     self.do_run_in_out_file_test('unistd/sleep.c')
 
-  @also_with_wasmfs
+  @crossplatform
+  @with_all_fs
   def test_unistd_fstatfs(self):
+    if '-DNODERAWFS' in self.emcc_args and WINDOWS:
+      self.skipTest('Cannot look up /dev/stdout on windows')
     self.do_run_in_out_file_test('unistd/fstatfs.c')
 
   @no_windows("test is Linux-specific")
