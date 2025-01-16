@@ -925,19 +925,6 @@ def phase_setup(options, state, newargs):
   return (newargs, input_files)
 
 
-def get_clang_output_extension(state):
-  if '-emit-llvm' in state.orig_args:
-    if state.has_dash_S:
-      return '.ll'
-    else:
-      return '.bc'
-
-  if state.has_dash_S:
-    return '.s'
-  else:
-    return '.o'
-
-
 def filter_out_link_flags(args):
   rtn = []
 
@@ -1145,6 +1132,12 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
 
     arg = newargs[i]
     arg_value = None
+
+    if arg in CLANG_FLAGS_WITH_ARGS:
+      # Ignore the next argument rather than trying to parse it.  This is needed
+      # because that next arg could, for example, start with `-o` and we don't want
+      # to confuse that with a normal `-o` flag.
+      skip = True
 
     def check_flag(value):
       # Check for and consume a flag
@@ -1494,11 +1487,6 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
         exit_with_error(f'unsupported target: {options.target} (emcc only supports wasm64-unknown-emscripten and wasm32-unknown-emscripten)')
     elif check_arg('--use-port'):
       ports.handle_use_port_arg(settings, consume_arg())
-    elif arg == '-mllvm':
-      # Ignore the next argument rather than trying to parse it.  This is needed
-      # because llvm args could, for example, start with `-o` and we don't want
-      # to confuse that with a normal `-o` flag.
-      skip = True
 
   if should_exit:
     sys.exit(0)
