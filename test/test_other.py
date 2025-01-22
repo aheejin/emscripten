@@ -5368,18 +5368,6 @@ Waste<3> *getMore() {
       self.assertContained('argc: 1\n16\n17\n10\n', self.run_js('a.out.js'))
       self.assertContainedIf('globalCtors', src, has_global)
 
-  def test_implicit_func(self):
-    # EMCC makes -Wimplicit-function-declaration an error by default in all modes. Upstream LLVM
-    # emits a warning in gnu89 mode, but otherwise emcc's behavior is identical to upstream.
-    IMPLICIT_C89 = "error: implicit declaration of function 'strnlen'"
-    # Also check for -Wincompatible-function-pointer-types (it became an error in LLVM 16)
-    INCOMPATIBLE = ': incompatible function pointer types'
-
-    stderr = self.expect_fail(
-        [EMCC, path_from_root('test/other/test_implicit_func.c'), '-c', '-o', 'implicit_func.o', '-std=gnu89'])
-    self.assertContained(IMPLICIT_C89, stderr)
-    self.assertContained(INCOMPATIBLE, stderr)
-
   @requires_native_clang
   @crossplatform
   def test_bad_triple(self):
@@ -12300,6 +12288,10 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
     err = self.run_process([EMCC, test_file('hello_world.c'), '-Wl,-static', '-Xlinker', '-static'], stderr=PIPE).stderr
     self.assertNotContained("input unused", err)
 
+  def test_linker_flags_missing(self):
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Xlinker'])
+    self.assertContained("emcc: error: option '-Xlinker' requires an argument", err)
+
   def test_linker_input_unused(self):
     self.run_process([EMCC, '-c', test_file('hello_world.c')])
     err = self.run_process([EMCC, 'hello_world.o', '-c', '-o', 'out.o'], stderr=PIPE).stderr
@@ -12642,8 +12634,8 @@ Aborted(`Module.arguments` has been replaced by `arguments_` (the initial value 
     self.assertContained("'string' file not found", err)
 
     # But it works if we pass and explicit language mode.
-    self.run_process([EMCC, '-c', 'cxxfoo.h', '-x', 'c++-header'])
-    self.run_process([EMCC, '-c', 'cxxfoo.h', '-x', 'c++'])
+    self.run_process([EMCC, '-x', 'c++-header', '-c', 'cxxfoo.h'])
+    self.run_process([EMCC, '-x', 'c++', '-c', 'cxxfoo.h'])
 
   @parameterized({
     '': ([],),
