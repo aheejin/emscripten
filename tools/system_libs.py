@@ -2235,10 +2235,10 @@ class libstubs(DebugLibrary):
   src_files = ['emscripten_syscall_stubs.c', 'emscripten_libc_stubs.c']
 
 
-def get_libs_to_link(args):
+def get_libs_to_link(options):
   libs_to_link = []
 
-  if '-nostdlib' in args:
+  if options.nostdlib:
     return libs_to_link
 
   already_included = set()
@@ -2278,7 +2278,7 @@ def get_libs_to_link(args):
     need_whole_archive = lib.name in force_include and lib.get_ext() == '.a'
     libs_to_link.append((lib.get_link_flag(), whole_archive or need_whole_archive))
 
-  if '-nostartfiles' not in args:
+  if not options.nostartfiles:
     if settings.SHARED_MEMORY:
       add_library('crtbegin')
 
@@ -2303,7 +2303,7 @@ def get_libs_to_link(args):
         shared.exit_with_error('invalid forced library: %s', forced)
       add_library(forced)
 
-  if '-nodefaultlibs' in args:
+  if options.nodefaultlibs:
     add_forced_libs()
     return libs_to_link
 
@@ -2356,7 +2356,7 @@ def get_libs_to_link(args):
     add_library('libstandalonewasm')
   if settings.ALLOW_UNIMPLEMENTED_SYSCALLS:
     add_library('libstubs')
-  if '-nolibc' not in args:
+  if not options.nolibc:
     if not settings.EXIT_RUNTIME:
       add_library('libnoexit')
     add_library('libc')
@@ -2408,9 +2408,9 @@ def get_libs_to_link(args):
   return libs_to_link
 
 
-def calculate(args):
+def calculate(options):
 
-  libs_to_link = get_libs_to_link(args)
+  libs_to_link = get_libs_to_link(options)
 
   # When LINKABLE is set the entire link command line is wrapped in --whole-archive by
   # building.link_ldd.  And since --whole-archive/--no-whole-archive processing does not nest we
