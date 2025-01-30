@@ -906,6 +906,7 @@ f.close()
     'whole_archive': ('whole_archive',  'whole.js',              []),
     'stdproperty':   ('stdproperty',    'helloworld.js',         []),
     'post_build':    ('post_build',     'hello.js',              []),
+    'cxx20':         ('cxx20',          'cxx20test.js',          []),
   })
   def test_cmake(self, test_dir, output_file, cmake_args):
     if test_dir == 'whole_archive' and 'EMTEST_SKIP_NEW_CMAKE' in os.environ:
@@ -956,7 +957,7 @@ f.close()
         # Run through node, if CMake produced a .js file.
         if output_file.endswith('.js'):
           ret = self.run_js(output_file)
-          self.assertTextDataIdentical(read_file(cmakelistsdir + '/out.txt').strip(), ret.strip())
+          self.assertFileContents(os.path.join(cmakelistsdir, 'out.txt'), ret)
 
         if test_dir == 'post_build':
           ret = self.run_process(['ctest'], env=env)
@@ -966,7 +967,11 @@ f.close()
   # If we update LLVM version and this test fails, copy over the new advertised features from Clang
   # and place them to cmake/Modules/Platform/Emscripten.cmake.
   @no_windows('Skipped on Windows because CMake does not configure native Clang builds well on Windows.')
-  def test_cmake_compile_features(self):
+  @parameterized({
+    '': ([],),
+    'force': (['-DEMSCRIPTEN_FORCE_COMPILERS=ON'],),
+  })
+  def test_cmake_compile_features(self, args):
     os.mkdir('build_native')
     cmd = ['cmake',
            '-DCMAKE_C_COMPILER=' + CLANG_CC, '-DCMAKE_C_FLAGS=--target=' + clang_native.get_native_triple(),
@@ -976,7 +981,7 @@ f.close()
     native_features = self.run_process(cmd, stdout=PIPE, cwd='build_native').stdout
 
     os.mkdir('build_emcc')
-    cmd = [EMCMAKE, 'cmake', test_file('cmake/stdproperty')]
+    cmd = [EMCMAKE, 'cmake', test_file('cmake/stdproperty')] + args
     print(str(cmd))
     emscripten_features = self.run_process(cmd, stdout=PIPE, cwd='build_emcc').stdout
 
@@ -1023,7 +1028,7 @@ f.close()
   @crossplatform
   @parameterized({
     '': ([],),
-    'noforce': (['-DEMSCRIPTEN_FORCE_COMPILERS=OFF'],),
+    'force': (['-DEMSCRIPTEN_FORCE_COMPILERS=ON'],),
   })
   def test_cmake_compile_commands(self, args):
     self.run_process([EMCMAKE, 'cmake', test_file('cmake/static_lib'), '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'] + args)
@@ -8453,6 +8458,30 @@ int main() {}
     # they should also appear at most once each
     self.assertLess(err.count(DISABLE), 2)
     self.assertLess(err.count(ENABLE), 2)
+
+  @also_with_minimal_runtime
+  def test_run_order(self):
+    create_file('lib.js', r'''
+addToLibrary({
+  foo__postset: () => {
+    addAtPostCtor("console.log(`addAtPostCtor`);");
+    addAtInit("console.log(`addAtInit`);");
+  },
+  foo: () => {},
+});
+''')
+    create_file('src.c', r'''
+    #include <stdio.h>
+    void foo();
+    __attribute__((constructor)) void ctor() {
+      printf("ctor\n");
+    }
+    int main() {
+      printf("main\n");
+      foo();
+    }
+    ''')
+    self.do_runf('src.c', 'addAtInit\nctor\naddAtPostCtor\nmain\n', emcc_args=['--js-library', 'lib.js'])
 
   def test_override_js_execution_environment(self):
     create_file('main.c', r'''

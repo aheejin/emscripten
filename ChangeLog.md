@@ -20,6 +20,9 @@ See docs/process.md for more on how version tagging works.
 
 4.0.3 (in development)
 ----------------------
+- emscan-deps tools was added.  This tool wraps clang-scan-deps and injects the
+  needed `--target` and `--sysroot` argument that would normally be injected by
+  emcc itself.  This enables support for C++20 in cmake projects. (#21987)
 
 4.0.2 - 01/30/25
 ----------------
@@ -34,6 +37,10 @@ See docs/process.md for more on how version tagging works.
 - The system JS libraries in `src/` were renamed from `library_foo.js` to
   `lib/libfoo.js`. They are still included via the same `-lfoo.js` flag so
   this should not be a user-visible change. (#23348)
+- When using cmake the emscripten toolchain will no longer skip the toolchain
+  detection stages.  This means the initial cmake run will be slower, but will
+  result in more accruate information.  If cmake is running too slow for you,
+  you can revert to the previous behaviour with `-DEMSCRIPTEN_FORCE_COMPILERS=ON`.
 
 4.0.1 - 01/17/25
 ----------------
