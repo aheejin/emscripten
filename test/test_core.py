@@ -26,9 +26,9 @@ from common import RunnerCore, path_from_root, requires_native_clang, test_file,
 from common import skip_if, no_windows, no_mac, is_slow_test, parameterized, parameterize
 from common import env_modify, with_env_modify, disabled, flaky, node_pthreads, also_with_wasm_bigint
 from common import read_file, read_binary, requires_v8, requires_node, requires_wasm2js, requires_node_canary
-from common import compiler_for, crossplatform, no_4gb, no_2gb, also_with_minimal_runtime
+from common import compiler_for, crossplatform, no_4gb, no_2gb, also_with_minimal_runtime, also_with_modularize
 from common import with_all_fs, also_with_nodefs, also_with_nodefs_both, also_with_noderawfs, also_with_wasmfs
-from common import with_all_eh_sjlj, with_all_sjlj, also_with_standalone_wasm, can_do_standalone, no_wasm64, requires_wasm_eh
+from common import with_all_eh_sjlj, with_all_sjlj, also_with_standalone_wasm, can_do_standalone, no_wasm64, requires_wasm_eh, requires_jspi
 from common import NON_ZERO, WEBIDL_BINDER, EMBUILDER, PYTHON
 import clang_native
 
@@ -161,17 +161,36 @@ def with_asyncify_and_jspi(f):
   assert callable(f)
 
   @wraps(f)
-  def metafunc(self, jspi):
+  def metafunc(self, jspi, *args, **kwargs):
     if jspi:
       self.set_setting('ASYNCIFY', 2)
       self.require_jspi()
-      f(self)
     else:
       self.set_setting('ASYNCIFY')
-      f(self)
+    f(self, *args, **kwargs)
 
   parameterize(metafunc, {'': (False,),
                           'jspi': (True,)})
+  return metafunc
+
+
+def also_with_asyncify_and_jspi(f):
+  assert callable(f)
+
+  @wraps(f)
+  def metafunc(self, asyncify, *args, **kwargs):
+    if asyncify == 2:
+      self.set_setting('ASYNCIFY', 2)
+      self.require_jspi()
+    elif asyncify == 1:
+      self.set_setting('ASYNCIFY')
+    else:
+      assert asyncify == 0
+    f(self, *args, **kwargs)
+
+  parameterize(metafunc, {'': (0,),
+                          'asyncify': (1,),
+                          'jspi': (2,)})
   return metafunc
 
 
@@ -1869,7 +1888,7 @@ int main(int argc, char **argv) {
 
   # Tests MAIN_THREAD_EM_ASM_INT() function call with different signatures.
   def test_main_thread_em_asm_signatures(self):
-    self.do_core_test('test_em_asm_signatures.cpp', assert_returncode=NON_ZERO)
+    self.do_core_test('test_em_asm_signatures.cpp')
 
   @crossplatform
   def test_em_asm_unicode(self):
@@ -2397,6 +2416,10 @@ The current type of b is: 9
       self.set_setting('EXIT_RUNTIME')
     self.do_core_test('test_atexit.c')
 
+  def test_force_exit(self):
+    self.set_setting('EXIT_RUNTIME')
+    self.do_run_in_out_file_test('test_force_exit.c')
+
   @no_lsan('https://github.com/emscripten-core/emscripten/issues/15988')
   def test_atexit_threads_stub(self):
     # also tests thread exit (__cxa_thread_atexit)
@@ -2424,24 +2447,17 @@ The current type of b is: 9
     self.do_run_in_out_file_test('pthread/test_pthread_equal.cpp')
 
   @node_pthreads
-  @parameterized({
-      '': (False,),
-      'modularize': (True,),
-  })
-  def test_pthread_proxying(self, modularize):
-    if modularize and self.get_setting('WASM') == 0:
-      self.skipTest('MODULARIZE + WASM=0 + pthreads does not work (#16794)')
+  @also_with_modularize
+  def test_pthread_proxying(self):
+    if '-sMODULARIZE' in self.emcc_args:
+      if self.get_setting('WASM') == 0:
+        self.skipTest('MODULARIZE + WASM=0 + pthreads does not work (#16794)')
+      self.set_setting('EXPORT_NAME=ModuleFactory')
     self.maybe_closure()
     self.set_setting('PROXY_TO_PTHREAD')
     if not self.has_changed_setting('INITIAL_MEMORY'):
       self.set_setting('INITIAL_MEMORY=32mb')
-    args = []
-    if modularize:
-      self.set_setting('MODULARIZE')
-      self.set_setting('EXPORT_NAME=ModuleFactory')
-      args = ['--extern-post-js', test_file('modularize_post_js.js')]
-    self.do_run_in_out_file_test('pthread/test_pthread_proxying.c',
-                                 interleaved_output=False, emcc_args=args)
+    self.do_run_in_out_file_test('pthread/test_pthread_proxying.c', interleaved_output=False)
 
   @node_pthreads
   def test_pthread_proxying_cpp(self):
@@ -3715,9 +3731,8 @@ ok
     self.do_run(src, 'float: 42.\n')
 
   @needs_dylink
+  @with_asyncify_and_jspi
   def test_dlfcn_asyncify(self):
-    self.set_setting('ASYNCIFY')
-
     create_file('liblib.c', r'''
       #include <stdio.h>
       #include <emscripten/emscripten.h>
@@ -3746,6 +3761,21 @@ ok
       }
       '''
     self.do_run(src, 'before sleep\nafter sleep\n42\n')
+
+  @requires_jspi
+  @needs_dylink
+  def test_dlfcn_jspi(self):
+    self.run_process(
+      [
+        EMCC,
+        "-o",
+        "side.so",
+        test_file("core/test_dlfcn_jspi_side.c"),
+        "-sSIDE_MODULE",
+      ]
+      + self.get_emcc_args()
+    )
+    self.do_run_in_out_file_test("core/test_dlfcn_jspi.c", emcc_args=["side.so", "-sMAIN_MODULE=2"])
 
   @needs_dylink
   def test_dlfcn_rtld_local(self):
@@ -5533,7 +5563,6 @@ got: 10
 
   @crossplatform
   @also_with_nodefs_both
-  @crossplatform
   def test_fcntl_open(self):
     nodefs = '-DNODEFS' in self.emcc_args or '-DNODERAWFS' in self.emcc_args
     if nodefs and WINDOWS:
@@ -5717,8 +5746,7 @@ got: 10
     self.set_setting('FS_DEBUG')
     self.do_run_in_out_file_test('fs/test_trackingdelegate.c')
 
-  @also_with_noderawfs
-  @also_with_wasmfs
+  @with_all_fs
   def test_fs_writeFile(self):
     if self.get_setting('WASMFS'):
       self.set_setting("FORCE_FILESYSTEM")
@@ -5892,7 +5920,7 @@ Module.onRuntimeInitialized = () => {
     # We also report all files as executable since there is no x bit
     # recorded there.
     # See https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/chmod-wchmod?view=msvc-170#remarks
-    if WINDOWS and '-DNODERAWFS' in self.emcc_args:
+    if WINDOWS and '-DNODERAWFS' in self.emcc_args and not self.get_setting('WASMFS'):
       out_suffix = '.win'
     else:
       out_suffix = ''
@@ -6371,12 +6399,8 @@ void* operator new(size_t size) {
     self.do_core_test('test_mmap_anon.c')
 
   @no_lsan('Test code contains memory leaks')
-  @parameterized({
-      '': (0,),
-      'asyncify': (1,),
-      'jspi': (2,),
-  })
-  def test_cubescript(self, asyncify):
+  @also_with_asyncify_and_jspi
+  def test_cubescript(self):
     # uses register keyword
     self.emcc_args += ['-std=c++03', '-Wno-dynamic-class-memaccess']
     self.maybe_closure()
@@ -6385,14 +6409,7 @@ void* operator new(size_t size) {
     if '-fsanitize=address' in self.emcc_args:
       self.emcc_args += ['--pre-js', test_file('asan-no-leak.js')]
 
-    if asyncify:
-      self.set_setting('ASYNCIFY', asyncify)
-    if asyncify == 2:
-      self.require_jspi()
-      self.emcc_args += ['-Wno-experimental']
-
-    src = test_file('third_party/cubescript/command.cpp')
-    self.do_runf(src, '*\nTemp is 33\n9\n5\nhello, everyone\n*')
+    self.do_runf('third_party/cubescript/command.cpp', '*\nTemp is 33\n9\n5\nhello, everyone\n*')
 
   @needs_dylink
   def test_relocatable_void_function(self):
@@ -6580,25 +6597,6 @@ void* operator new(size_t size) {
     self.emcc_args += ['-I' + test_file('third_party/libiberty')]
 
     self.do_runf('third_party/libiberty/cp-demangle.c', '*d_demangle(char const*, int, unsigned int*)*', args=['_ZL10d_demanglePKciPj'])
-
-  @needs_make('make')
-  @crossplatform
-  def test_lua(self):
-    self.emcc_args.remove('-Werror')
-    env_init = {
-      'SYSCFLAGS': ' '.join(self.get_emcc_args(compile_only=True)),
-      'SYSLDFLAGS': ' '.join(self.get_emcc_args())
-    }
-    libs = self.get_library('third_party/lua',
-                            ['src/lua.o', 'src/liblua.a'],
-                            make=['make', 'echo', 'generic'],
-                            env_init=env_init,
-                            configure=None)
-    self.do_run('',
-                'hello lua world!\n17\n1\n2\n3\n4\n7',
-                args=['-e', '''print("hello lua world!");print(17);for x = 1,4 do print(x) end;print(10-3)'''],
-                libraries=libs,
-                includes=[test_file('lua')])
 
   @no_asan('issues with freetype itself')
   @needs_make('configure script')
@@ -7864,14 +7862,10 @@ void* operator new(size_t size) {
   @no_wasm2js('symbol names look different wasm2js backtraces')
   @also_with_wasm_bigint
   def test_emscripten_log(self):
-    if '-g' not in self.emcc_args:
-      self.emcc_args.append('-g')
-    self.emcc_args += ['-DRUN_FROM_JS_SHELL', '-Wno-deprecated-pragma']
-    self.do_run_in_out_file_test('emscripten_log/emscripten_log.cpp', interleaved_output=False)
-    # test closure compiler as well
+    self.emcc_args += ['-g', '-DRUN_FROM_JS_SHELL', '-Wno-deprecated-pragma']
     if self.maybe_closure():
       self.emcc_args += ['-g1'] # extra testing
-      self.do_run_in_out_file_test('emscripten_log/emscripten_log_with_closure.cpp', interleaved_output=False)
+    self.do_run_in_out_file_test('test_emscripten_log.cpp', interleaved_output=False)
 
   def test_float_literals(self):
     self.do_run_in_out_file_test('test_float_literals.cpp')
@@ -8054,16 +8048,13 @@ Module.onRuntimeInitialized = () => {
     self.do_runf('main.c', 'HelloWorld')
 
   @parameterized({
-    'asyncify': (False, 1),
-    'exit_runtime_asyncify': (True, 1),
-    'jspi': (False, 2),
-    'exit_runtime_jspi': (True, 2),
+    '': (False,),
+    'exit_runtime': (True,),
   })
-  def test_async_ccall_promise(self, exit_runtime, asyncify):
-    if asyncify == 2:
-      self.require_jspi()
+  @with_asyncify_and_jspi
+  def test_async_ccall_promise(self, exit_runtime):
+    if self.get_setting('ASYNCIFY') ==  2:
       self.set_setting('JSPI_EXPORTS', ['stringf', 'floatf'])
-    self.set_setting('ASYNCIFY', asyncify)
     self.set_setting('ASSERTIONS')
     self.set_setting('INVOKE_RUN', 0)
     self.set_setting('EXIT_RUNTIME', exit_runtime)
@@ -9120,23 +9111,13 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   @node_pthreads
   @no_wasm2js('wasm2js does not support PROXY_TO_PTHREAD (custom section support)')
+  @also_with_modularize
   def test_pthread_offset_converter(self):
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('EXIT_RUNTIME')
     self.set_setting('USE_OFFSET_CONVERTER')
-    if '-g' in self.emcc_args:
-      self.emcc_args += ['-DDEBUG']
-    self.do_runf('core/test_return_address.c', 'passed')
-
-  @node_pthreads
-  @no_wasm2js('wasm2js does not support PROXY_TO_PTHREAD (custom section support)')
-  def test_pthread_offset_converter_modularize(self):
-    self.set_setting('PROXY_TO_PTHREAD')
-    self.set_setting('EXIT_RUNTIME')
-    self.set_setting('USE_OFFSET_CONVERTER')
-    self.set_setting('MODULARIZE')
-    self.set_setting('EXPORT_NAME', 'foo')
-    self.emcc_args += ['--extern-post-js', test_file('modularize_post_js.js')]
+    if '-sMODULARIZE' in self.emcc_args:
+      self.set_setting('EXPORT_NAME', 'foo')
     if '-g' in self.emcc_args:
       self.emcc_args += ['-DDEBUG']
     self.do_runf('core/test_return_address.c', 'passed')
