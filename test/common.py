@@ -101,6 +101,10 @@ def test_file(*path_components):
   return str(Path(TEST_ROOT, *path_components))
 
 
+def copytree(src, dest):
+  shutil.copytree(src, dest, dirs_exist_ok=True)
+
+
 # checks if browser testing is enabled
 def has_browser():
   return EMTEST_BROWSER != '0'
@@ -1167,8 +1171,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   @classmethod
   def setUpClass(cls):
     super().setUpClass()
-    print('(checking sanity from test runner)') # do this after we set env stuff
-    shared.check_sanity(force=True)
+    shared.check_sanity(force=True, quiet=True)
 
   def setUp(self):
     super().setUp()
