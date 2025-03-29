@@ -435,17 +435,18 @@ def emscript(in_wasm, out_wasm, outfile_js, js_syms, finalize=True, base_metadat
     pre = None
 
     receiving = create_receiving(function_exports)
-
-    module = create_module(receiving, metadata, global_exports, forwarded_json['librarySymbols'])
-
-    metadata.library_definitions = forwarded_json['libraryDefinitions']
-
+    if settings.WASM_ESM_INTEGRATION:
+      sending = create_sending(metadata, forwarded_json['librarySymbols'])
+      module = [sending, receiving]
+    else:
+      module = create_module(receiving, metadata, global_exports, forwarded_json['librarySymbols'])
     write_output_file(out, module)
 
     out.write(post)
     module = None
 
-    return metadata
+  metadata.library_definitions = forwarded_json['libraryDefinitions']
+  return metadata
 
 
 @ToolchainProfiler.profile()
@@ -627,12 +628,16 @@ def create_tsd_exported_runtime_methods(metadata):
   js_doc_file = in_temp('jsdoc.js')
   tsc_output_file = in_temp('jsdoc.d.ts')
   utils.write_file(js_doc_file, js_doc)
-  tsc = shutil.which('tsc')
-  if tsc:
+  tsc = shared.get_npm_cmd('tsc', missing_ok=True)
+  # Prefer the npm install'd version of tsc since we know that one is compatible
+  # with emscripten output.
+  if not tsc:
+    # Fall back to tsc in the user's PATH.
+    tsc = shutil.which('tsc')
+    if not tsc:
+      exit_with_error('tsc executable not found in node_modules or in $PATH')
     # Use the full path from the which command so windows can find tsc.
     tsc = [tsc]
-  else:
-    tsc = shared.get_npm_cmd('tsc')
   cmd = tsc + ['--outFile', tsc_output_file,
                '--skipLibCheck', # Avoid checking any of the user's types e.g. node_modules/@types.
                '--declaration',
@@ -851,6 +856,13 @@ def create_sending(metadata, library_symbols):
           send_items_map[demangled] = f
 
   sorted_items = sorted(send_items_map.items())
+
+  if settings.WASM_ESM_INTEGRATION:
+    elems = []
+    for k, v in sorted_items:
+      elems.append(f'{v} as {k}')
+    return f"export {{ {', '.join(elems)} }};\n\n"
+
   prefix = ''
   if settings.MAYBE_CLOSURE_COMPILER:
     # This prevents closure compiler from minifying the field names in this
@@ -924,6 +936,13 @@ def make_export_wrappers(function_exports):
 
 
 def create_receiving(function_exports):
+  if settings.WASM_ESM_INTEGRATION:
+    exports = [f'{f} as {asmjs_mangle(f)}' for f in function_exports]
+    exports.append('memory as wasmMemory')
+    exports.append('__indirect_function_table as wasmTable')
+    exports = ',\n  '.join(exports)
+    return f"import {{\n  {exports}\n}} from './{settings.WASM_BINARY_FILE}';\n\n"
+
   # When not declaring asm exports this section is empty and we instead programmatically export
   # symbols on the global object by calling exportWasmSymbols after initialization
   if not settings.DECLARE_ASM_MODULE_EXPORTS:

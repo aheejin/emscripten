@@ -360,12 +360,22 @@ class other(RunnerCore):
 
   @requires_node_canary
   def test_esm_source_phase_imports(self):
-    self.node_args += ['--experimental-wasm-modules']
+    self.node_args += ['--experimental-wasm-modules', '--no-warnings']
     self.run_process([EMCC, '-o', 'hello_world.mjs', '-sSOURCE_PHASE_IMPORTS',
                       '--extern-post-js', test_file('modularize_post_js.js'),
                       test_file('hello_world.c')])
     self.assertContained('import source wasmModule from', read_file('hello_world.mjs'))
     self.assertContained('hello, world!', self.run_js('hello_world.mjs'))
+
+  @requires_node_canary
+  def test_esm_integration(self):
+    self.node_args += ['--experimental-wasm-modules', '--no-warnings']
+    self.run_process([EMCC, '-o', 'hello_world.mjs', '-sWASM_ESM_INTEGRATION', '-Wno-experimental', test_file('hello_world.c')])
+    create_file('runner.mjs', '''
+      import init from "./hello_world.mjs";
+      await init();
+    ''')
+    self.assertContained('hello, world!', self.run_js('runner.mjs'))
 
   @parameterized({
     '': ([],),
@@ -633,7 +643,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         # closure has not been run, we can do some additional checks. TODO: figure out how to do these even with closure
         assert '._main = ' not in generated, 'closure compiler should not have been run'
         if keep_debug:
-          self.assertContainedIf("assert(!Module['STACK_SIZE']", generated, opt_level == 0)
+          self.assertContainedIf("assert(typeof Module['STACK_SIZE'] == 'undefined'", generated, opt_level == 0)
         if 'WASM=0' in params:
           looks_unminified = ' = {}' in generated and ' = []' in generated
           looks_minified = '={}' in generated and '=[]' and ';var' in generated
@@ -2166,6 +2176,7 @@ Module['postRun'] = () => {
     test(['libdir/libfile.so.3.1.4.1.5.9'], '.3.1.4.1.5.9') # handle libX.so.1.2.3 as well
 
   @node_pthreads
+  @also_with_modularize
   def test_dylink_pthread_static_data(self):
     # Test that a side module uses the same static data region for global objects across all threads
 
@@ -8180,6 +8191,11 @@ addToLibrary({
     create_file('Folder/testfile.txt', '')
     self.do_other_test('test_realpath_2.c', emcc_args=['--embed-file', 'testfile.txt', '--embed-file', 'Folder'])
 
+  @requires_node
+  @also_with_wasmfs
+  def test_resolve_mountpoint_parent(self):
+    self.do_other_test('test_resolve_mountpoint_parent.c', emcc_args=['-sFORCE_FILESYSTEM', '-lnodefs.js'])
+
   @with_env_modify({'EMCC_LOGGING': '0'})  # this test assumes no emcc output
   def test_no_warnings(self):
     # build once before to make sure system libs etc. exist
@@ -9703,6 +9719,37 @@ int main() {
   def test_exceptions_exit_runtime(self):
     self.set_setting('EXIT_RUNTIME')
     self.do_other_test('test_exceptions_exit_runtime.cpp')
+
+  @with_all_eh_sjlj
+  def test_multi_inheritance_exception_message(self):
+    # Regression test for a bug that getting exception message in the DEBUG mode
+    # did not retrieve the correct thrown object pointer in case of multiple
+    # inheritance
+    create_file('src.cpp', r'''
+      #include <iostream>
+
+      struct Virt {
+        virtual void virt1() {}
+      };
+
+      struct MyEx : Virt, public std::runtime_error {
+        explicit MyEx(std::string msg) : std::runtime_error(std::move(msg)) {}
+      };
+
+      int main() {
+        try {
+          throw MyEx("ERROR");
+        } catch (...) {
+          try {
+            std::rethrow_exception(std::current_exception());
+          } catch (const std::exception &ex) {
+            std::cout << ex.what() << '\n';
+          }
+        }
+      }
+    ''')
+    self.set_setting('ASSERTIONS')
+    self.do_runf('src.cpp', 'ERROR\n')
 
   @requires_node
   def test_jsrun(self):
@@ -15262,7 +15309,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
 
         // Check that it was preloaded.
         // The preloading actually only happens on the main thread where the filesystem
-        // lives.  On worker threads the module object is shared via preloadedModules.
+        // lives.  On worker threads the module object is shared via sharedModules.
         if (emscripten_is_main_runtime_thread()) {
           int found = EM_ASM_INT(
             return preloadedWasm['/library.so'] !== undefined;
@@ -15270,7 +15317,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
           assert(found);
         } else {
           int found = EM_ASM_INT(
-            err(sharedModules);
+            err('sharedModules:', sharedModules);
             return sharedModules['/library.so'] !== undefined;
           );
           assert(found);
@@ -15285,7 +15332,10 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
         return 0;
       }
     ''')
-    self.do_runf('main.c', 'done\n', emcc_args=['-sMAIN_MODULE=2', '--preload-file', 'tmp.so@library.so', '--use-preload-plugins'] + args)
+    expected = 'done\n'
+    if args:
+      expected = "sharedModules: { '/library.so': Module [WebAssembly.Module] {} }\ndone\n"
+    self.do_runf('main.c', expected, emcc_args=['-sMAIN_MODULE=2', '--preload-file', 'tmp.so@library.so', '--use-preload-plugins'] + args)
 
   @node_pthreads
   def test_standalone_whole_archive(self):
