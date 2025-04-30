@@ -53,12 +53,20 @@ var readyPromise = new Promise((resolve, reject) => {
 });
 #endif
 
-// Determine the runtime environment we are in. You can customize this by
-// setting the ENVIRONMENT setting at compile time (see settings.js).
+#if WASM_WORKERS
+// The way we signal to a worker that it is hosting a pthread is to construct
+// it with a specific name.
+var ENVIRONMENT_IS_WASM_WORKER = globalThis.name == 'em-ww';
+#endif
 
 #if AUDIO_WORKLET
 var ENVIRONMENT_IS_AUDIO_WORKLET = typeof AudioWorkletGlobalScope !== 'undefined';
+// Audio worklets behave as wasm workers.
+if (ENVIRONMENT_IS_AUDIO_WORKLET) ENVIRONMENT_IS_WASM_WORKER = true;
 #endif
+
+// Determine the runtime environment we are in. You can customize this by
+// setting the ENVIRONMENT setting at compile time (see settings.js).
 
 #if ENVIRONMENT && !ENVIRONMENT.includes(',')
 var ENVIRONMENT_IS_WEB = {{{ ENVIRONMENT === 'web' }}};
@@ -121,13 +129,12 @@ if (ENVIRONMENT_IS_NODE) {
   // is hosting a pthread.
   ENVIRONMENT_IS_PTHREAD = ENVIRONMENT_IS_WORKER && worker_threads['workerData'] == 'em-pthread'
 #endif // PTHREADS
+#if WASM_WORKERS
+  ENVIRONMENT_IS_WASM_WORKER = ENVIRONMENT_IS_WORKER && worker_threads['workerData'] == 'em-ww'
+#endif
 #endif // PTHREADS || WASM_WORKERS
 }
 #endif // ENVIRONMENT_MAY_BE_NODE
-
-#if WASM_WORKERS
-var ENVIRONMENT_IS_WASM_WORKER = !!Module['$ww'];
-#endif
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
@@ -370,7 +377,7 @@ if (!ENVIRONMENT_IS_AUDIO_WORKLET)
 #endif // ASSERTIONS
 }
 
-#if ENVIRONMENT_MAY_BE_NODE && PTHREADS
+#if ENVIRONMENT_MAY_BE_NODE && (PTHREADS || WASM_WORKERS)
 // Set up the out() and err() hooks, which are how we can print to stdout or
 // stderr, respectively.
 // Normally just binding console.log/console.error here works fine, but

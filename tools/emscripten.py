@@ -715,7 +715,7 @@ def type_to_sig(type):
     webassembly.Type.F32: 'f',
     webassembly.Type.F64: 'd',
     webassembly.Type.EXTERNREF: 'e',
-    webassembly.Type.VOID: 'v'
+    webassembly.Type.VOID: 'v',
   }[type]
 
 
@@ -726,7 +726,7 @@ def type_to_ts_type(type):
     webassembly.Type.F32: 'number',
     webassembly.Type.F64: 'number',
     webassembly.Type.EXTERNREF: 'any',
-    webassembly.Type.VOID: 'void'
+    webassembly.Type.VOID: 'void',
   }[type]
 
 
@@ -942,7 +942,7 @@ def make_export_wrappers(function_exports):
       # With assertions enabled we create a wrapper that are calls get routed through, for
       # the lifetime of the program.
       wrapper += f"createExportWrapper('{name}', {nargs});"
-    elif (settings.WASM_ASYNC_COMPILATION and not can_use_await()) or settings.PTHREADS:
+    elif (settings.WASM_ASYNC_COMPILATION and not can_use_await()) or settings.PTHREADS or settings.WASM_WORKERS:
       # With WASM_ASYNC_COMPILATION wrapper will replace the global var and Module var on
       # first use.
       args = [f'a{i}' for i in range(nargs)]
@@ -1010,7 +1010,7 @@ def create_module(receiving, metadata, global_exports, library_symbols):
   module = []
 
   sending = create_sending(metadata, library_symbols)
-  if settings.PTHREADS:
+  if settings.PTHREADS or settings.WASM_WORKERS:
     sending = textwrap.indent(sending, '  ').strip()
     module.append('''\
 var wasmImports;
