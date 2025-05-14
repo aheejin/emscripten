@@ -539,6 +539,7 @@ jobs:
           title: "asan+lsan"
           test_targets: "
             asan.test_stat
+            asan.test_stack
             asan.test_float_builtins
             asan.test_embind*
             asan.test_abort_on_exceptions
@@ -646,7 +647,9 @@ jobs:
             wasmfs.test_fcntl_open
             wasmfs.test_fs_llseek
             wasmfs.test_fs_llseek_rawfs
-            wasmfs.test_freetype"
+            wasmfs.test_freetype
+            minimal0.test_utf
+            "
   test-wasm2js1:
     environment:
       EMTEST_SKIP_NODE_CANARY: "1"
@@ -794,11 +797,27 @@ jobs:
             other.test_native_call_before_init
             other.test_node_unhandled_rejection
             core2.test_hello_world
-            core2.test_esm_integration
-            core0.test_esm_integration
+            core2.test_esm_integration*
+            core0.test_esm_integration*
             core0.test_pthread_join_and_asyncify
             core0.test_async_ccall_promise_jspi*
-            core0.test_cubescript_jspi"
+            core0.test_cubescript_jspi
+            instance.test_hello_world
+            instance.test_dylink_basics
+            instance.test_cube2hash*
+            instance.test_exceptions_3*
+            instance.test_memorygrowth
+            instance.test_stat
+            instance.test_iostream_and_determinism
+            instance.test_fannkuch
+            instance.test_fasta
+            instance.test_EXPORTED_RUNTIME_METHODS
+            instance.test_ccall
+            esm_integration.test_fs_js_api*
+            esm_integration.test_inlinejs3
+            esm_integration.test_embind_val_basics
+            esm_integration.test_undefined_main
+            "
       # Run some basic tests with the minimum version of node that we currently
       # support in the generated code.
       # Keep this in sync with `OLDEST_SUPPORTED_NODE` in `feature_matrix.py`

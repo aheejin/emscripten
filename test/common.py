@@ -548,9 +548,7 @@ def also_with_wasm_bigint(f):
       self.set_setting('WASM_BIGINT')
       nodejs = self.require_node()
       self.node_args += shared.node_bigint_flags(nodejs)
-      f(self, *args, **kwargs)
-    else:
-      f(self, *args, **kwargs)
+    f(self, *args, **kwargs)
 
   parameterize(metafunc, {'': (False,),
                           'bigint': (True,)})
@@ -567,9 +565,7 @@ def also_with_wasm64(f):
     if with_wasm64:
       self.require_wasm64()
       self.set_setting('MEMORY64')
-      f(self, *args, **kwargs)
-    else:
-      f(self, *args, **kwargs)
+    f(self, *args, **kwargs)
 
   parameterize(metafunc, {'': (False,),
                           'wasm64': (True,)})
@@ -587,9 +583,7 @@ def also_with_wasm2js(f):
     if with_wasm2js:
       self.require_wasm2js()
       self.set_setting('WASM', 0)
-      f(self, *args, **kwargs)
-    else:
-      f(self, *args, **kwargs)
+    f(self, *args, **kwargs)
 
   parameterize(metafunc, {'': (False,),
                           'wasm2js': (True,)})
@@ -617,12 +611,10 @@ def can_do_standalone(self, impure=False):
 def also_with_standalone_wasm(impure=False):
   def decorated(func):
     @wraps(func)
-    def metafunc(self, standalone):
+    def metafunc(self, standalone, *args, **kwargs):
       if DEBUG:
         print('parameterize:standalone=%s' % standalone)
-      if not standalone:
-        func(self)
-      else:
+      if standalone:
         if not can_do_standalone(self, impure):
           self.skipTest('Test configuration is not compatible with STANDALONE_WASM')
         self.set_setting('STANDALONE_WASM')
@@ -638,7 +630,7 @@ def also_with_standalone_wasm(impure=False):
           self.wasm_engines = []
         nodejs = self.require_node()
         self.node_args += shared.node_bigint_flags(nodejs)
-        func(self)
+      func(self, *args, **kwargs)
 
     parameterize(metafunc, {'': (False,),
                             'standalone': (True,)})
@@ -876,6 +868,13 @@ def parameterized(parameters):
   return decorator
 
 
+def get_output_suffix(args):
+  if any(a in args for a in ('-sEXPORT_ES6', '-sWASM_ESM_INTEGRATION', '-sMODULARIZE=instance')):
+    return '.mjs'
+  else:
+    return '.js'
+
+
 class RunnerMeta(type):
   @classmethod
   def make_test(mcs, name, func, suffix, args):
@@ -957,15 +956,17 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     return self.get_setting('INITIAL_MEMORY') == '2200mb'
 
   def check_dylink(self):
+    if self.get_setting('WASM_ESM_INTEGRATION'):
+      self.skipTest('dynamic linking not supported with WASM_ESM_INTEGRATION')
     if self.is_wasm2js():
-      self.skipTest('no dynamic linking support in wasm2js yet')
+      self.skipTest('dynamic linking not supported with wasm2js')
     if '-fsanitize=undefined' in self.emcc_args:
-      self.skipTest('no dynamic linking support in UBSan yet')
+      self.skipTest('dynamic linking not supported with UBSan')
     # MEMORY64=2 mode doesn't currently support dynamic linking because
     # The side modules are lowered to wasm32 when they are built, making
     # them unlinkable with wasm64 binaries.
     if self.get_setting('MEMORY64') == 2:
-      self.skipTest('MEMORY64=2 + dynamic linking is not currently supported')
+      self.skipTest('dynamic linking not supported with MEMORY64=2')
 
   def require_v8(self):
     if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:
@@ -1398,10 +1399,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     if emcc_args:
       all_emcc_args += emcc_args
     if not output_suffix:
-      if '-sEXPORT_ES6' in all_emcc_args or '-sWASM_ESM_INTEGRATION' in all_emcc_args:
-        output_suffix = '.mjs'
-      else:
-        output_suffix = '.js'
+      output_suffix = get_output_suffix(all_emcc_args)
 
     if output_basename:
       output = output_basename + output_suffix

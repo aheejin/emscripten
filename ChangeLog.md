@@ -20,8 +20,18 @@ See docs/process.md for more on how version tagging works.
 
 4.0.9 (in development)
 ----------------------
+- libunwind was updated to LLVM 20.1.4. (#24251)
 - When using cmake the EMSCRIPTEN_FORCE_COMPILERS setting was reverted to
   being on by default due to issues that were found with disabling it. (#24223)
+- Several symbols from embind (`InternalError`, `BindingError`,
+  `count_emval_handles`) and from `libbrowser.py` (`requestFullscreen`,
+  `requestFullScreen`, `createContext`, `getUserMedia`, `setCanvasSize`) are no
+  longer exported by default. They can be exported using
+  `-sEXPORTED_RUNTIME_METHODS=requestFullscreen`, for example. (#24223, #24269)
+- Embind: fixed support for unsigned 64-bit integers, which were previously
+  returned to JavaScript as their signed counterparts. (#24285)
+- Added handing for 64-bit integer access to AddressSanitizer, `-sSAFE_HEAP` and
+  `-sSUPPORT_BIG_ENDIAN` features. (#24283)
 
 4.0.8 - 04/30/25
 ----------------
