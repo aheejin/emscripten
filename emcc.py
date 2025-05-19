@@ -896,6 +896,57 @@ def phase_setup(options, state):
     else:
       settings.SUPPORT_LONGJMP = 'emscripten'
 
+
+
+
+
+  if 'DISABLE_EXCEPTION_CATCHING' in user_settings or \
+     'EXCEPTION_CATCHING_ALLOWED' in user_settings or \
+     'DISABLE_EXCEPTION_THROWING' in user_settings:
+    settings.EXCEPTION_KIND = 'emscripten'
+
+  if 'SUPPORT_LONGJMP' in user_settings:
+    if user_settings['SUPPORT_LONGJMP'] == 'emscripten':
+      settings.EXCEPTION_KIND = 'emscripten'
+      settings.SJLJ_MODE = 1
+    elif user_settings['SUPPORT_LONGJMP'] == 'wasm':
+      settings.EXCEPTION_KIND = 'wasm'
+      settings.SJLJ_MODE = 1
+    elif user_settings['SUPPORT_LONGJMP'] == 0:
+      settings.SJLJ_MODE = 0
+    elif user_settings['SUPPORT_LONGJMP'] == 1:
+      settings.SJLJ_MODE = 1
+
+  if 'DISABLE_EXCEPTION_THROWING' in user_settings and 'DISABLE_EXCEPTION_CATCHING' in user_settings:
+    if user_settings['DISABLE_EXCEPTION_THROWING']
+      settings.EXCEPTION_MODE = 0
+  elif 'DISABLE_EXCEPTION_THROWING' in user_settings and 'DISABLE_EXCEPTION_CATCHING' not in user_settings:
+
+  elif 'DISABLE_EXCEPTION_THROWING' not in user_settings and 'DISABLE_EXCEPTION_CATCHING' in user_settings:
+
+
+
+  not user_settings['DISABLE_EXCEPTION_THROWING']:
+    settings.EXCEPTION_MODE = 0
+
+  if 'DISABLE_EXCEPTION_CATCHING' in user_settings:
+    if user_settings['DISABLE_EXCEPTION_CATCHING'] in ('0', '2'):
+      settings.EXCEPTION_MODE = 2
+    if user_settings['DISABLE_EXCEPTION_CATCHING'] == 1:
+      settings.EXCEPTION_MODE = 2
+
+  if 'DISABLE_EXCEPTION_CATCHING' in user_settings and user_settings['DISABLE_EXCEPTION_CATCHING'] == 1 and
+
+    settings.EXCEPTION_MODE = 2
+
+      diagnostics.warning('deprecated', 'DISABLE_EXCEPTION_CATCHING=X is no longer needed when specifying EXCEPTION_CATCHING_ALLOWED')
+    else:
+      exit_with_error('DISABLE_EXCEPTION_CATCHING and EXCEPTION_CATCHING_ALLOWED are mutually exclusive')
+
+  if settings.EXCEPTION_CATCHING_ALLOWED:
+    settings.DISABLE_EXCEPTION_CATCHING = 0
+
+
   # SDL2 requires eglGetProcAddress() to work.
   # NOTE: if SDL2 is updated to not rely on eglGetProcAddress(), this can be removed
   if settings.USE_SDL == 2 or settings.USE_SDL_MIXER == 2 or settings.USE_SDL_GFX == 2:
@@ -1314,9 +1365,9 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
     elif check_flag('--threadprofiler'):
       settings_changes.append('PTHREADS_PROFILING=1')
     elif arg == '-fno-exceptions':
-      settings.DISABLE_EXCEPTION_CATCHING = 1
-      settings.DISABLE_EXCEPTION_THROWING = 1
-      settings.WASM_EXCEPTIONS = 0
+      settings.EXCEPTION_MODE = 0
+      #settings.DISABLE_EXCEPTION_CATCHING = 1
+      #settings.DISABLE_EXCEPTION_THROWING = 1
     elif arg == '-mbulk-memory':
       settings.BULK_MEMORY = 1
       feature_matrix.enable_feature(feature_matrix.Feature.BULK_MEMORY,
@@ -1338,15 +1389,17 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
     elif arg == '-mno-nontrapping-fptoint':
       feature_matrix.disable_feature(feature_matrix.Feature.NON_TRAPPING_FPTOINT)
     elif arg == '-fexceptions':
+      settings_changes.append('EXCEPTION_MODE=2')
       # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
       # exception handling by default when -fexceptions is given when wasm
       # exception handling becomes stable.
-      settings.DISABLE_EXCEPTION_THROWING = 0
-      settings.DISABLE_EXCEPTION_CATCHING = 0
+      #settings.DISABLE_EXCEPTION_THROWING = 0
+      #settings.DISABLE_EXCEPTION_CATCHING = 0
     elif arg == '-fwasm-exceptions':
-      settings.WASM_EXCEPTIONS = 1
+      settings_changes.append('EXCEPTION_KIND=wasm')
+      settings_changes.append('EXCEPTION_MODE=2')
     elif arg == '-fignore-exceptions':
-      settings.DISABLE_EXCEPTION_CATCHING = 1
+      settings_changes.append('EXCEPTION_MODE=1')
     elif check_arg('--default-obj-ext'):
       exit_with_error('--default-obj-ext is no longer supported by emcc')
     elif arg.startswith('-fsanitize=cfi'):
