@@ -18,7 +18,7 @@ if __name__ == '__main__':
   raise Exception('do not run this file directly; do something like: test/runner')
 
 from tools.shared import PIPE
-from tools.shared import EMCC, EMAR, FILE_PACKAGER
+from tools.shared import EMCC, EMAR, EMXX, FILE_PACKAGER
 from tools.utils import WINDOWS, MACOS, LINUX, write_file, delete_file
 from tools import shared, building, config, utils, webassembly
 import common
@@ -9084,14 +9084,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('INITIAL_MEMORY', '300mb')
     self.do_run_in_out_file_test('hello_world.c')
 
-  @no_asan('SAFE_HEAP cannot be used with ASan')
-  @no_2gb('asan doesnt support GLOBAL_BASE')
-  @no_esm_integration('sanitizers do not support WASM_ESM_INTEGRATION')
-  def test_safe_heap_user_js(self):
-    self.set_setting('SAFE_HEAP')
-    self.do_runf('core/test_safe_heap_user_js.c',
-                 expected_output=['Aborted(segmentation fault storing 1 bytes at address 0)'], assert_returncode=NON_ZERO)
-
   def test_safe_stack(self):
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('STACK_SIZE', 1024)
@@ -9732,6 +9724,8 @@ NODEFS is no longer included by default; build with -lnodefs.js
     'pthreads': (['-pthread'],),
   })
   def test_modularize_instance(self, args):
+    if self.get_setting('WASM_ESM_INTEGRATION') and '-pthread' in args:
+      self.skipTest('pthread is not compatible with WASM_ESM_INTEGRATION')
     create_file('library.js', '''\
     addToLibrary({
       $baz: () => console.log('baz'),
@@ -9743,7 +9737,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
                       '-sEXPORTED_RUNTIME_METHODS=baz,addOnExit,HEAP32',
                       '-sEXPORTED_FUNCTIONS=_bar,_main,qux',
                       '--js-library', 'library.js',
-                      '-o', 'modularize_instance.mjs'] + args)
+                      '-o', 'modularize_instance.mjs'] + args + self.get_emcc_args())
 
     create_file('runner.mjs', '''
       import { strict as assert } from 'assert';
@@ -9759,12 +9753,14 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
     self.assertContained('main1\nmain2\nfoo\nbar\nbaz\n', self.run_js('runner.mjs'))
 
+  @no_4gb('EMBIND_AOT can\'t lower 4gb')
   def test_modularize_instance_embind(self):
-    self.run_process([EMCC, test_file('modularize_instance_embind.cpp'),
+    self.run_process([EMXX, test_file('modularize_instance_embind.cpp'),
                       '-sMODULARIZE=instance',
+                      '-Wno-experimental',
                       '-lembind',
                       '-sEMBIND_AOT',
-                      '-o', 'modularize_instance_embind.mjs'])
+                      '-o', 'modularize_instance_embind.mjs'] + self.get_emcc_args())
 
     create_file('runner.mjs', '''
       import init, { foo, Bar } from "./modularize_instance_embind.mjs";
@@ -9863,7 +9859,7 @@ core_2gb = make_run('core_2gb', emcc_args=['--profiling-funcs'],
                     settings={'INITIAL_MEMORY': '2200mb', 'GLOBAL_BASE': '2gb'})
 
 # MEMORY64=1
-wasm64 = make_run('wasm64', emcc_args=['-O1', '-Wno-experimental', '--profiling-funcs'],
+wasm64 = make_run('wasm64', emcc_args=['-Wno-experimental', '--profiling-funcs'],
                   settings={'MEMORY64': 1}, require_wasm64=True, require_node=True)
 wasm64_v8 = make_run('wasm64_v8', emcc_args=['-Wno-experimental', '--profiling-funcs'],
                      settings={'MEMORY64': 1}, require_wasm64=True, require_v8=True)

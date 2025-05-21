@@ -836,7 +836,8 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
       default_setting('INCOMING_MODULE_JS_API', [])
 
   if settings.ASYNCIFY == 1:
-    # See: https://github.com/emscripten-core/emscripten/issues/12065
+    # ASYNCIFY=1 wraps only wasm exports so we need to enable legacy
+    # dyncalls via dynCall_xxx exports.
     # See: https://github.com/emscripten-core/emscripten/issues/12066
     settings.DYNCALLS = 1
 
@@ -2027,6 +2028,8 @@ def run_embind_gen(options, wasm_target, js_syms, extra_settings):
   # Ignore -sMODULARIZE which could otherwise effect how we run the module
   # to generate the bindings.
   settings.MODULARIZE = False
+  # Disable ESM integration to avoid enabling the experimental feature in node.
+  settings.WASM_ESM_INTEGRATION = False
   # Don't include any custom user JS or files.
   settings.PRE_JS_FILES = []
   settings.POST_JS_FILES = []
@@ -2108,6 +2111,9 @@ addOnPostCtor(assignEmbindExports);
 // end embind exports'''
     src += exports
   write_file(final_js, src)
+  if settings.WASM_ESM_INTEGRATION:
+    # With ESM integration the embind exports also need to be exported by the main file.
+    settings.EXPORTED_RUNTIME_METHODS.extend(out['publicSymbols'])
 
 
 # for Popen, we cannot have doublequotes, so provide functionality to
@@ -2322,10 +2328,6 @@ def phase_binaryen(target, options, wasm_target):
   # after generating the wasm, do some final operations
 
   if final_js:
-    if settings.SUPPORT_BIG_ENDIAN:
-      with ToolchainProfiler.profile_block('little_endian_heap'):
-        final_js = building.little_endian_heap(final_js)
-
     # >=2GB heap support requires pointers in JS to be unsigned. rather than
     # require all pointers to be unsigned by default, which increases code size
     # a little, keep them signed, and just unsign them here if we need that.
@@ -2333,20 +2335,26 @@ def phase_binaryen(target, options, wasm_target):
       with ToolchainProfiler.profile_block('use_unsigned_pointers_in_js'):
         final_js = building.use_unsigned_pointers_in_js(final_js)
 
-    # shared memory growth requires some additional JS fixups.
-    # note that we must do this after handling of unsigned pointers. unsigning
-    # adds some >>> 0 things, while growth will replace a HEAP8 with a call to
-    # a method to get the heap, and that call would not be recognized by the
-    # unsigning pass
-    if settings.SHARED_MEMORY and settings.ALLOW_MEMORY_GROWTH:
-      with ToolchainProfiler.profile_block('apply_wasm_memory_growth'):
-        final_js = building.apply_wasm_memory_growth(final_js)
-
     if settings.USE_ASAN:
       final_js = building.instrument_js_for_asan(final_js)
 
     if settings.SAFE_HEAP:
       final_js = building.instrument_js_for_safe_heap(final_js)
+
+    # shared memory growth requires some additional JS fixups.
+    # note that we must do this after handling of unsigned pointers. unsigning
+    # adds some >>> 0 things, while growth will replace a HEAP8 with a call to
+    # a method to get the heap, and that call would not be recognized by the
+    # unsigning pass.
+    # we also must do this after the asan or safe_heap instrumentation, as they
+    # wouldn't be able to recognize patterns produced by the growth pass.
+    if settings.SHARED_MEMORY and settings.ALLOW_MEMORY_GROWTH:
+      with ToolchainProfiler.profile_block('apply_wasm_memory_growth'):
+        final_js = building.apply_wasm_memory_growth(final_js)
+
+    if settings.SUPPORT_BIG_ENDIAN:
+      with ToolchainProfiler.profile_block('little_endian_heap'):
+        final_js = building.little_endian_heap(final_js)
 
     if settings.OPT_LEVEL >= 2 and settings.DEBUG_LEVEL <= 2:
       # minify the JS. Do not minify whitespace if Closure is used, so that
