@@ -2594,7 +2594,7 @@ F1 -> ''
 
   @requires_network
   def test_remote_ports(self):
-    self.emcc(test_file('hello_world.c'), ['--use-port=contrib.emdawnwebgpu'])
+    self.emcc(test_file('hello_world.c'), ['--use-port=emdawnwebgpu'])
 
   @crossplatform
   def test_external_ports_simple(self):
@@ -10247,6 +10247,7 @@ end
     self.build('hello_world.c', emcc_args=[
       '--closure=1',
       '-Werror=closure',
+      '-Wno-error=deprecated',
       '-sINCLUDE_FULL_LIBRARY',
       '-sUSE_WEBGPU',
     ])
@@ -12977,7 +12978,16 @@ int main(void) {
     'dylink': (['-sMAIN_MODULE'],),
   })
   def test_webgpu_compiletest(self, args):
-    self.run_process([EMXX, test_file('webgpu_jsvalstore.cpp'), '-sUSE_WEBGPU', '-sASYNCIFY'] + args)
+    self.run_process([EMXX, test_file('webgpu_jsvalstore.cpp'), '-Wno-error=deprecated', '-sUSE_WEBGPU', '-sASYNCIFY'] + args)
+
+  @also_with_wasm64
+  @parameterized({
+    '': ([],),
+    'closure': (['--closure=1', '-Werror=closure'],),
+    'closure_assertions': (['--closure=1', '-Werror=closure', '-sASSERTIONS'],),
+  })
+  def test_emdawnwebgpu_link_test(self, args):
+    self.run_process([EMXX, test_file('test_emdawnwebgpu_link_test.cpp'), '--use-port=emdawnwebgpu', '-sASYNCIFY'] + args)
 
   def test_signature_mismatch(self):
     create_file('a.c', 'void foo(); int main() { foo(); return 0; }')
@@ -15019,7 +15029,11 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     self.emcc_args.append('--pre-js=pre.js')
     # Verify that, after initialization, dbg() messages are prefixed with
     # worker and thread ID.
-    self.do_runf('other/test_dbg.c', expected, regex=True)
+    self.do_runf('other/test_dbg.c', expected, interleaved_output=True, regex=True)
+
+    # Verify that stdout does not contain dbg() messages (interleaved_output=True
+    # means we return stdout followed by stderr)
+    self.do_runf('other/test_dbg.c', 'hello, world!\nstart { foo: 1 }\n', interleaved_output=False)
 
     # When assertions are disabled `dbg` function is not defined
     self.do_runf('other/test_dbg.c',
