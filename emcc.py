@@ -815,12 +815,9 @@ def check_and_set_eh_sjlj_options():
   em_eh_flag_given = 'DISABLE_EXCEPTION_CATCHING' in user_settings or \
      'DISABLE_EXCEPTION_THROWING' in user_settings or \
      'EXCEPTION_CATCHING_ALLOWED' in user_settings
-  wasm_eh_flag_given = 'EXCEPTION_KIND' in user_settings and \
-      user_settings['EXCEPTION_KIND'] == 'wasm'
-  em_sjlj_flag_given = 'SUPPORT_LONGJMP' in user_settings and
-      user_settings['SUPPORT_LONGJMP'] == 'emscripten'
-  wasm_sjlj_flag_given = 'SUPPORT_LONGJMP' in user_settings and
-      user_settings['SUPPORT_LONGJMP'] == 'wasm'
+  wasm_eh_flag_given = user_settings.get('EXCEPTION_KIND') == 'wasm'
+  em_sjlj_flag_given = user_settings.get('SUPPORT_LONGJMP') == 'emscripten'
+  wasm_sjlj_flag_given = user_settings.get('SUPPORT_LONGJMP') == 'wasm'
 
   if em_eh_flag_given and wasm_eh_flag_given:
     exit_with_error('DISABLE_EXCEPTION_CATCHING / DISABLE_EXCEPTION_THROWING / EXCEPTION_CATCHING_ALLOWED cannot be used with -fwasm-exceptions')
@@ -829,7 +826,7 @@ def check_and_set_eh_sjlj_options():
   if wasm_eh_flag_given and em_sjlj_flag_given:
     exit_with_error('-fwasm-exceptions cannot be used with SUPPORT_LONGJMP=wasm')
 
-  if wasm_eh_flag_given or wasm_sjlj_flag_given and if user_settings.get('ASYNCIFY') == '1':
+  if (wasm_eh_flag_given or wasm_sjlj_flag_given) and user_settings.get('ASYNCIFY') == '1':
     diagnostics.warning('emcc', 'ASYNCIFY=1 is not compatible with -fwasm-exceptions/SUPPORT_LONGJMP=wasm. Parts of the program that mix ASYNCIFY and exceptions will not compile.')
 
   if em_eh_flag_given or em_sjlj_flag_given:
@@ -856,7 +853,7 @@ def check_and_set_eh_sjlj_options():
       settings.EXCEPTION_MODE = 0
     if user_settings['DISABLE_EXCEPTION_THROWING'] == '1' and user_settings['DISABLE_EXCEPTION_CATCHING'] == '0':
       exit_with_error('DISABLE_EXCEPTION_THROWING=1 cannot be used with DISABLE_EXCEPTION_CATCHING=0')
-    elif user_settings['DISABLE_EXCEPTION_THROWING'] == '0' and user_settings['DISABLE_EXCEPTION_CATCHING'] == '1'
+    elif user_settings['DISABLE_EXCEPTION_THROWING'] == '0' and user_settings['DISABLE_EXCEPTION_CATCHING'] == '1':
       if 'EXCEPTION_MODE' in user_settings and user_settings['EXCEPTION_MODE'] != '1':
         exit_with_error('-fno-exceptions / -fexceptions cannot be used with DISABLE_EXCEPTION_THROWING=0 && DISABLE_EXCEPTION_CATCHING=1')
       settings.EXCEPTION_MODE = 1
