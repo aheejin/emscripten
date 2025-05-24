@@ -83,6 +83,7 @@ COMPILE_TIME_SETTINGS = {
     'INLINING_LIMIT',
     'DISABLE_EXCEPTION_CATCHING',
     'DISABLE_EXCEPTION_THROWING',
+    'EXCEPTION_CATCHING_ALLOWED',
     'WASM_LEGACY_EXCEPTIONS',
     'MAIN_MODULE',
     'SIDE_MODULE',
@@ -99,11 +100,13 @@ COMPILE_TIME_SETTINGS = {
     'BULK_MEMORY',
 
     # Internal settings used during compilation
-    'EXCEPTION_CATCHING_ALLOWED',
     'WASM_EXCEPTIONS',
     'LTO',
     'OPT_LEVEL',
     'DEBUG_LEVEL',
+    'EXCEPTION_KIND',
+    'EXCEPTION_MODE',
+    'SJLJ_MODE',
 
     # Affects ports
     'GL_ENABLE_GET_PROC_ADDRESS', # NOTE: if SDL2 is updated to not rely on eglGetProcAddress(), this can be removed

@@ -826,9 +826,6 @@ def check_and_set_eh_sjlj_options():
   if wasm_eh_flag_given and em_sjlj_flag_given:
     exit_with_error('-fwasm-exceptions cannot be used with SUPPORT_LONGJMP=wasm')
 
-  if (wasm_eh_flag_given or wasm_sjlj_flag_given) and user_settings.get('ASYNCIFY') == '1':
-    diagnostics.warning('emcc', 'ASYNCIFY=1 is not compatible with -fwasm-exceptions/SUPPORT_LONGJMP=wasm. Parts of the program that mix ASYNCIFY and exceptions will not compile.')
-
   if em_eh_flag_given or em_sjlj_flag_given:
     settings.EXCEPTION_KIND = 'emscripten'
   if wasm_eh_flag_given or wasm_sjlj_flag_given:
@@ -870,17 +867,23 @@ def check_and_set_eh_sjlj_options():
     elif user_settings['DISABLE_EXCEPTION_THROWING'] == '0':
       if 'EXCEPTION_MODE' in user_settings and user_settings['EXCEPTION_MODE'] == '0':
         exit_with_error('-fno-exceptions cannot be used with DISABLE_EXCEPTION_THROWING=0')
-      default_setting('EXCEPTION_MODE', '1')
+      default_setting('EXCEPTION_MODE', 1)
 
   elif 'DISABLE_EXCEPTION_CATCHING' in user_settings:
     if user_settings['DISABLE_EXCEPTION_CATCHING'] == '1':
       if 'EXCEPTION_MODE' in user_settings and user_settings['EXCEPTION_MODE'] == '2':
         exit_with_error('-fexceptions cannot be used with DISABLE_EXCEPTION_CATCHING=1')
-      default_setting('EXCEPTION_MODE', '1')
+      default_setting('EXCEPTION_MODE', 1)
     elif user_settings['DISABLE_EXCEPTION_CATCHING'] == '0':
       if 'EXCEPTION_MODE' in user_settings and user_settings['EXCEPTION_MODE'] != '2':
         exit_with_error('-fno-exceptions / -fignore-exceptions cannot be used with DISABLE_EXCEPTION_CATCHING=0')
       settings.EXCEPTION_MODE = 2
+
+  if (wasm_eh_flag_given or wasm_sjlj_flag_given) and user_settings.get('ASYNCIFY') == '1':
+    diagnostics.warning('emcc', 'ASYNCIFY=1 is not compatible with -fwasm-exceptions/SUPPORT_LONGJMP=wasm. Parts of the program that mix ASYNCIFY and exceptions will not compile.')
+
+  if settings.EXCEPTION_KIND == 'emscripten' and user_settings.get('WASM_LEGACY_EXCEPTIONS') == '1':
+    exit_with_error('WASM_LEGACY_EXCEPTIONS cannot be used with Emscripten EH')
 
 
 @ToolchainProfiler.profile_block('setup')
