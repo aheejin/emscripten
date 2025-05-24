@@ -1365,9 +1365,7 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
     elif check_flag('--threadprofiler'):
       settings_changes.append('PTHREADS_PROFILING=1')
     elif arg == '-fno-exceptions':
-      settings.EXCEPTION_MODE = 0
-      #settings.DISABLE_EXCEPTION_CATCHING = 1
-      #settings.DISABLE_EXCEPTION_THROWING = 1
+      settings_changes.append('EXCEPTION_MODE=0')
     elif arg == '-mbulk-memory':
       settings.BULK_MEMORY = 1
       feature_matrix.enable_feature(feature_matrix.Feature.BULK_MEMORY,
@@ -1390,11 +1388,6 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
       feature_matrix.disable_feature(feature_matrix.Feature.NON_TRAPPING_FPTOINT)
     elif arg == '-fexceptions':
       settings_changes.append('EXCEPTION_MODE=2')
-      # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
-      # exception handling by default when -fexceptions is given when wasm
-      # exception handling becomes stable.
-      #settings.DISABLE_EXCEPTION_THROWING = 0
-      #settings.DISABLE_EXCEPTION_CATCHING = 0
     elif arg == '-fwasm-exceptions':
       settings_changes.append('EXCEPTION_KIND=wasm')
       settings_changes.append('EXCEPTION_MODE=2')
