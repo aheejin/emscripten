@@ -882,7 +882,7 @@ def check_and_set_eh_sjlj_options():
   if (wasm_eh_flag_given or wasm_sjlj_flag_given) and user_settings.get('ASYNCIFY') == '1':
     diagnostics.warning('emcc', 'ASYNCIFY=1 is not compatible with -fwasm-exceptions/SUPPORT_LONGJMP=wasm. Parts of the program that mix ASYNCIFY and exceptions will not compile.')
 
-  if settings.EXCEPTION_KIND == 'emscripten' and user_settings.get('WASM_LEGACY_EXCEPTIONS') == '1':
+  if settings.EXCEPTION_KIND == 'emscripten' and 'WASM_LEGACY_EXCEPTIONS' in user_settings:
     exit_with_error('WASM_LEGACY_EXCEPTIONS cannot be used with Emscripten EH')
 
 
