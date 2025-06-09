@@ -33,9 +33,10 @@ from . import system_libs
 from . import utils
 from . import webassembly
 from . import extract_metadata
+from .cmdline import OFormat
 from .utils import read_file, write_file, delete_file
 from .utils import removeprefix, exit_with_error
-from .shared import in_temp, safe_copy, do_replace, OFormat
+from .shared import in_temp, safe_copy, do_replace
 from .shared import DEBUG, WINDOWS, DYLIB_EXTENSIONS
 from .shared import unsuffixed, unsuffixed_basename, get_file_suffix
 from .settings import settings, default_setting, user_settings, JS_ONLY_SETTINGS, DEPRECATED_SETTINGS
@@ -822,8 +823,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
       exit_with_error('WASM_ESM_INTEGRATION is not compatible with WASM_ASYNC_COMPILATION')
     if not settings.WASM:
       exit_with_error('WASM_ESM_INTEGRATION is not compatible with WASM2JS')
-    if settings.MAYBE_WASM2JS:
-      exit_with_error('WASM_ESM_INTEGRATION is not compatible with MAYBE_WASM2JS')
     if settings.ABORT_ON_WASM_EXCEPTIONS:
       exit_with_error('WASM_ESM_INTEGRATION is not compatible with ABORT_ON_WASM_EXCEPTIONS')
 
@@ -882,7 +881,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
     settings.WASM2JS = 1
 
   if settings.WASM2JS:
-    settings.MAYBE_WASM2JS = 1
     # Wasm bigint doesn't make sense with wasm2js, since it controls how the
     # wasm and JS interact.
     if user_settings.get('WASM_BIGINT') and settings.WASM_BIGINT:
@@ -1048,10 +1046,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
     settings.AUTODEBUG = 1
 
   # Use settings
-
-  if settings.DEBUG_LEVEL > 1 and options.use_closure_compiler:
-    diagnostics.warning('emcc', 'disabling closure because debug info was requested')
-    options.use_closure_compiler = False
 
   if settings.WASM == 2 and settings.SINGLE_FILE:
     exit_with_error('cannot have both WASM=2 and SINGLE_FILE enabled at the same time')
@@ -1267,15 +1261,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
                           settings.MIN_SAFARI_VERSION < 140000 or
                           settings.MIN_NODE_VERSION < 160000)
 
-  # https://caniuse.com/class: FF:45 CHROME:49 SAFARI:9
-  supports_es6_classes = (settings.MIN_FIREFOX_VERSION >= 45 and
-                          settings.MIN_CHROME_VERSION >= 49 and
-                          settings.MIN_SAFARI_VERSION >= 90000)
-
-  if not settings.DISABLE_EXCEPTION_CATCHING and settings.EXCEPTION_STACK_TRACES and not supports_es6_classes:
-    diagnostics.warning('transpile', '-sEXCEPTION_STACK_TRACES requires an engine that support ES6 classes.')
-    settings.EXCEPTION_STACK_TRACES = 0
-
   if settings.STB_IMAGE:
     settings.EXPORTED_FUNCTIONS += ['_stbi_load', '_stbi_load_from_memory', '_stbi_image_free']
 
@@ -1397,7 +1382,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
   if settings.SAFE_HEAP:
     # SAFE_HEAP check includes calling emscripten_get_sbrk_ptr() from wasm
     settings.REQUIRED_EXPORTS += ['emscripten_get_sbrk_ptr', 'emscripten_stack_get_base']
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$unSign']
 
   if not settings.DECLARE_ASM_MODULE_EXPORTS:
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$exportWasmSymbols']
@@ -1752,9 +1736,9 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
     # need to be able to call these explicitly.
     settings.REQUIRED_EXPORTS += ['__funcs_on_exit']
 
-  # The worker code in src/postamble.js depends on malloc/free being exported
+  # The worker code in src/postamble.js depends on realloc
   if settings.BUILD_AS_WORKER:
-    settings.REQUIRED_EXPORTS += ['malloc', 'free']
+    settings.REQUIRED_EXPORTS += ['realloc']
 
   if not settings.DISABLE_EXCEPTION_CATCHING:
     settings.REQUIRED_EXPORTS += [
@@ -2071,9 +2055,10 @@ def run_embind_gen(options, wasm_target, js_syms, extra_settings):
   if settings.WASM_EXCEPTIONS:
     node_args += shared.node_exception_flags(config.NODE_JS)
   # Run the generated JS file with the proper flags to generate the TypeScript bindings.
-  out = shared.run_js_tool(outfile_js, [], node_args, stdout=PIPE)
+  output_file = in_temp('embind_generated_output.js')
+  shared.run_js_tool(outfile_js, [output_file], node_args)
   settings.restore(original_settings)
-  return out
+  return read_file(output_file)
 
 
 @ToolchainProfiler.profile_block('emit tsd')
@@ -2259,6 +2244,8 @@ def phase_final_emitting(options, target, js_target, wasm_target):
 
   target_basename = unsuffixed_basename(target)
 
+  utils.convert_line_endings_in_file(js_target, options.output_eol)
+
   # If we were asked to also generate HTML, do that
   if options.oformat == OFormat.HTML:
     generate_html(target, options, js_target, target_basename,
@@ -2269,9 +2256,6 @@ def phase_final_emitting(options, target, js_target, wasm_target):
   if settings.SPLIT_MODULE:
     diagnostics.warning('experimental', 'the SPLIT_MODULE setting is experimental and subject to change')
     do_split_module(wasm_target, options)
-
-  if not settings.SINGLE_FILE:
-    utils.convert_line_endings_in_file(js_target, options.output_eol)
 
   if options.executable:
     make_js_executable(js_target)

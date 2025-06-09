@@ -4274,7 +4274,7 @@ Module["preRun"] = () => {
     self.assertGreater(just_fallback, td_without_fallback)
 
   def test_small_js_flags(self):
-    self.btest('browser_test_hello_world.c', '0', emcc_args=['-O3', '--closure=1', '-sINCOMING_MODULE_JS_API=[]', '-sENVIRONMENT=web'])
+    self.btest('browser_test_hello_world.c', '0', emcc_args=['-O3', '--closure=1', '-sINCOMING_MODULE_JS_API=[]', '-sENVIRONMENT=web', '--output-eol=linux'])
     # Check an absolute js code size, with some slack.
     size = os.path.getsize('test.js')
     print('size:', size)
@@ -4644,6 +4644,10 @@ Module["preRun"] = () => {
   def test_fetch_persist(self):
     create_file('myfile.dat', 'hello world\n')
     self.btest_exit('fetch/test_fetch_persist.c', emcc_args=['-sFETCH'])
+
+  @no_firefox('https://github.com/emscripten-core/emscripten/issues/16868')
+  def test_fetch_redirect(self):
+    self.btest_exit('fetch/test_fetch_redirect.c', emcc_args=['-sFETCH', '-pthread', '-sPROXY_TO_PTHREAD'])
 
   @parameterized({
     '': ([],),

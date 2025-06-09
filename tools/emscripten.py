@@ -811,6 +811,8 @@ def add_standard_wasm_imports(send_items_map):
       'store_val_i64',
       'store_val_f32',
       'store_val_f64',
+      'memory_grow_pre',
+      'memory_grow_post',
     ]
 
   if settings.SPLIT_MODULE and settings.ASYNCIFY == 2:
@@ -901,10 +903,6 @@ def create_reexports(metadata):
         wasm_exports.append('_main')
   exports += f"export {{ {', '.join(wasm_exports)} }};\n\n"
   return exports
-
-
-def can_use_await():
-  return settings.MODULARIZE
 
 
 def install_debug_wrapper(sym):
@@ -1044,7 +1042,7 @@ def create_module(metadata, function_exports, global_exports, tag_exports,librar
       if settings.MODULARIZE == 'instance':
         module.append("var wasmExports;\n")
       elif settings.WASM_ASYNC_COMPILATION:
-        if can_use_await():
+        if settings.MODULARIZE:
           # In modularize mode the generated code is within a factory function.
           # This magic string gets replaced by `await createWasm`.  It needed to allow
           # closure and acorn to process the module without seeing this as a top-level
@@ -1095,6 +1093,7 @@ def create_pointer_conversion_wrappers(metadata):
     'emscripten_builtin_calloc': 'ppp',
     'wasmfs_create_node_backend': 'pp',
     'malloc': 'pp',
+    'realloc': 'ppp',
     'calloc': 'ppp',
     'webidl_malloc': 'pp',
     'memalign': 'ppp',
@@ -1165,6 +1164,7 @@ def create_pointer_conversion_wrappers(metadata):
     'emscripten_proxy_finish': '_p',
     'emscripten_proxy_execute_queue': '_p',
     '_emval_coro_resume': '_pp',
+    '_emval_coro_reject': '_pp',
     'emscripten_main_runtime_thread_id': 'p',
     '_emscripten_set_offscreencanvas_size_on_thread': '_pp__',
     'fileno': '_p',

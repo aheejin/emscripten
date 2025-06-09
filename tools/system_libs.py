@@ -992,6 +992,19 @@ class libnoexit(Library):
   src_files = ['atexit_dummy.c']
 
 
+class llvmlibc(DebugLibrary, AsanInstrumentedLibrary, MTLibrary):
+  name = 'libllvmlibc'
+  never_force = True
+  includes = ['system/lib/llvm-libc']
+  cflags = ['-DLIBC_NAMESPACE=__llvm_libc', '-DLIBC_COPT_PUBLIC_PACKAGING']
+
+  def get_files(self):
+    files = glob_in_path('system/lib/llvm-libc/src/string', '*.cpp')
+    files += glob_in_path('system/lib/llvm-libc/src/errno', '*.cpp')
+    files += glob_in_path('system/lib/llvm-libc/src/__support/StringUtil', '*.cpp')
+    return files
+
+
 class libc(MuslInternalLibrary,
            DebugLibrary,
            AsanInstrumentedLibrary,
@@ -1933,7 +1946,7 @@ class libwebgpu_cpp(MTLibrary):
   src_files = ['webgpu_cpp.cpp']
 
 
-class libembind(Library):
+class libembind(MTLibrary):
   name = 'libembind'
   never_force = True
 
@@ -2427,7 +2440,6 @@ def get_libs_to_link(options):
 
 
 def calculate(options):
-
   libs_to_link = get_libs_to_link(options)
 
   # When LINKABLE is set the entire link command line is wrapped in --whole-archive by

@@ -18,8 +18,15 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-4.0.10 (in development)
+4.0.11 (in development)
 ----------------------
+
+
+4.0.10 - 06/07/25
+------------------ Emscripten ports now install pkg-config `.pc` files so they will show up, for
+  example, when you run `pkg-config --list-all` or `pkg-config --cflags
+  <portname>`. Bare in mind that the correct PKG_CONFIG_PATH needs to be set for
+  this to work.  One way to do this is to run `emmake pkg-config`. (#24426)
 - libcxx, libcxxabi, and compiler-rt were updated to LLVM 20.1.4. (#24346 and
   #24357)
 - Emscripten will not longer generate trampoline functions for Wasm exports
@@ -36,6 +43,20 @@ See docs/process.md for more on how version tagging works.
   nightly release](https://github.com/google/dawn/releases) and file feedback
   with Dawn. (Emdawnwebgpu is maintained as part of Dawn, the open-source
   WebGPU implementation used by Chromium, but it is still cross-browser.)
+- The `-sMAYBE_WASM2JS` setting was removed.  This was originally added for
+  debugging purposes, and we now have `-sWASM=2` for folks that want to be able
+  to fall back to js if wasm fails. (#24176)
+- The field `responseUrl` is added to `emscripten_fetch_t`. This is notably
+  usable for obtaining resolved URL, in line with JS `XMLHttpRequest.responseURL`
+  field. (#24414)
+- `emscripten_fetch_get_response_headers_length` now excludes the trailing
+  null character from the length calculation to match the documented behaviour.
+  (#24486)
+- `--closure=1` can now be used while preserving readable function names with
+  `-g2` or `-g`.
+- Functions `UTF8ToString`, `UTF16ToString` and `UTF32ToString` take a new
+  optional `ignoreNul` parameter that allows to ignore the NUL characters and
+  read the entire string up to the specific byte length. (#24487)
 
 4.0.9 - 05/19/25
 ----------------
