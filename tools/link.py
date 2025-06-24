@@ -488,6 +488,7 @@ def make_js_executable(script):
 
 
 def do_split_module(wasm_file, options):
+  mylog.log_move(wasm_file, wasm_file + '.orig')
   os.replace(wasm_file, wasm_file + '.orig')
   args = ['--instrument']
   if options.requested_debug:
@@ -2959,6 +2960,7 @@ def move_file(src, dst):
     return
   if dst == os.devnull:
     return
+  mylog.log_move(src, dst)
   shutil.move(src, dst)
 
 
