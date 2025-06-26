@@ -33,6 +33,7 @@ from . import system_libs
 from . import utils
 from . import webassembly
 from . import extract_metadata
+from . import mylog
 from .cmdline import OFormat
 from .utils import read_file, write_file, delete_file
 from .utils import removeprefix, exit_with_error
@@ -494,7 +495,7 @@ def do_split_module(wasm_file, options):
   if options.requested_debug:
     # Tell wasm-split to preserve function names.
     args += ['-g']
-  building.run_binaryen_command('wasm-split', wasm_file + '.orig', outfile=wasm_file, args=args)
+  building.run_binaryen_command('wasm-split', wasm_file + '.orig', outfile=wasm_file, args=args, debug=True)
 
 
 def get_worker_js_suffix():
