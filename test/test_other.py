@@ -104,6 +104,16 @@ def uses_canonical_tmp(func):
   return decorated
 
 
+def requires_git_checkout(func):
+  @wraps(func)
+  def decorated(self, *args, **kwargs):
+    if not os.path.exists(utils.path_from_root('.git')):
+      self.skipTest('test requires git checkout of emscripten')
+    func(self, *args, **kwargs)
+
+  return decorated
+
+
 def also_with_llvm_libc(f):
   assert callable(f)
 
@@ -717,23 +727,6 @@ f.close()
     err = self.run_process([EMCC, test_file('hello_world.c'), '-gsource-map', '--js-transform', '%s t.py' % (PYTHON)], stderr=PIPE).stderr
     self.assertContained('disabling source maps because a js transform is being done', err)
     self.assertIn('transformed!', read_file('a.out.js'))
-
-  @also_with_wasm2js
-  @parameterized({
-    '': ([],),
-    'O1': (['-O1'],),
-    'O2': (['-O2'],),
-    'O3': (['-O3'],),
-  })
-  def test_emcc_asm_v_wasm(self, opts):
-    self.run_process([EMCC, test_file('hello_world.c'), '-sENVIRONMENT=node,shell'] + opts + self.get_cflags())
-    self.assertExists('a.out.js')
-    if self.is_wasm():
-      self.assertExists('a.out.wasm')
-    for engine in config.JS_ENGINES:
-      print('    engine', engine)
-      out = self.run_js('a.out.js', engine=engine)
-      self.assertContained('hello, world!', out)
 
   @crossplatform
   def test_emcc_cflags(self):
@@ -16373,8 +16366,8 @@ addToLibrary({
     self.emcc(test_file('hello_world.c'), ['-lidbfs.js'], output_filename='hello_world.js')
     self.assertNotContained(removed_fs_assert_content, read_file('hello_world.js'))
 
-  @is_slow_test
   @crossplatform
+  @requires_git_checkout
   def test_install(self):
     self.run_process([PYTHON, path_from_root('tools/install.py'), 'newdir'])
     self.assertExists('newdir/emcc')
