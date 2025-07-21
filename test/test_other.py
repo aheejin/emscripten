@@ -3156,6 +3156,7 @@ More info: https://emscripten.org
       (['-g2', '-gsource-map'], False, True, True),
       (['-gsplit-dwarf', '-gsource-map'], True, True, True),
       (['-gsource-map', '-sERROR_ON_WASM_CHANGES_AFTER_LINK'], False, True, True),
+      (['-Oz', '-gsource-map'], False, True, True),
     ]:
       print(flags, expect_dwarf, expect_sourcemap, expect_names)
       self.emcc(test_file(source_file), flags, js_file)
@@ -9190,21 +9191,24 @@ int main() {
   # test debug info and debuggability of JS output
   @crossplatform
   def test_binaryen_debug(self):
-    for args, expect_emit_text, expect_clean_js, expect_whitespace_js, expect_closured in [
-        (['-O0'], False, False, True, False),
-        (['-O0', '-g1'], False, False, True, False),
-        (['-O0', '-g2'], False, False, True, False), # in -g2+, we emit -g to asm2wasm so function names are saved
-        (['-O0', '-g'], True, False, True, False),
-        (['-O0', '--profiling-funcs'], False, False, True, False),
-        (['-O1'],        False, False, True, False),
-        (['-O2'],        False, True,  False, False),
-        (['-O2', '-gz'], False, True,  False, False), # -gz means debug compression, it should not enable debugging
-        (['-O2', '-g1'], False, False, True, False),
-        (['-O2', '-g'],  True,  False, True, False),
-        (['-O2', '--closure=1'],         False, True, False, True),
-        (['-O2', '--closure=1', '-g1'],  False, True, True,  True),
+    for args, expect_clean_js, expect_whitespace_js, expect_closured in [
+        (['-O0'], False, True, False),
+        (['-O0', '-g1'], False, True, False),
+        (['-O0', '-g2'], False, True, False), # in -g2+, we emit -g to asm2wasm so function names are saved
+        (['-O0', '-g'], False, True, False),
+        (['-O0', '--profiling-funcs'], False, True, False),
+        (['-O0', '-gline-tables-only'], False, True, False),
+        (['-O1'], False, True, False),
+        (['-O3'], True, False, False),
+        (['-Oz', '-gsource-map'], False, True, False), # TODO: fix this (#20462)
+        (['-O2'], True,  False, False),
+        (['-O2', '-gz'], True,  False, False), # -gz means debug compression, it should not enable debugging
+        (['-O2', '-g1'], False, True, False),
+        (['-O2', '-g'],  False, True, False),
+        (['-O2', '--closure=1'], True, False, True),
+        (['-O2', '--closure=1', '-g1'], True, True,  True),
       ]:
-      print(args, expect_emit_text, expect_clean_js, expect_whitespace_js, expect_closured)
+      print(args, expect_clean_js, expect_whitespace_js, expect_closured)
       delete_file('a.out.wat')
       cmd = [EMCC, test_file('hello_world.c')] + args
       print(' '.join(cmd))
@@ -10945,6 +10949,24 @@ int main() {
     check_func_info('test_dwarf.wasm', out_to_js_call_addr, 'foo')
     # The name section will not show bar, as it's inlined into main
     check_func_info('test_dwarf.wasm', unreachable_addr, '__original_main')
+
+    # 2. Test symbol map
+    self.run_process([EMCC, test_file('core/test_dwarf.c'),
+                      '-O1', '--emit-symbol-map', '-o', 'test_dwarf.js'])
+    self.assertExists('test_dwarf.js.symbols')
+
+    def check_symbolmap_info(address, func):
+      out = self.run_process([emsymbolizer, '--source=symbolmap', '-f', 'test_dwarf.js.symbols', 'test_dwarf.wasm', address], stdout=PIPE).stdout
+      self.assertIn(func, out)
+
+    # Same tests as name section above.
+    # Address of out_to_js(0) within foo(), uninlined
+    out_to_js_call_addr = self.get_instr_addr('call\t0', 'test_dwarf.wasm')
+    # Address of __builtin_trap() within bar(), inlined into main()
+    unreachable_addr = self.get_instr_addr('unreachable', 'test_dwarf.wasm')
+    check_symbolmap_info(out_to_js_call_addr, 'foo')
+    # The name section will not show bar, as it's inlined into main
+    check_symbolmap_info(unreachable_addr, '__original_main')
 
   def test_separate_dwarf(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-g'])
@@ -15039,6 +15061,8 @@ int main() {
 
   @with_all_fs
   def test_std_filesystem(self):
+    if (WINDOWS or MACOS) and self.get_setting('NODERAWFS'):
+      self.skipTest('Rawfs directory removal works only on Linux')
     self.do_other_test('test_std_filesystem.cpp')
 
   def test_strict_js_closure(self):
