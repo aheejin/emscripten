@@ -3356,6 +3356,8 @@ More info: https://emscripten.org
     'o2_mem_growth': ['-O2', '-sALLOW_MEMORY_GROWTH', test_file('embind/isMemoryGrowthEnabled=true.cpp')],
     'o2_closure': ['-O2', '--closure=1', '--closure-args', '--externs ' + shlex.quote(test_file('embind/underscore-externs.js')), '-sASSERTIONS=1'],
     'strict_js': ['-sSTRICT_JS'],
+    # DYNCALLS tests the legacy native function API (ASYNCIFY implicitly enables DYNCALLS)
+    'dyncalls': ['-sDYNCALLS=1'],
   })
   def test_embind(self, *extra_args):
     if '-sMEMORY64' in extra_args:
@@ -7243,16 +7245,19 @@ m();
     self.assertContained('error: customizing EXPORT_NAME requires that the HTML be customized to use that name', err)
 
   def test_modularize_sync_compilation(self):
+    # Verify that, even when WASM_ASYNC_COMPILATION is disabled, the module factory
+    # still returns a promise.   This behaviour was changed in #24727.
     create_file('post.js', r'''
 console.log('before');
 var result = Module();
 // It should be an object.
 console.log('typeof result: ' + typeof result);
-// And it should have the exports that Module has, showing it is Module in fact.
-console.log('typeof _main: ' + typeof result._main);
-// And it should not be a Promise.
 console.log('typeof result.then: ' + typeof result.then);
-console.log('after');
+result.then((inst) => {
+  // And it should have the exports that Module has, showing it is Module in fact.
+  console.log('typeof inst._main: ' + typeof inst._main);
+  console.log('after');
+});
 ''')
     self.run_process([EMCC, test_file('hello_world.c'),
                       '-sMODULARIZE',
@@ -7262,8 +7267,8 @@ console.log('after');
 before
 hello, world!
 typeof result: object
-typeof _main: function
-typeof result.then: undefined
+typeof result.then: function
+typeof inst._main: function
 after
 ''', self.run_js('a.out.js'))
 
@@ -9377,8 +9382,7 @@ int main() {
     'ctors1':    (['-O2', '-sEVAL_CTORS'],),
     'ctors2':    (['-O2', '-sEVAL_CTORS=2'],),
     'wasmfs':    (['-O2', '-sWASMFS'],),
-    # Disabled until https://github.com/WebAssembly/binaryen/pull/7748 lands
-    #'lto':       (['-Oz', '-flto'],),
+    'lto':       (['-Oz', '-flto'],),
   })
   def test_codesize_cxx(self, args):
     # do not check functions in this test as there are a lot of libc++ functions
@@ -15777,6 +15781,12 @@ addToLibrary({
     create_file('b.cpp', '#include <emscripten/bind.h>')
     self.run_process([EMXX, '-std=c++23', '-lembind', 'a.cpp', 'b.cpp'])
 
+  def test_embind_no_exceptions(self):
+    # Test disabling exceptions and redefining try/catch with preprocessor
+    # macros.
+    create_file('a.cpp', '#define try\n#define catch if (0)\n#include <emscripten/bind.h>')
+    self.run_process([EMXX, '-fno-exceptions', '-std=c++23', '-lembind', 'a.cpp'])
+
   def test_no_pthread(self):
     self.do_runf('hello_world.c', cflags=['-pthread', '-no-pthread'])
     self.assertExists('hello_world.js')
@@ -16396,3 +16406,6 @@ addToLibrary({
 
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sTEXTDECODER=3'])
     self.assertContained('#error "TEXTDECODER must be either 1 or 2"', err)
+
+  def test_reallocarray(self):
+    self.do_other_test('test_reallocarray.c')

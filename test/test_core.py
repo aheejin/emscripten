@@ -4495,12 +4495,16 @@ res64 - external 64\n''', header='''\
     ''', force_c=True)
 
   @parameterized({
-    '': (False,),
-    'rtld_local': (True,),
+    '': [False],
+    'rtld_local': [True],
+  })
+  @parameterized({
+    '': [[]],
+    'nobigint': [['-sWASM_BIGINT=0']],
   })
   @needs_dylink
-  @also_with_wasm_bigint
-  def test_dylink_i64_invoke(self, rtld_local):
+  def test_dylink_i64_invoke(self, rtld_local, args):
+    self.cflags += args
     if rtld_local:
       self.set_setting('NO_AUTOLOAD_DYLIBS')
       self.cflags.append('-DUSE_DLOPEN')
@@ -8805,7 +8809,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.cflags = args
     self.set_setting('MINIMAL_RUNTIME')
     self.maybe_closure()
-    self.do_runf('small_hello_world.c', 'hello')
+    self.do_runf('small_hello_world.c', 'hello!')
 
   # Test that printf() works in MINIMAL_RUNTIME=1
   @no_wasmfs('https://github.com/emscripten-core/emscripten/issues/16816')
