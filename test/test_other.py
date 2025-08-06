@@ -14,6 +14,7 @@ import itertools
 import json
 from math import inf
 import os
+import random
 import re
 import select
 import shlex
@@ -39,7 +40,7 @@ from common import compiler_for, EMBUILDER, requires_v8, requires_node, requires
 from common import requires_wasm_eh, crossplatform, with_all_eh_sjlj, with_all_sjlj, requires_jspi
 from common import also_with_standalone_wasm, also_with_wasm2js, also_with_noderawfs
 from common import also_with_modularize, also_with_wasmfs, with_all_fs
-from common import also_with_minimal_runtime, also_with_wasm_bigint, also_with_wasm64, also_with_asan, flaky
+from common import also_with_minimal_runtime, also_without_bigint, also_with_wasm64, also_with_asan, flaky
 from common import EMTEST_BUILD_VERBOSE, PYTHON, WEBIDL_BINDER, EMCMAKE, EMCONFIGURE
 from common import requires_network, parameterize, copytree
 from tools import shared, building, utils, response_file, cache
@@ -1649,6 +1650,22 @@ int f() {
       main();
     ''')
     self.assertContained('libf1\nlibf2\n', self.run_js('main.mjs'))
+
+  def test_minimal_runtime_errors(self):
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-o', 'out.html', '-sMINIMAL_RUNTIME_STREAMING_WASM_COMPILATION'])
+    self.assertContained('emcc: error: MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION requires MINIMAL_RUNTIME', err)
+
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-o', 'our.html', '-sMINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION'])
+    self.assertContained('emcc: error: MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION requires MINIMAL_RUNTIME', err)
+
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sMINIMAL_RUNTIME', '-sMINIMAL_RUNTIME_STREAMING_WASM_COMPILATION'])
+    self.assertContained('emcc: error: MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION is only compatible with html output', err)
+
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sMINIMAL_RUNTIME', '-sMINIMAL_RUNTIME_STREAMING_WASM_COMPILATION', '-oout.html', '-sSINGLE_FILE'])
+    self.assertContained('emcc: error: MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION is not compatible with SINGLE_FILE', err)
+
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sMINIMAL_RUNTIME', '-sMINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION', '-oout.html', '-sSINGLE_FILE'])
+    self.assertContained('emcc: error: MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION is not compatible with SINGLE_FILE', err)
 
   def test_export_all_and_exported_functions(self):
     # EXPORT_ALL should not export library functions by default.
@@ -6510,7 +6527,7 @@ int main()
   def test_force_stdlibs(self):
     self.do_runf('hello_world.c')
 
-  @also_with_standalone_wasm()
+  @also_with_standalone_wasm(impure=True)
   def test_time(self):
     self.do_other_test('test_time.c')
 
@@ -8512,7 +8529,6 @@ addToLibrary({
     ''')
 
     # Run the test and confirm the output is as expected.
-    self.node_args += shared.node_bigint_flags(self.get_nodejs())
     out = self.run_js('testrun.js')
     self.assertContained('''\
 input = 0xaabbccdd11223344
@@ -10434,7 +10450,7 @@ end
     'runtime_debug': (['-sRUNTIME_DEBUG', '-sEXIT_RUNTIME', '-pthread'],),
   })
   def test_noderawfs_basics(self, args):
-    self.do_runf('fs/test_fopen_write.cpp', 'read 11 bytes. Result: Hello data!', cflags=['-sNODERAWFS'] + args)
+    self.do_runf('fs/test_fopen_write.c', 'read 11 bytes. Result: Hello data!', cflags=['-sNODERAWFS'] + args)
 
     # NODERAWFS should directly write on OS file system
     self.assertEqual("Hello data!", read_file('hello_file.txt'))
@@ -11290,6 +11306,15 @@ T6:(else) !ASSERTIONS""", output)
     ret = self.run_js('workerLoader.js')
     self.assertContained('hello, world!\ndone\n', ret)
 
+  @crossplatform
+  def test_html_preprocess_error(self):
+    create_file('shell.html', '''
+      #error this is an error
+      {{{ SCRIPT }}}
+    ''')
+    err = self.expect_fail([EMCC, '-o', 'out.html', test_file('hello_world.c'), '--shell-file=shell.html'])
+    self.assertContained('error: shell.html:2: #error this is an error', err)
+
   @no_windows('node system() does not seem to work, see https://github.com/emscripten-core/emscripten/pull/10547')
   @requires_node
   def test_system_node_js(self):
@@ -11436,7 +11461,7 @@ _d
     self.assertContained('[asyncify] i can', out)
 
   def test_asyncify_stack_overflow(self):
-    self.cflags = ['-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=4', '-sASYNCIFY_DEBUG=2']
+    self.cflags += ['-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=4', '-sASYNCIFY_DEBUG=2']
 
     # The unreachable error on small stack sizes is not super-helpful. Try at
     # least to hint at increasing the stack size.
@@ -12371,25 +12396,52 @@ int main(void) {
     self.set_setting('LOAD_SOURCE_MAP')
     self.do_runf('other/test_offset_converter.c', 'ok', cflags=['-gsource-map', '-DUSE_SOURCE_MAP'] + args)
 
+  @crossplatform
   @no_windows('ptys and select are not available on windows')
-  def test_build_error_color(self):
+  def test_color_diagnostics(self):
     create_file('src.c', 'int main() {')
     returncode, output = self.run_on_pty([EMCC, 'src.c'])
     self.assertNotEqual(returncode, 0)
     self.assertIn(b"\x1b[1msrc.c:1:13: \x1b[0m\x1b[0;1;31merror: \x1b[0m\x1b[1mexpected '}'\x1b[0m", output)
-    self.assertIn(b"\x1b[31merror: ", output)
+    # Verify that emcc errors show up as red and bold
+    self.assertIn(b"emcc: \x1b[31m\x1b[1m", output)
 
+  @crossplatform
   @parameterized({
-    'fno_diagnostics_color': ['-fno-diagnostics-color'],
-    'fdiagnostics_color_never': ['-fdiagnostics-color=never'],
+    '': ['-fno-diagnostics-color'],
+    'never': ['-fdiagnostics-color=never'],
   })
   @no_windows('ptys and select are not available on windows')
-  def test_pty_no_color(self, flag):
+  def test_color_diagnostics_disable(self, flag):
     create_file('src.c', 'int main() {')
 
     returncode, output = self.run_on_pty([EMCC, flag, 'src.c'])
     self.assertNotEqual(returncode, 0)
     self.assertNotIn(b'\x1b', output)
+
+  @crossplatform
+  #  There are 3 different ways for force color output in clang
+  @parameterized({
+    '': ['-fcolor-diagnostics'],
+    'alt': ['-fdiagnostics-color'],
+    'always': ['-fdiagnostics-color=always'],
+  })
+  def test_color_diagnostics_force(self, flag):
+    create_file('src.c', 'int main() {')
+    # -fansi-escape-codes is needed here to make this test work on windows, which doesn't
+    # use ansi codes by default
+    output = self.expect_fail([EMCC, '-fansi-escape-codes', flag, 'src.c'])
+    self.assertIn("\x1b[1msrc.c:1:13: \x1b[0m\x1b[0;1;31merror: \x1b[0m\x1b[1mexpected '}'\x1b[0m", output)
+    # Verify that emcc errors show up as red and bold
+    self.assertIn('emcc: \x1b[31m\x1b[1m', output)
+
+    if WINDOWS:
+      # Also test without -fansi-escape-codes on windows.
+      # In those mode the code will use kernel calls such as SetConsoleTextAttribute to
+      # change the output color.  We cannot detect this in the output, but we can at least
+      # get coverage of the code path in the diagnositics.py.
+      output = self.expect_fail([EMCC, flag, 'src.c'])
+      self.assertNotIn('\x1b', output)
 
   def test_sanitizer_color(self):
     create_file('src.c', '''
@@ -13490,7 +13542,7 @@ exec "$@"
     for arg in ('-sMAIN_MODULE', '-sSIDE_MODULE', '-sRELOCATABLE'):
       print(arg)
       err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sWASM=0', arg])
-      self.assertContained('WASM2JS is not compatible with relocatable output', err)
+      self.assertContained('emcc: error: WASM2JS is not compatible with RELOCATABLE', err)
 
   def test_wasm2js_standalone(self):
     self.do_run_in_out_file_test('hello_world.c', cflags=['-sSTANDALONE_WASM', '-sWASM=0'])
@@ -14018,7 +14070,7 @@ kill -9 $$
 
   def test_offset_convertor_plus_wasm2js(self):
     err = self.expect_fail([EMCC, '-sUSE_OFFSET_CONVERTER', '-sWASM=0', test_file('hello_world.c')])
-    self.assertContained('wasm2js is not compatible with USE_OFFSET_CONVERTER', err)
+    self.assertContained('emcc: error: WASM2JS is not compatible with USE_OFFSET_CONVERTER (see #14630)', err)
 
   def test_standard_library_mapping(self):
     # Test the `-l` flags on the command line get mapped the correct libraries variant
@@ -14900,7 +14952,7 @@ int main() {
     err = self.expect_fail([EMCC, '-fsanitize=cfi', '-flto', test_file('hello_world.c')])
     self.assertContained('emcc: error: emscripten does not currently support -fsanitize=cfi', err)
 
-  @also_with_wasm_bigint
+  @also_without_bigint
   def test_parseTools(self):
     # Suppress js compiler warnings because we deliberately use legacy parseTools functions
     self.cflags += ['-Wno-js-compiler', '--js-library', test_file('other/test_parseTools.js')]
@@ -15218,7 +15270,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
     base_cmd = [EMCC, test_file('hello_world.c'), '-sSTANDALONE_WASM']
 
     err = self.expect_fail(base_cmd + ['-sMINIMAL_RUNTIME'])
-    self.assertContained('error: MINIMAL_RUNTIME reduces JS size, and is incompatible with STANDALONE_WASM which focuses on ignoring JS anyhow and being 100% wasm', err)
+    self.assertContained('emcc: error: STANDALONE_WASM is not compatible with MINIMAL_RUNTIME', err)
 
     err = self.expect_fail(base_cmd + ['-sMEMORY_GROWTH_GEOMETRIC_CAP=1mb'])
     self.assertContained('error: MEMORY_GROWTH_GEOMETRIC_CAP is not compatible with STANDALONE_WASM', err)
@@ -15319,7 +15371,6 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
   def run_wasi_test_suite_test(self, name):
     if not os.path.exists(path_from_root('test/third_party/wasi-test-suite')):
       self.fail('wasi-testsuite not found; run `git submodule update --init`')
-    self.node_args += shared.node_bigint_flags(self.get_nodejs())
     wasm = path_from_root('test', 'third_party', 'wasi-test-suite', name + '.wasm')
     with open(path_from_root('test', 'third_party', 'wasi-test-suite', name + '.json')) as f:
       config = json.load(f)
@@ -15614,7 +15665,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
   def test_proxy_to_worker(self, args):
     self.do_runf('hello_world.c', cflags=['--proxy-to-worker'] + args)
 
-  @also_with_standalone_wasm()
+  @also_with_standalone_wasm(impure=True)
   def test_console_out(self):
     self.do_other_test('test_console_out.c', regex=True)
 
@@ -16040,6 +16091,20 @@ addToLibrary({
     self.set_setting('FORCE_FILESYSTEM')
     self.do_run_in_out_file_test('fs/test_writev_partial_write.c')
 
+  def test_fs_lzfs(self):
+    # generate data
+    ensure_dir('subdir')
+    create_file('file1.txt', '0123456789' * (1024 * 128))
+    create_file('subdir/file2.txt', '1234567890' * (1024 * 128))
+    random_data = bytearray(random.randint(0, 255) for x in range(1024 * 128 * 10 + 1))
+    random_data[17] = ord('X')
+    create_file('file3.txt', random_data, binary=True)
+
+    # compress in emcc, -sLZ4 tells it to tell the file packager
+    self.do_runf('fs/test_lz4fs.c', cflags=['-sLZ4', '--preload-file', 'file1.txt', '--preload-file', 'subdir/file2.txt', '--preload-file', 'file3.txt'])
+    self.assertEqual(os.path.getsize('file1.txt') + os.path.getsize('subdir/file2.txt') + os.path.getsize('file3.txt'), 3 * 1024 * 128 * 10 + 1)
+    self.assertLess(os.path.getsize('test_lz4fs.data'), (3 * 1024 * 128 * 10) / 2)  # over half is gone
+
   @requires_v8
   @parameterized({
     '': [[]],
@@ -16050,7 +16115,7 @@ addToLibrary({
     # TODO Remove this. Liftoff is currently broken for this test.
     # https://chromium-review.googlesource.com/c/v8/v8/+/5842546
     self.v8_args += ['--no-liftoff']
-    self.cflags = ['-msimd128', '-mfp16', '-sENVIRONMENT=shell'] + opts
+    self.cflags += ['-msimd128', '-mfp16', '-sENVIRONMENT=shell'] + opts
     self.do_runf('test_fp16.c')
 
   def test_embool(self):

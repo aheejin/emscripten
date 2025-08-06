@@ -18,8 +18,29 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-4.0.12 (in development)
+4.0.13 (in development)
 -----------------------
+- The `-sMODULARIZE` setting generates a factory function that must be called
+  before the program is instantiated that run.  However, emscripten previously
+  had very special case where this instantiation would happen automatically
+  (with no parameterization) under certain specific circumstances: When
+  `-sMINIMAL_RUNTIME`, `-sSINGLE_FILE` and `-sMODULARIZE` were used in
+  combination with default html output.  This special case was removed.  If you
+  want to instantiate the module on startup you can still do so by adding a call
+  the factory function in `--extern-post-js`. (#24874)
+- emcc will now error if `MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION` is used
+  when not generating html output.  This was always incompatible but previously
+  ignored. (#24849)
+- emcc will now error if `MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION` or
+  `MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION` are used with `SINGLE_FILE`.
+  These are fundamentally incompatible but were previously ignored. (#24849)
+
+4.0.12 - 08/01/25
+-----------------
+- The `#!` line that emscripten, under some circumstances, will add to the
+  generated JS code no longer injects the `--experimental-wasm-bigint` node
+  flag.  This flag is not needed on recent versions of node, and in fact
+  errors there, so it's not possible to know if it's safe to include. (#24808)
 - In `-sMODULARIZE` mode the factory function will now always return a promise,
   even when `WASM_ASYNC_COMPILATION` is disabled.  This is because emscripten
   has other features that might also return async module creation (e.g. loading
