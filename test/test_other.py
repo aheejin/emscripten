@@ -1667,6 +1667,9 @@ int f() {
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sMINIMAL_RUNTIME', '-sMINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION', '-oout.html', '-sSINGLE_FILE'])
     self.assertContained('emcc: error: MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION is not compatible with SINGLE_FILE', err)
 
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sMINIMAL_RUNTIME', '--preload-file', 'foo'])
+    self.assertContained('emcc: error: MINIMAL_RUNTIME is not compatible with --preload-file', err)
+
   def test_export_all_and_exported_functions(self):
     # EXPORT_ALL should not export library functions by default.
     # This means that to export library function you also need to explicitly
@@ -2850,21 +2853,19 @@ More info: https://emscripten.org
   })
   def test_prepost(self, no_initial_run, run_dep):
     create_file('pre.js', '''
-      var Module = {
-        preRun: () => out('pre-run'),
-        postRun: () => out('post-run')
+      Module = {
+        "preRun": () => out('pre-run'),
+        "postRun": () => out('post-run')
       };
       ''')
 
-    self.run_process([EMCC, test_file('hello_world.c'), '--pre-js', 'pre.js', '-sWASM_ASYNC_COMPILATION=0'])
-    self.assertContained('pre-run\nhello, world!\npost-run\n', self.run_js('a.out.js'))
+    self.do_runf('hello_world.c', 'pre-run\nhello, world!\npost-run\n', cflags=['--pre-js', 'pre.js', '-sWASM_ASYNC_COMPILATION=0'])
 
     # addRunDependency during preRun should prevent main, and post-run from
     # running.
     with open('pre.js', 'a') as f:
-      f.write('Module.preRun = () => { out("add-dep"); addRunDependency(); }\n')
-    self.run_process([EMCC, test_file('hello_world.c'), '--pre-js', 'pre.js', '-sWASM_ASYNC_COMPILATION=0'])
-    output = self.run_js('a.out.js')
+      f.write('Module["preRun"] = () => { out("add-dep"); addRunDependency("dep"); }\n')
+    output = self.do_runf('hello_world.c', cflags=['--pre-js', 'pre.js', '-sRUNTIME_DEBUG', '-sWASM_ASYNC_COMPILATION=0', '-O2', '--closure=1'])
     self.assertContained('add-dep\n', output)
     self.assertNotContained('hello, world!\n', output)
     self.assertNotContained('post-run\n', output)
@@ -2874,21 +2875,20 @@ More info: https://emscripten.org
     if no_initial_run:
       args += ['-sINVOKE_RUN=0']
     if run_dep:
-      create_file('pre.js', 'Module.preRun = () => addRunDependency("test");')
+      create_file('pre.js', 'Module["preRun"] = () => addRunDependency("test");')
       create_file('post.js', 'removeRunDependency("test");')
       args += ['--pre-js', 'pre.js', '--post-js', 'post.js']
 
-    self.run_process([EMCC, test_file('hello_world.c')] + args)
-    output = self.run_js('a.out.js')
+    output = self.do_runf('hello_world.c', cflags=args)
     self.assertContainedIf('hello, world!', output, not no_initial_run)
 
     if no_initial_run:
       # Calling main later should still work, filesystem etc. must be set up.
       print('call main later')
-      src = read_file('a.out.js')
+      src = read_file('hello_world.js')
       src += '\nout("callMain -> " + Module.callMain());\n'
-      create_file('a.out.js', src)
-      self.assertContained('hello, world!\ncallMain -> 0\n', self.run_js('a.out.js'))
+      create_file('hello_world.js', src)
+      self.assertContained('hello, world!\ncallMain -> 0\n', self.run_js('hello_world.js'))
 
   def test_prepost2(self):
     create_file('pre.js', 'Module.preRun = () => out("pre-run");')
@@ -3919,6 +3919,11 @@ More info: https://emscripten.org
     err = self.expect_fail([FILE_PACKAGER, 'test.data', '--js-output=test.data'])
     self.assertContained(MESSAGE, err)
 
+  def test_file_packager_returns_error_if_emcc_and_export_es6(self):
+    MESSAGE = 'error: Can\'t use --export-es6 option together with --from-emcc since the code should be embedded within emcc\'s code'
+    err = self.expect_fail([FILE_PACKAGER, 'test.data', '--export-es6', '--from-emcc'])
+    self.assertContained(MESSAGE, err)
+
   def test_file_packager_embed(self):
     create_file('data.txt', 'hello data')
 
@@ -3944,6 +3949,37 @@ More info: https://emscripten.org
     self.run_process([EMCC, 'test.c', 'data.o', '-sFORCE_FILESYSTEM'])
     output = self.run_js('a.out.js')
     self.assertContained('hello data', output)
+
+  def test_file_packager_export_es6(self):
+    create_file('smth.txt', 'hello data')
+    self.run_process([FILE_PACKAGER, 'test.data', '--export-es6', '--preload', 'smth.txt', '--js-output=dataFileLoader.js'])
+
+    create_file('test.c', '''
+    #include <stdio.h>
+    #include <emscripten.h>
+
+    EMSCRIPTEN_KEEPALIVE int test_fun() {
+      FILE* f = fopen("smth.txt", "r");
+      char buf[64] = {0};
+      int rtn = fread(buf, 1, 64, f);
+      buf[rtn] = '\\0';
+      fclose(f);
+      printf("%s\\n", buf);
+      return 0;
+    }
+    ''')
+    self.run_process([EMCC, 'test.c', '-sFORCE_FILESYSTEM', '-sMODULARIZE', '-sEXPORT_ES6', '-o', 'moduleFile.js'])
+
+    create_file('run.js', '''
+    import loadDataFile from './dataFileLoader.js'
+    import {default as loadModule} from './moduleFile.js'
+
+    var module = await loadModule();
+    await loadDataFile(module);
+    module._test_fun();
+    ''')
+
+    self.assertContained('hello data', self.run_js('run.js'))
 
   @crossplatform
   def test_file_packager_depfile(self):
@@ -3987,10 +4023,7 @@ More info: https://emscripten.org
 
     create_file('post.js', 'MyModule(Module).then(() => console.log("done"));')
 
-    self.run_process([EMCC, 'main.c', '--extern-pre-js=embed.js', '--extern-post-js=post.js', '-sMODULARIZE', '-sEXPORT_NAME=MyModule', '-sFORCE_FILESYSTEM'])
-
-    result = self.run_js('a.out.js')
-    self.assertContained('|hello world|', result)
+    self.do_runf('main.c', '|hello world|', cflags=['--extern-pre-js=embed.js', '--extern-post-js=post.js', '-sMODULARIZE', '-sEXPORT_NAME=MyModule', '-sFORCE_FILESYSTEM'])
 
   def test_preprocess(self):
     # Pass -Werror to prevent regressions such as https://github.com/emscripten-core/emscripten/pull/9661
@@ -7358,6 +7391,7 @@ print(os.environ.get('NM'))
     self.run_process([emmake, PYTHON, test_file('emmake/make.py')])
 
   @crossplatform
+  @no_windows('sdl2-config is a shell script and cannot run on windows')
   def test_sdl2_config(self):
     for args, expected in [
       [['--version'], '2.0.10'],
@@ -12379,23 +12413,6 @@ int main(void) {
                             '-sSTACK_SIZE=128kb', '-sEXIT_RUNTIME',
                             '--profiling-funcs'])
 
-  @parameterized({
-    '': ([],),
-    'sync': (['-sWASM_ASYNC_COMPILATION=0'],),
-  })
-  def test_offset_converter(self, args):
-    self.set_setting('USE_OFFSET_CONVERTER')
-    self.do_runf('other/test_offset_converter.c', 'ok', cflags=['--profiling-funcs'] + args)
-
-  @parameterized({
-    '': ([],),
-    'sync': (['-sWASM_ASYNC_COMPILATION=0'],),
-  })
-  def test_offset_converter_source_map(self, args):
-    self.set_setting('USE_OFFSET_CONVERTER')
-    self.set_setting('LOAD_SOURCE_MAP')
-    self.do_runf('other/test_offset_converter.c', 'ok', cflags=['-gsource-map', '-DUSE_SOURCE_MAP'] + args)
-
   @crossplatform
   @no_windows('ptys and select are not available on windows')
   def test_color_diagnostics(self):
@@ -14068,10 +14085,6 @@ kill -9 $$
     err = self.expect_fail([EMCC, '-sEXPORT_NAME=foo bar', test_file('hello_world.c')])
     self.assertContained('error: EXPORT_NAME is not a valid JS identifier: `foo bar`', err)
 
-  def test_offset_convertor_plus_wasm2js(self):
-    err = self.expect_fail([EMCC, '-sUSE_OFFSET_CONVERTER', '-sWASM=0', test_file('hello_world.c')])
-    self.assertContained('emcc: error: WASM2JS is not compatible with USE_OFFSET_CONVERTER (see #14630)', err)
-
   def test_standard_library_mapping(self):
     # Test the `-l` flags on the command line get mapped the correct libraries variant
     libs = ['-lc', '-lcompiler_rt', '-lmalloc']
@@ -14839,6 +14852,12 @@ int main() {
   def test_wasm_worker_trusted_types(self):
     self.do_run_in_out_file_test('wasm_worker/hello_wasm_worker.c', cflags=['-sWASM_WORKERS', '-sTRUSTED_TYPES'])
 
+  def test_wasm_worker_export_es6(self):
+    self.do_run_in_out_file_test('wasm_worker/hello_wasm_worker.c', cflags=['-sWASM_WORKERS',
+                                                                            '-sEXPORT_ES6',
+                                                                            '--extern-post-js',
+                                                                            test_file('modularize_post_js.js')])
+
   def test_wasm_worker_terminate(self):
     self.do_runf('wasm_worker/terminate_wasm_worker.c', cflags=['-sWASM_WORKERS'])
 
@@ -15192,8 +15211,8 @@ out.js
     self.assertTextDataIdentical(expected, response)
 
   def test_min_browser_version(self):
-    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Wno-transpile', '-Werror', '-sWASM_BIGINT', '-sMIN_SAFARI_VERSION=120000'])
-    self.assertContained('emcc: error: MIN_SAFARI_VERSION=120000 is not compatible with WASM_BIGINT (150000 or above required)', err)
+    err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Wno-transpile', '-Werror', '-sWASM_BIGINT', '-sMIN_SAFARI_VERSION=130000'])
+    self.assertContained('emcc: error: MIN_SAFARI_VERSION=130000 is not compatible with WASM_BIGINT (150000 or above required)', err)
 
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '-Wno-transpile', '-Werror', '-pthread', '-sMIN_CHROME_VERSION=73'])
     self.assertContained('emcc: error: MIN_CHROME_VERSION=73 is not compatible with pthreads (74 or above required)', err)
@@ -15207,7 +15226,7 @@ out.js
     self.assertNotContained('--signext-lowering', err)
 
     # Specifying an older browser version should trigger the lowering pass
-    err = self.run_process(cmd + ['-sMIN_SAFARI_VERSION=120000'], stderr=subprocess.PIPE).stderr
+    err = self.run_process(cmd + ['-sMIN_SAFARI_VERSION=120200'], stderr=subprocess.PIPE).stderr
     self.assertContained('--signext-lowering', err)
     err = self.run_process(cmd + ['-sMIN_FIREFOX_VERSION=61'], stderr=subprocess.PIPE).stderr
     self.assertContained('--signext-lowering', err)
@@ -15596,10 +15615,11 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
 
   @parameterized({
     '': ([],),
+    'lz4': (['-sLZ4'],),
     'pthread': (['-g', '-pthread', '-Wno-experimental', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
   })
   def test_preload_module(self, args):
-    if args:
+    if '-pthread' in args:
       self.setup_node_pthreads()
     # TODO(sbc): This test is copyied from test_browser.py.  Perhaps find a better way to
     # share code between them.
@@ -15649,7 +15669,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
       }
     ''')
     expected = 'done\n'
-    if args:
+    if '-pthread' in args:
       expected = "sharedModules: { '/library.so': Module [WebAssembly.Module] {} }\ndone\n"
     self.do_runf('main.c', expected, cflags=['-sMAIN_MODULE=2', '--preload-file', 'tmp.so@library.so', '--use-preload-plugins'] + args)
 
@@ -15956,7 +15976,7 @@ addToLibrary({
 
   def test_browser_too_old(self):
     err = self.expect_fail([EMCC, test_file('hello_world.c'), '-sMIN_CHROME_VERSION=10'])
-    self.assertContained('emcc: error: MIN_CHROME_VERSION older than 55 is not supported', err)
+    self.assertContained('emcc: error: MIN_CHROME_VERSION older than 70 is not supported', err)
 
   def test_js_only_settings(self):
     err = self.run_process([EMCC, test_file('hello_world.c'), '-o', 'foo.wasm', '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=emscripten_get_heap_max'], stderr=PIPE).stderr
@@ -16474,3 +16494,21 @@ addToLibrary({
 
   def test_reallocarray(self):
     self.do_other_test('test_reallocarray.c')
+
+  def test_create_preloaded_file(self):
+    # Test that the FS.createPreloadedFile API works
+    create_file('post.js', "FS.createPreloadedFile('/', 'someotherfile.txt', 'somefile.txt', true, false);")
+    create_file('somefile.txt', 'hello')
+    create_file('main.c', r'''
+      #include <stdio.h>
+      #include <assert.h>
+      #include <sys/stat.h>
+
+      int main() {
+        struct stat buf;
+        int rtn = stat("someotherfile.txt", &buf);
+        assert(rtn == 0);
+        printf("done\n");
+        return 0;
+      }''')
+    self.do_runf('main.c', 'done\n', cflags=['-sFORCE_FILESYSTEM', '--post-js=post.js'])

@@ -683,7 +683,7 @@ def also_with_modularize(f):
   @wraps(f)
   def metafunc(self, modularize, *args, **kwargs):
     if modularize:
-      if '-sWASM_ESM_INTEGRATION':
+      if self.get_setting('WASM_ESM_INTEGRATION'):
         self.skipTest('also_with_modularize is not compatible with WASM_ESM_INTEGRATION')
       self.cflags += ['--extern-post-js', test_file('modularize_post_js.js'), '-sMODULARIZE']
     f(self, *args, **kwargs)
@@ -1995,7 +1995,10 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       # TODO once standalone wasm support is more stable, apply use_all_engines
       # like with js engines, but for now as we bring it up, test in all of them
       if not self.wasm_engines:
-        logger.warning('no wasm engine was found to run the standalone part of this test')
+        if 'EMTEST_SKIP_WASM_ENGINE' in os.environ:
+          self.skipTest('no wasm engine was found to run the standalone part of this test')
+        else:
+          logger.warning('no wasm engine was found to run the standalone part of this test (Use EMTEST_SKIP_WASM_ENGINE to skip)')
       engines += self.wasm_engines
     if len(engines) == 0:
       self.fail('No JS engine present to run this test with. Check %s and the paths therein.' % config.EM_CONFIG)
