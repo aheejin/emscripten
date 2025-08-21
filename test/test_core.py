@@ -474,8 +474,9 @@ class TestCoreBase(RunnerCore):
       # that we are doing cross-compilation
       # and skip attempting to run the generated executable with './a.out',
       # which would fail since we are building a .js file.
-      configure_args = ['--disable-shared', '--host=i686-pc-linux-gnu',
-                        '--disable-demos', '--disable-dependency-tracking']
+      configure_args = ['--disable-shared', '--build=i686-pc-linux-gnu',
+                        '--host=i686-pc-linux-gnu', '--disable-demos',
+                        '--disable-dependency-tracking']
       generated_libs = ['src/.libs/libBulletDynamics.a',
                         'src/.libs/libBulletCollision.a',
                         'src/.libs/libLinearMath.a']
@@ -4148,7 +4149,9 @@ ok
   @with_dylink_reversed
   def test_dylink_basics_no_modify(self):
     if self.is_optimizing():
-      self.skipTest('no modify mode only works with non-optimizing builds')
+      self.skipTest('ERROR_ON_WASM_CHANGES_AFTER_LINK is not applicable when optimizing')
+    if self.get_setting('SAFE_HEAP'):
+      self.skipTest('ERROR_ON_WASM_CHANGES_AFTER_LINK is not applicable when using SAFE_HEAP')
     if self.get_setting('MEMORY64') == 2:
       self.skipTest('MEMORY64=2 always requires module re-writing')
     self.set_setting('WASM_BIGINT')
@@ -5686,7 +5689,7 @@ got: 10
       self.skipTest('mode bits work differently on windows')
     if nodefs and self.get_setting('WASMFS'):
       self.skipTest('test requires symlink creation which currently missing from wasmfs+noderawfs')
-    self.do_runf('stat/test_chmod.c', 'success')
+    self.do_runf('stat/test_chmod.c', 'success', cflags=['-Werror=conversion'])
 
   @also_with_wasmfs
   def test_stat_mknod(self):
@@ -8305,7 +8308,6 @@ Module.onRuntimeInitialized = () => {
     'onlylist_b_response': ([], True,  'main\n__original_main\nfoo(int, double)\nbaz()\nc_baz\nStructy::funcy()\n'),
     'onlylist_c_response': ([], False, 'main\n__original_main\nfoo(int, double)\nbaz()\nc_baz\n'),
   })
-  @no_windows("TODO: Fails on Windows due to an unknown reason.")
   def test_asyncify_lists(self, args, should_pass, response=None):
     if response is not None:
       create_file('response.file', response)
@@ -8323,14 +8325,16 @@ Module.onRuntimeInitialized = () => {
     if self.is_wasm():
       filename = 'test_asyncify_lists.wasm'
       # there should be no name section. sanitizers, however, always enable that
-      if not is_sanitizing(self.cflags) and '--profiling-funcs' not in self.cflags:
+      if not is_sanitizing(self.cflags) and '--profiling-funcs' not in self.cflags and '-g' not in self.cflags:
         with webassembly.Module(filename) as m:
           self.assertFalse(m.has_name_section())
       # in a fully-optimized build, imports and exports are minified too and we
       # can verify that our function names appear nowhere
       if '-O3' in self.cflags:
-        binary = read_binary(filename)
-        self.assertFalse(b'main' in binary)
+        self.assertFalse(b'__wasm_call_ctors' in read_binary(filename))
+      elif '-O0' in self.cflags:
+        # However, sanity check that in core0 test, we do see this symbol.
+        self.assertTrue(b'__wasm_call_ctors' in read_binary(filename))
 
   @no_esm_integration('WASM_ESM_INTEGRATION is not compatible with ASYNCIFY')
   @parameterized({
