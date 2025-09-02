@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 import common
-from common import BrowserCore, RunnerCore, path_from_root, has_browser, EMTEST_BROWSER, Reporting
+from common import BrowserCore, RunnerCore, path_from_root, has_browser, Reporting, is_chrome, is_firefox, CHROMIUM_BASED_BROWSERS
 from common import create_file, parameterized, ensure_dir, disabled, test_file, WEBIDL_BINDER
 from common import read_file, EMRUN, no_wasm64, no_2gb, no_4gb, copytree
 from common import requires_wasm2js, parameterize, find_browser_test_file, with_all_sjlj
@@ -130,21 +130,10 @@ def shell_with_script(shell_file, output_file, replacement):
   create_file(output_file, shell.replace('{{{ SCRIPT }}}', replacement))
 
 
-CHROMIUM_BASED_BROWSERS = ['chrom', 'edge', 'opera']
-
-
-def is_chrome():
-  return EMTEST_BROWSER and any(pattern in EMTEST_BROWSER.lower() for pattern in CHROMIUM_BASED_BROWSERS)
-
-
 def no_chrome(note='chrome is not supported'):
   if is_chrome():
     return unittest.skip(note)
   return lambda f: f
-
-
-def is_firefox():
-  return EMTEST_BROWSER and 'firefox' in EMTEST_BROWSER.lower()
 
 
 def no_firefox(note='firefox is not supported'):
@@ -162,7 +151,7 @@ def no_swiftshader(f):
 
   @wraps(f)
   def decorated(self, *args, **kwargs):
-    if is_chrome() and '--use-gl=swiftshader' in EMTEST_BROWSER:
+    if is_chrome() and '--use-gl=swiftshader' in common.EMTEST_BROWSER:
       self.skipTest('not compatible with swiftshader')
     return f(self, *args, **kwargs)
 
@@ -210,7 +199,7 @@ class browser(BrowserCore):
   def setUpClass(cls):
     super().setUpClass()
     cls.browser_timeout = 60
-    if EMTEST_BROWSER != 'node':
+    if common.EMTEST_BROWSER != 'node':
       print()
       print('Running the browser tests. Make sure the browser allows popups from localhost.')
       print()
@@ -220,7 +209,7 @@ class browser(BrowserCore):
 
   def require_jspi(self):
     if not is_chrome():
-      self.skipTest(f'Current browser ({EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
+      self.skipTest(f'Current browser ({common.EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
     super().require_jspi()
 
   def post_manual_reftest(self):
@@ -3305,23 +3294,23 @@ Module["preRun"] = () => {
   })
   def test_async(self, args):
     if is_jspi(args) and not is_chrome():
-      self.skipTest(f'Current browser ({EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
+      self.skipTest(f'Current browser ({common.EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
 
     for opts in (0, 1, 2, 3):
       print(opts)
-      self.btest_exit('async.cpp', cflags=['-O' + str(opts), '-g2'] + args)
+      self.btest_exit('test_async.c', cflags=['-O' + str(opts), '-g2'] + args)
 
   def test_asyncify_tricky_function_sig(self):
     self.btest('test_asyncify_tricky_function_sig.cpp', '85', cflags=['-sASYNCIFY_ONLY=[foo(char.const*?.int#),foo2(),main,__original_main]', '-sASYNCIFY'])
 
   def test_async_in_pthread(self):
-    self.btest_exit('async.cpp', cflags=['-sASYNCIFY', '-pthread', '-sPROXY_TO_PTHREAD', '-g'])
+    self.btest_exit('test_async.c', cflags=['-sASYNCIFY', '-pthread', '-sPROXY_TO_PTHREAD', '-g'])
 
   def test_async_2(self):
     # Error.stackTraceLimit default to 10 in chrome but this test relies on more
     # than 40 stack frames being reported.
     create_file('pre.js', 'Error.stackTraceLimit = 80;\n')
-    self.btest_exit('async_2.cpp', cflags=['-O3', '--pre-js', 'pre.js', '-sASYNCIFY', '-sSTACK_SIZE=1MB'])
+    self.btest_exit('test_async_2.c', cflags=['-O3', '--pre-js', 'pre.js', '-sASYNCIFY', '-sSTACK_SIZE=1MB'])
 
   @parameterized({
     '': ([],),
@@ -3366,7 +3355,7 @@ Module["preRun"] = () => {
   # ASYNCIFY_IMPORTS.
   # To make the test more precise we also use ASYNCIFY_IGNORE_INDIRECT here.
   @parameterized({
-    'normal': (['-sASYNCIFY_IMPORTS=sync_tunnel,sync_tunnel_bool'],), # noqa
+    '': (['-sASYNCIFY_IMPORTS=sync_tunnel,sync_tunnel_bool'],), # noqa
     'pattern_imports': (['-sASYNCIFY_IMPORTS=[sync_tun*]'],), # noqa
     'response': (['-sASYNCIFY_IMPORTS=@filey.txt'],), # noqa
     'nothing': (['-DBAD'],), # noqa
@@ -3376,10 +3365,10 @@ Module["preRun"] = () => {
   def test_async_returnvalue(self, args):
     if '@' in str(args):
       create_file('filey.txt', 'sync_tunnel\nsync_tunnel_bool\n')
-    self.btest('async_returnvalue.cpp', '0', cflags=['-sASYNCIFY', '-sASYNCIFY_IGNORE_INDIRECT', '--js-library', test_file('browser/async_returnvalue.js')] + args + ['-sASSERTIONS'])
+    self.btest('test_async_returnvalue.c', '0', cflags=['-sASSERTIONS', '-sASYNCIFY', '-sASYNCIFY_IGNORE_INDIRECT', '--js-library', test_file('browser/test_async_returnvalue.js')] + args)
 
   def test_async_bad_list(self):
-    self.btest('async_bad_list.cpp', '0', cflags=['-sASYNCIFY', '-sASYNCIFY_ONLY=waka', '--profiling'])
+    self.btest('test_async_bad_list.c', '0', cflags=['-sASYNCIFY', '-sASYNCIFY_ONLY=waka', '--profiling'])
 
   # Tests that when building with -sMINIMAL_RUNTIME, the build can use -sMODULARIZE as well.
   def test_minimal_runtime_modularize(self):
@@ -3420,10 +3409,12 @@ Module["preRun"] = () => {
     # this test is synchronous, so avoid async startup due to wasm features
     self.compile_btest('browser_test_hello_world.c', ['-sMODULARIZE', '-sSINGLE_FILE'] + args + opts)
     create_file('a.html', '''
+      <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"></head><body>
       <script src="a.out.js"></script>
       <script>
         %s
       </script>
+      </body></html>
     ''' % code)
     self.run_browser('a.html', '/report_result?0')
 
@@ -4838,7 +4829,7 @@ Module["preRun"] = () => {
   # Tests that SINGLE_FILE works as intended in a Worker in JS output
   def test_single_file_worker_js(self):
     self.compile_btest('browser_test_hello_world.c', ['-o', 'test.js', '--proxy-to-worker', '-sSINGLE_FILE'])
-    create_file('test.html', '<script src="test.js"></script>')
+    create_file('test.html', '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"></head><body><script src="test.js"></script></body></html>')
     self.run_browser('test.html', '/report_result?0')
     self.assertExists('test.js')
     self.assertNotExists('test.worker.js')
@@ -4977,7 +4968,7 @@ Module["preRun"] = () => {
   })
   def test_embind(self, args):
     if is_jspi(args) and not is_chrome():
-      self.skipTest(f'Current browser ({EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
+      self.skipTest(f'Current browser ({common.EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
     if is_jspi(args) and self.is_wasm64():
       self.skipTest('_emval_await fails')
 
@@ -5597,9 +5588,9 @@ class emrun(RunnerCore):
     self.run_process([EMCC, test_file('test_emrun.c'), '--emrun', '-o', 'hello_world.html'])
     proc = subprocess.Popen([EMRUN, '--no-browser', '.', '--port=3333'], stdout=PIPE)
     try:
-      if EMTEST_BROWSER:
+      if common.EMTEST_BROWSER:
         print('Starting browser')
-        browser_cmd = shlex.split(EMTEST_BROWSER)
+        browser_cmd = shlex.split(common.EMTEST_BROWSER)
         browser = subprocess.Popen(browser_cmd + ['http://localhost:3333/hello_world.html'])
         try:
           while True:
@@ -5638,11 +5629,11 @@ class emrun(RunnerCore):
                  '--log-stdout', self.in_dir('stdout.txt'),
                  '--log-stderr', self.in_dir('stderr.txt')]
 
-    if EMTEST_BROWSER is not None:
+    if common.EMTEST_BROWSER is not None:
       # If EMTEST_BROWSER carried command line arguments to pass to the browser,
       # (e.g. "firefox -profile /path/to/foo") those can't be passed via emrun,
       # so strip them out.
-      browser_cmd = shlex.split(EMTEST_BROWSER)
+      browser_cmd = shlex.split(common.EMTEST_BROWSER)
       browser_path = browser_cmd[0]
       args_base += ['--browser', browser_path]
       if len(browser_cmd) > 1:
