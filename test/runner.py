@@ -397,7 +397,7 @@ def flattened_tests(loaded_tests):
 
 
 def suite_for_module(module, tests, options):
-  suite_supported = module.__name__ in ('test_core', 'test_other', 'test_posixtest')
+  suite_supported = module.__name__ in ('test_core', 'test_other', 'test_posixtest', 'test_browser')
   if not common.EMTEST_SAVE_DIR and not shared.DEBUG:
     has_multiple_tests = len(tests) > 1
     has_multiple_cores = parallel_testsuite.num_cores() > 1
@@ -575,6 +575,10 @@ def main():
     tests = tests_with_expanded_wildcards(tests, all_tests)
     tests = skip_requested_tests(tests, modules)
     tests = args_for_random_tests(tests, modules)
+
+  if not tests:
+    print('ERROR: no tests to run')
+    return 1
 
   if not options.start_at and options._continue:
     if os.path.exists(common.LAST_TEST):
