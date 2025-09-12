@@ -548,7 +548,7 @@ def set_initial_memory():
   if settings.IMPORTED_MEMORY:
     if user_specified_initial_heap:
       # Some of these could (and should) be implemented.
-      exit_with_error('INITIAL_HEAP is currently not compatible with IMPORTED_MEMORY (which is enabled indirectly via SHARED_MEMORY, RELOCATABLE, ASYNCIFY_LAZY_LOAD_CODE)')
+      exit_with_error('INITIAL_HEAP is currently not compatible with IMPORTED_MEMORY (which is enabled indirectly via SHARED_MEMORY, RELOCATABLE)')
     # The default for imported memory is to fall back to INITIAL_MEMORY.
     settings.INITIAL_HEAP = -1
 
@@ -848,6 +848,8 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
 
   if settings.SUPPORT_BIG_ENDIAN:
     diagnostics.warning('experimental', '-sSUPPORT_BIG_ENDIAN is experimental, not all features are fully supported.')
+    if settings.WASM2JS:
+      exit_with_error('WASMJ2S is currently not compatible with SUPPORT_BIG_ENDIAN')
 
   if settings.WASM_ESM_INTEGRATION:
     diagnostics.warning('experimental', '-sWASM_ESM_INTEGRATION is still experimental and not yet supported in browsers')
@@ -892,8 +894,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
     diagnostics.warning('experimental', 'MODULARIZE=instance is still experimental. Many features may not work or will change.')
     if not settings.EXPORT_ES6:
       exit_with_error('MODULARIZE=instance requires EXPORT_ES6')
-    if settings.ASYNCIFY_LAZY_LOAD_CODE:
-      exit_with_error('MODULARIZE=instance is not compatible with -sASYNCIFY_LAZY_LOAD_CODE')
     if settings.MINIMAL_RUNTIME:
       exit_with_error('MODULARIZE=instance is not compatible with MINIMAL_RUNTIME')
     if options.use_preload_plugins or len(options.preload_files):
@@ -1051,6 +1051,9 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
     else:
       options.shell_path = DEFAULT_SHELL_HTML
 
+  if options.oformat == OFormat.HTML and options.shell_path == DEFAULT_SHELL_HTML:
+    settings.EXPORTED_RUNTIME_METHODS.append('requestFullscreen')
+
   if settings.STRICT:
     if not settings.MODULARIZE:
       default_setting('STRICT_JS', 1)
@@ -1203,9 +1206,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
                                   'emscripten_stack_get_end',
                                   'emscripten_stack_get_current']
 
-  if settings.ASYNCIFY_LAZY_LOAD_CODE:
-    settings.ASYNCIFY = 1
-
   settings.ASYNCIFY_ADD = unmangle_symbols_from_cmdline(settings.ASYNCIFY_ADD)
   settings.ASYNCIFY_REMOVE = unmangle_symbols_from_cmdline(settings.ASYNCIFY_REMOVE)
   settings.ASYNCIFY_ONLY = unmangle_symbols_from_cmdline(settings.ASYNCIFY_ONLY)
@@ -1225,12 +1225,16 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
       '$LE_HEAP_STORE_I16',
       '$LE_HEAP_STORE_U32',
       '$LE_HEAP_STORE_I32',
+      '$LE_HEAP_STORE_U64',
+      '$LE_HEAP_STORE_I64',
       '$LE_HEAP_STORE_F32',
       '$LE_HEAP_STORE_F64',
       '$LE_HEAP_LOAD_U16',
       '$LE_HEAP_LOAD_I16',
       '$LE_HEAP_LOAD_U32',
       '$LE_HEAP_LOAD_I32',
+      '$LE_HEAP_LOAD_U64',
+      '$LE_HEAP_LOAD_I64',
       '$LE_HEAP_LOAD_F32',
       '$LE_HEAP_LOAD_F64',
       '$LE_ATOMICS_NATIVE_BYTE_ORDER',
@@ -1394,9 +1398,7 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['$stackSave', '$stackRestore']
 
   if settings.RELOCATABLE:
-    # TODO(https://reviews.llvm.org/D128515): Make this mandatory once
-    # llvm change lands
-    settings.EXPORT_IF_DEFINED.append('__wasm_apply_data_relocs')
+    settings.REQUIRED_EXPORTS += ['__wasm_apply_data_relocs']
 
   if settings.SIDE_MODULE and 'GLOBAL_BASE' in user_settings:
     diagnostics.warning('unused-command-line-argument', 'GLOBAL_BASE is not compatible with SIDE_MODULE')
@@ -1511,7 +1513,7 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
       'removeRunDependency',
     ]
 
-  if settings.PTHREADS or settings.WASM_WORKERS or settings.RELOCATABLE or settings.ASYNCIFY_LAZY_LOAD_CODE:
+  if settings.PTHREADS or settings.WASM_WORKERS or settings.RELOCATABLE:
     settings.IMPORTED_MEMORY = 1
 
   set_initial_memory()
@@ -1525,7 +1527,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
   # Enable minification of wasm imports and exports when appropriate, if we
   # are emitting an optimized JS+wasm combo (then the JS knows how to load the minified names).
   # Things that process the JS after this operation would be done must disable this.
-  # For example, ASYNCIFY_LAZY_LOAD_CODE needs to identify import names.
   # ASYNCIFY=2 does not support this optimization yet as it has a hardcoded
   # check for 'main' as an export name. TODO
   if will_metadce() and \
@@ -1538,7 +1539,6 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
       not settings.AUTODEBUG and \
       not settings.ASSERTIONS and \
       not settings.RELOCATABLE and \
-      not settings.ASYNCIFY_LAZY_LOAD_CODE and \
           settings.MINIFY_WASM_EXPORT_NAMES:
     settings.MINIFY_WASM_IMPORTS_AND_EXPORTS = 1
     settings.MINIFY_WASM_IMPORTED_MODULES = 1
@@ -2372,10 +2372,6 @@ def phase_binaryen(target, options, wasm_target):
       # Run acorn one more time to minify whitespace after babel runs
       if settings.MINIFY_WHITESPACE:
         final_js = building.acorn_optimizer(final_js, ['--minify-whitespace'])
-
-  if settings.ASYNCIFY_LAZY_LOAD_CODE:
-    with ToolchainProfiler.profile_block('asyncify_lazy_load_code'):
-      building.asyncify_lazy_load_code(wasm_target, debug=intermediate_debug_info)
 
   symbols_file = None
   if options.emit_symbol_map:

@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import time
 import unittest
-import webbrowser
 import zlib
 from functools import wraps
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,11 +19,11 @@ from urllib.request import urlopen
 
 import common
 from common import BrowserCore, RunnerCore, path_from_root, has_browser, Reporting, is_chrome, is_firefox, CHROMIUM_BASED_BROWSERS
-from common import create_file, parameterized, ensure_dir, disabled, test_file, WEBIDL_BINDER
+from common import create_file, parameterized, ensure_dir, disabled, flaky, test_file, WEBIDL_BINDER
 from common import read_file, EMRUN, no_wasm64, no_2gb, no_4gb, copytree
 from common import requires_wasm2js, parameterize, find_browser_test_file, with_all_sjlj
 from common import also_with_minimal_runtime, also_with_wasm2js, also_with_asan, also_with_wasmfs
-from common import HttpServerThread
+from common import HttpServerThread, requires_dev_dependency
 from tools import shared
 from tools import ports
 from tools.shared import EMCC, WINDOWS, FILE_PACKAGER, PIPE, DEBUG
@@ -279,44 +278,6 @@ window.close = () => {
 
   def test_sdl1_es6(self):
     self.reftest('hello_world_sdl.c', 'htmltest.png', cflags=['-sUSE_SDL', '-lGL', '-sEXPORT_ES6'])
-
-  # Deliberately named as test_zzz_* to make this test the last one
-  # as this test may take the focus away from the main test window
-  # by opening a new window and possibly not closing it.
-  def test_zzz_html_source_map(self):
-    # browsers will try to 'guess' the corresponding original line if a
-    # generated line is unmapped, so if we want to make sure that our
-    # numbering is correct, we need to provide a couple of 'possible wrong
-    # answers'. thus, we add some printf calls so that the cpp file gets
-    # multiple mapped lines. in other words, if the program consists of a
-    # single 'throw' statement, browsers may just map any thrown exception to
-    # that line, because it will be the only mapped line.
-    create_file('src.cpp', r'''
-      #include <cstdio>
-
-      int main() {
-        printf("Starting test\n");
-        try {
-          throw 42; // line 8
-        } catch (int e) { }
-        printf("done\n");
-        return 0;
-      }
-      ''')
-    # use relative paths when calling emcc, because file:// URIs can only load
-    # sourceContent when the maps are relative paths
-    self.compile_btest('src.cpp', ['-o', 'src.html', '-gsource-map'])
-    self.assertExists('src.html')
-    self.assertExists('src.wasm.map')
-    if not has_browser():
-      self.skipTest('need a browser')
-    webbrowser.open_new('file://src.html')
-    print('''
-If manually bisecting:
-  Check that you see src.cpp among the page sources.
-  Even better, add a breakpoint, e.g. on the printf, then reload, then step
-  through and see the print (best to run with --save-dir for the reload).
-''')
 
   def test_emscripten_log(self):
     self.btest_exit('test_emscripten_log.cpp', cflags=['-Wno-deprecated-pragma', '-gsource-map'])
@@ -3290,19 +3251,23 @@ Module["preRun"] = () => {
                             '-Wno-deprecated-declarations'])
 
   @parameterized({
+    'O0': ('-O0',),
+    'O1': ('-O1',),
+    'O2': ('-O2',),
+    'O3': ('-O3',),
+  })
+  @parameterized({
     'asyncify': (['-sASYNCIFY=1'],),
     'asyncify_minimal_runtime': (['-sMINIMAL_RUNTIME', '-sASYNCIFY=1'],),
     'jspi': (['-sASYNCIFY=2', '-Wno-experimental'],),
     'jspi_wasm_bigint': (['-sASYNCIFY=2', '-sWASM_BIGINT', '-Wno-experimental'],),
     'jspi_wasm_bigint_minimal_runtime': (['-sMINIMAL_RUNTIME', '-sASYNCIFY=2', '-sWASM_BIGINT', '-Wno-experimental'],),
   })
-  def test_async(self, args):
+  def test_async(self, opt, args):
     if is_jspi(args) and not is_chrome():
       self.skipTest(f'Current browser ({common.EMTEST_BROWSER}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
 
-    for opts in (0, 1, 2, 3):
-      print(opts)
-      self.btest_exit('test_async.c', cflags=['-O' + str(opts), '-g2'] + args)
+    self.btest_exit('test_async.c', cflags=[opt, '-g2'] + args)
 
   def test_asyncify_tricky_function_sig(self):
     self.btest('test_asyncify_tricky_function_sig.cpp', '85', cflags=['-sASYNCIFY_ONLY=[foo(char.const*?.int#),foo2(),main,__original_main]', '-sASYNCIFY'])
@@ -3842,8 +3807,7 @@ Module["preRun"] = () => {
   })
   def test_pthread_create(self, args):
     self.btest_exit('pthread/test_pthread_create.c',
-                    cflags=['-pthread', '-sPTHREAD_POOL_SIZE=8'] + args,
-                    extra_tries=0) # this should be 100% deterministic
+                    cflags=['-pthread', '-sPTHREAD_POOL_SIZE=8'] + args)
     files = os.listdir('.')
     if '-sSINGLE_FILE' in args:
       self.assertEqual(len(files), 1, files)
@@ -5008,11 +4972,13 @@ Module["preRun"] = () => {
     self.btest_exit('declare_asm_module_exports.c', cflags=['-sDECLARE_ASM_MODULE_EXPORTS=0', '-sENVIRONMENT=web', '-O3', '--closure=1', '-sWASM=0'] + args)
 
   @parameterized({
-    '': (1,),
-    '2': (2,),
+    '': ([],),
+    'strict_js': (['-sSTRICT_JS'],),
+    'minimal_runtime': (['-sMINIMAL_RUNTIME=1'],),
+    'minimal_runtime_2': (['-sMINIMAL_RUNTIME=2'],),
   })
-  def test_no_declare_asm_module_exports_wasm_minimal_runtime(self, mode):
-    self.btest_exit('declare_asm_module_exports.c', cflags=['-sDECLARE_ASM_MODULE_EXPORTS=0', '-sENVIRONMENT=web', '-O3', '--closure=1', f'-sMINIMAL_RUNTIME={mode}'])
+  def test_no_declare_asm_module_exports(self, args):
+    self.btest_exit('declare_asm_module_exports.c', cflags=['-sDECLARE_ASM_MODULE_EXPORTS=0', '-sENVIRONMENT=web', '-O3', '--closure=1'] + args)
 
   # Tests that the different code paths in src/shell_minimal_runtime.html all work ok.
   @parameterized({
@@ -5441,10 +5407,7 @@ Module["preRun"] = () => {
     self.btest_exit('pthread/test_pthread_proxy_hammer.cpp',
                     cflags=['-pthread', '-O2', '-sPROXY_TO_PTHREAD',
                                '-DITERATIONS=1024', '-g1'] + args,
-                    timeout=10000,
-                    # don't run this with the default extra_tries value, as this is
-                    # *meant* to notice something random, a race condition.
-                    extra_tries=0)
+                    timeout=10000)
 
   def test_assert_failure(self):
     self.btest('test_assert_failure.c', 'abort:Assertion failed: false && "this is a test"')
@@ -5521,6 +5484,7 @@ Module["preRun"] = () => {
   # Tests AudioWorklet with emscripten_lock_busyspin_wait_acquire() and friends
   @requires_sound_hardware
   @also_with_minimal_runtime
+  @flaky('https://github.com/emscripten-core/emscripten/issues/25245')
   def test_audio_worklet_emscripten_locks(self):
     self.btest_exit('webaudio/audioworklet_emscripten_locks.c', cflags=['-sAUDIO_WORKLET', '-sWASM_WORKERS', '-pthread'])
 
@@ -5534,26 +5498,29 @@ Module["preRun"] = () => {
     self.btest('hello_world.c', cflags=['--post-js=post.js'], expected='exception:foo')
 
   @also_with_threads
+  @also_with_wasm2js
   @parameterized({
-    '': (False,),
-    'es6': (True,),
+    '': ([],),
+    'es6': (['-sEXPORT_ES6', '-pthread', '-sPTHREAD_POOL_SIZE=1'],),
   })
-  def test_webpack(self, es6):
-    if es6:
+  @requires_dev_dependency('webpack')
+  def test_webpack(self, args):
+    if '-sEXPORT_ES6' in args:
       copytree(test_file('webpack_es6'), '.')
-      self.cflags += ['-sEXPORT_ES6', '-pthread', '-sPTHREAD_POOL_SIZE=1']
       outfile = 'src/hello.mjs'
     else:
       copytree(test_file('webpack'), '.')
       outfile = 'src/hello.js'
-    self.compile_btest('hello_world.c', ['-sEXIT_RUNTIME', '-sMODULARIZE', '-sENVIRONMENT=web', '-o', outfile])
+    self.compile_btest('hello_world.c', ['-sEXIT_RUNTIME', '-sMODULARIZE', '-sENVIRONMENT=web', '-o', outfile] + args)
     self.run_process(shared.get_npm_cmd('webpack') + ['--mode=development', '--no-devtool'])
-    # Webpack doesn't bundle the wasm file by default so we need to copy it
-    # TODO(sbc): Look into plugins that do bundling.
-    shutil.copy('src/hello.wasm', 'dist/')
+    if not self.is_wasm2js():
+      # Webpack doesn't bundle the wasm file by default so we need to copy it
+      # TODO(sbc): Look into plugins that do bundling.
+      shutil.copy('src/hello.wasm', 'dist/')
     self.run_browser('dist/index.html', '/report_result?exit:0')
 
   @also_with_threads
+  @requires_dev_dependency('vite')
   def test_vite(self):
     copytree(test_file('vite'), '.')
     self.compile_btest('hello_world.c', ['-sEXIT_RUNTIME', '-sENVIRONMENT=web', '-o', 'hello.mjs'])
@@ -5561,6 +5528,7 @@ Module["preRun"] = () => {
     self.run_browser('dist/index.html', '/report_result?exit:0')
 
   @also_with_threads
+  @requires_dev_dependency('rollup')
   def test_rollup(self):
     copytree(test_file('rollup'), '.')
     self.compile_btest('hello_world.c', ['-sEXIT_RUNTIME', '-sENVIRONMENT=web', '-o', 'hello.mjs'])

@@ -413,8 +413,17 @@ function instrumentWasmTableWithAbort() {
 #if !SOURCE_PHASE_IMPORTS && !WASM_ESM_INTEGRATION
 var wasmBinaryFile;
 
+#if WASM2JS && WASM != 2
+
+// When building with wasm2js these 3 functions all no-ops.
+function findWasmBinary(file) {}
+function getBinarySync(file) {}
+function getWasmBinary(file) {}
+
+#else
+
 function findWasmBinary() {
-#if SINGLE_FILE && WASM == 1 && !WASM2JS
+#if SINGLE_FILE
   return base64Decode('<<< WASM_BINARY_DATA >>>');
 #else
 #if EXPORT_ES6 && !AUDIO_WORKLET
@@ -435,7 +444,7 @@ function findWasmBinary() {
 }
 
 function getBinarySync(file) {
-#if SINGLE_FILE && WASM == 1 && !WASM2JS
+#if SINGLE_FILE
   if (ArrayBuffer.isView(file)) {
     return file;
   }
@@ -474,6 +483,7 @@ async function getWasmBinary(binaryFile) {
   // Otherwise, getBinarySync should be able to get it synchronously
   return getBinarySync(binaryFile);
 }
+#endif
 
 #if SPLIT_MODULE
 {{{ makeModuleReceiveWithVar('loadSplitModule', undefined, 'instantiateSync') }}}
@@ -572,8 +582,8 @@ async function instantiateArrayBuffer(binaryFile, imports) {
 
 #if ASSERTIONS
     // Warn on some common problems.
-    if (isFileURI(wasmBinaryFile)) {
-      err(`warning: Loading from a file URI (${wasmBinaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`);
+    if (isFileURI(binaryFile)) {
+      err(`warning: Loading from a file URI (${binaryFile}) is not supported in most browsers. See https://emscripten.org/docs/getting_started/FAQ.html#how-do-i-run-a-local-webserver-for-testing-why-does-my-program-stall-in-downloading-or-preparing`);
     }
 #endif
     abort(reason);
@@ -632,7 +642,7 @@ function getWasmImports() {
   // instrumenting imports is used in asyncify in two ways: to add assertions
   // that check for proper import use, and for ASYNCIFY=2 we use them to set up
   // the Promise API on the import side.
-#if PTHREADS || ASYNCIFY_LAZY_LOAD_CODE
+#if PTHREADS
   // In pthreads builds getWasmImports is called more than once but we only
   // and the instrument the imports once.
   if (!wasmImports.__instrumented) {

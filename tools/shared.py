@@ -117,10 +117,6 @@ def run_process(cmd, check=True, input=None, *args, **kw):
   return ret
 
 
-def get_num_cores():
-  return int(os.environ.get('EMCC_CORES', os.cpu_count()))
-
-
 def returncode_to_str(code):
   assert code != 0
   if code < 0:
@@ -171,7 +167,7 @@ def run_multiple_processes(commands,
       except subprocess.TimeoutExpired:
         pass
 
-  num_parallel_processes = get_num_cores()
+  num_parallel_processes = utils.get_num_cores()
   temp_files = get_temp_files()
   i = 0
   num_completed = 0
