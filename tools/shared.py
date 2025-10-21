@@ -3,20 +3,21 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
-from .toolchain_profiler import ToolchainProfiler
+"""Shared code specific to emscripten.  General purpose and low-level helpers belong instead in
+utils.py."""
 
-from subprocess import PIPE
 import atexit
 import logging
 import os
 import re
-import shutil
 import shlex
-import subprocess
 import signal
-import stat
+import subprocess
 import sys
 import tempfile
+from subprocess import PIPE
+
+from .toolchain_profiler import ToolchainProfiler
 
 # We depend on python 3.8 features
 if sys.version_info < (3, 8): # noqa: UP036
@@ -38,16 +39,19 @@ elif EMCC_LOGGING:
 logging.basicConfig(format='%(name)s:%(levelname)s: %(message)s', level=log_level)
 colored_logger.enable()
 
-from .utils import path_from_root, exit_with_error, safe_ensure_dirs, WINDOWS, set_version_globals, memoize
-from . import cache, tempfiles
-from . import diagnostics
-from . import config
-from . import filelock
-from . import utils
-from .settings import settings
-from . import mylog
 import contextlib
 
+from . import cache, config, diagnostics, filelock, mylog, tempfiles, utils
+from .settings import settings
+from .utils import (
+  WINDOWS,
+  bat_suffix,
+  exit_with_error,
+  memoize,
+  path_from_root,
+  safe_ensure_dirs,
+  set_version_globals,
+)
 
 DEBUG_SAVE = DEBUG or int(os.environ.get('EMCC_DEBUG_SAVE', '0'))
 PRINT_SUBPROCS = int(os.getenv('EMCC_VERBOSE', '0'))
@@ -484,7 +488,7 @@ def llvm_tool_path_with_suffix(tool, suffix):
   if suffix:
     tool += '-' + suffix
   llvm_root = os.path.expanduser(config.LLVM_ROOT)
-  return os.path.join(llvm_root, exe_suffix(tool))
+  return os.path.join(llvm_root, utils.exe_suffix(tool))
 
 
 # Some distributions ship with multiple llvm versions so they add
@@ -499,25 +503,12 @@ def clang_tool_path(tool):
   return llvm_tool_path_with_suffix(tool, config.CLANG_ADD_VERSION)
 
 
-def exe_suffix(cmd):
-  return cmd + '.exe' if WINDOWS else cmd
-
-
-def bat_suffix(cmd):
-  return cmd + '.bat' if WINDOWS else cmd
-
-
-def replace_suffix(filename, new_suffix):
-  assert new_suffix[0] == '.'
-  return os.path.splitext(filename)[0] + new_suffix
-
-
 # In MINIMAL_RUNTIME mode, keep suffixes of generated files simple
 # ('.mem' instead of '.js.mem'; .'symbols' instead of '.js.symbols' etc)
 # Retain the original naming scheme in traditional runtime.
 def replace_or_append_suffix(filename, new_suffix):
   assert new_suffix[0] == '.'
-  return replace_suffix(filename, new_suffix) if settings.MINIMAL_RUNTIME else filename + new_suffix
+  return utils.replace_suffix(filename, new_suffix) if settings.MINIMAL_RUNTIME else filename + new_suffix
 
 
 # Temp dir. Create a random one, unless EMCC_DEBUG is set, in which case use the canonical
@@ -650,6 +641,7 @@ def asmjs_mangle(name):
   return name
 
 
+<<<<<<< HEAD
 def suffix(name):
   """Return the file extension"""
   return os.path.splitext(name)[1]
@@ -701,6 +693,8 @@ def safe_copy(src, dst):
   make_writable(dst)
 
 
+=======
+>>>>>>> main
 def do_replace(input_, pattern, replacement):
   if pattern not in input_:
     exit_with_error('expected to find pattern in input JS: %s' % pattern)
