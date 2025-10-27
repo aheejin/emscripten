@@ -105,6 +105,7 @@ def safe_copy(src, dst):
   if dst == os.devnull:
     return
   # Copies data and permission bits, but not other metadata such as timestamp
+  mylog.log_copy(src, dst)
   shutil.copy(src, dst)
   # We always want the target file to be writable even when copying from
   # read-only source. (e.g. a read-only install of emscripten).

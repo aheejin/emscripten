@@ -641,60 +641,6 @@ def asmjs_mangle(name):
   return name
 
 
-<<<<<<< HEAD
-def suffix(name):
-  """Return the file extension"""
-  return os.path.splitext(name)[1]
-
-
-def unsuffixed(name):
-  """Return the filename without the extension.
-
-  If there are multiple extensions this strips only the final one.
-  """
-  return os.path.splitext(name)[0]
-
-
-def unsuffixed_basename(name):
-  return os.path.basename(unsuffixed(name))
-
-
-def get_file_suffix(filename):
-  """Parses the essential suffix of a filename, discarding Unix-style version
-  numbers in the name. For example for 'libz.so.1.2.8' returns '.so'"""
-  while filename:
-    filename, suffix = os.path.splitext(filename)
-    if not suffix[1:].isdigit():
-      return suffix
-  return ''
-
-
-def make_writable(filename):
-  assert os.path.exists(filename)
-  old_mode = stat.S_IMODE(os.stat(filename).st_mode)
-  os.chmod(filename, old_mode | stat.S_IWUSR)
-
-
-def safe_copy(src, dst):
-  logging.debug('copy: %s -> %s', src, dst)
-  src = os.path.abspath(src)
-  dst = os.path.abspath(dst)
-  if os.path.isdir(dst):
-    dst = os.path.join(dst, os.path.basename(src))
-  if src == dst:
-    return
-  if dst == os.devnull:
-    return
-  # Copies data and permission bits, but not other metadata such as timestamp
-  mylog.log_copy(src, dst)
-  shutil.copy(src, dst)
-  # We always want the target file to be writable even when copying from
-  # read-only source. (e.g. a read-only install of emscripten).
-  make_writable(dst)
-
-
-=======
->>>>>>> main
 def do_replace(input_, pattern, replacement):
   if pattern not in input_:
     exit_with_error('expected to find pattern in input JS: %s' % pattern)
