@@ -1180,6 +1180,7 @@ def emit_wasm_source_map(wasm_file, map_file, final_wasm):
     sourcemap_cmd += ['--sources']
 
   # TODO(sbc): Convert to using library internal API instead of running `main` here
+  mylog.log_cmd([path_from_root('tools/wasm-sourcemap.py')] + sourcemap_cmd)
   rtn = wasm_sourcemap.main(sourcemap_cmd)
   if rtn != 0:
     exit_with_error('wasm-sourcemap failed (%s)', sourcemap_cmd)
