@@ -2982,7 +2982,7 @@ More info: https://emscripten.org
   def test_js_optimizer(self, passes, filename=None):
     if not filename:
       testname = self.id().split('.')[-1]
-      filename = utils.removeprefix(testname, 'test_js_optimizer_') + '.js'
+      filename = testname.removeprefix('test_js_optimizer_') + '.js'
     filename = test_file('js_optimizer', filename)
     expected_file = utils.unsuffixed(filename) + '-output.js'
     # test calling optimizer
@@ -8402,8 +8402,7 @@ int main() {
     self.run_process([EMCC, test_file('hello_world.c'), '-sSIDE_MODULE', '-o', 'libside.so'])
 
     # Attempting to link statically against a side module (libside.so) should fail.
-    err = self.expect_fail([EMCC, '-L.', '-lside'])
-    self.assertContained(r'error: attempted static link of dynamic object \.[/\\]libside.so', err, regex=True)
+    self.assert_fail([EMCC, '-L.', '-lside'], 'wasm-ld: error: unable to find library -lside')
 
     # But a static library in the same location (libside.a) should take precedence.
     self.run_process([EMCC, test_file('hello_world.c'), '-c'])
@@ -13338,8 +13337,14 @@ int main() {
     # Ensure that files referenced in Tutorial.rst are buildable
     self.run_process([EMCC, test_file('hello_world_file.cpp')])
 
+  @also_with_wasm64
   def test_stdint_limits(self):
-    self.do_other_test('test_stdint_limits.c')
+    if self.is_wasm64():
+      suffix = '.64'
+    else:
+      suffix = ''
+    print(suffix)
+    self.do_other_test('test_stdint_limits.c', out_suffix=suffix)
 
   def test_legacy_runtime(self):
     self.set_setting('EXPORTED_FUNCTIONS', ['_malloc', '_main'])
@@ -13406,8 +13411,9 @@ int main() {
   @parameterized({
     # we will warn here since -O2 runs the optimizer and -g enables DWARF
     'O2_g': (True, ['-O2', '-g']),
-    # asyncify will force wasm-opt to run as well, so we warn here too
-    'asyncify_g': (True, ['-sASYNCIFY', '-g']),
+    # asyncify will force wasm-opt to run as well, but without optimizations, so
+    # we do not warn about the lack of optimization
+    'asyncify_g': (False, ['-sASYNCIFY', '-g']),
     # with --profiling-funcs however we do not use DWARF (we just emit the
     # names section) and will not warn.
     'O2_pfuncs': (False, ['-O2', '--profiling-funcs']),
