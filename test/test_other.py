@@ -48,6 +48,7 @@ from common import (
   create_file,
   ensure_dir,
   env_modify,
+  exe_path_from_root,
   make_executable,
   path_from_root,
   test_file,
@@ -118,13 +119,13 @@ from tools.utils import (
   write_file,
 )
 
-emmake = utils.bat_suffix(path_from_root('emmake'))
-emconfig = utils.bat_suffix(path_from_root('em-config'))
-emsize = utils.bat_suffix(path_from_root('emsize'))
-empath_split = utils.bat_suffix(path_from_root('empath-split'))
-emprofile = utils.bat_suffix(path_from_root('emprofile'))
-emstrip = utils.bat_suffix(path_from_root('emstrip'))
-emsymbolizer = utils.bat_suffix(path_from_root('emsymbolizer'))
+emmake = exe_path_from_root('emmake')
+emconfig = exe_path_from_root('em-config')
+emsize = exe_path_from_root('emsize')
+empath_split = exe_path_from_root('empath-split')
+emprofile = exe_path_from_root('emprofile')
+emstrip = exe_path_from_root('emstrip')
+emsymbolizer = exe_path_from_root('emsymbolizer')
 
 
 def is_bitcode(filename):
@@ -6310,7 +6311,7 @@ print(os.environ.get('NM'))
       [['--cflags', '--libs'], '-sUSE_SDL=2'],
     ]:
       print(args, expected)
-      out = self.run_process([utils.bat_suffix(cache.get_sysroot_dir('bin/sdl2-config'))] + args,
+      out = self.run_process([cache.get_sysroot_dir('bin/sdl2-config')] + args,
                              stdout=PIPE, stderr=PIPE).stdout
       self.assertContained(expected, out)
       print('via emmake')
@@ -10237,13 +10238,13 @@ _d
       # Simple one-per-line response file format
       ("EXPORTED_FUNCTIONS=@response.txt", ''),
       # stray slash
-      ("EXPORTED_FUNCTIONS=['_a', '_b', \\'_c', '_d']", '''invalid export name: "\\\\'_c'"'''),
+      ("EXPORTED_FUNCTIONS=['_a', '_b', \\'_c', '_d']", r'''emcc: error: undefined exported symbol: "\\'_c'"'''),
       # stray slash
-      ("EXPORTED_FUNCTIONS=['_a', '_b',\\ '_c', '_d']", '''invalid export name: "\\\\ '_c'"'''),
+      ("EXPORTED_FUNCTIONS=['_a', '_b',\\ '_c', '_d']", r'''emcc: error: undefined exported symbol: "\\ '_c'"'''),
       # stray slash
-      ('EXPORTED_FUNCTIONS=["_a", "_b", \\"_c", "_d"]', 'invalid export name: "\\\\"_c""'),
+      ('EXPORTED_FUNCTIONS=["_a", "_b", \\"_c", "_d"]', r'emcc: error: undefined exported symbol: "\\"_c""'),
       # stray slash
-      ('EXPORTED_FUNCTIONS=["_a", "_b",\\ "_c", "_d"]', 'invalid export name: "\\\\ "_c"'),
+      ('EXPORTED_FUNCTIONS=["_a", "_b",\\ "_c", "_d"]', r'emcc: error: undefined exported symbol: "\\ "_c""'),
       # missing comma
       ('EXPORTED_FUNCTIONS=["_a", "_b" "_c", "_d"]', 'wasm-ld: error: symbol exported via --export not found: b" "_c'),
     ]:
@@ -14852,21 +14853,45 @@ addToLibrary({
     self.do_runf('main.cpp', 'Hello Module!', cflags=['-std=c++20', '-fmodules'])
 
   def test_invalid_export_name(self):
-    create_file('test.c', '__attribute__((export_name("my.func"))) void myfunc() {}')
-    expected = 'emcc: error: invalid export name: "_my.func"'
-    self.assert_fail([EMCC, 'test.c'], expected)
+    create_file('main.c', r'''
+      #include <emscripten.h>
+      #include <stdio.h>
+
+      __attribute__((export_name("my.func"))) int myfunc() { return 42; }
+
+      int main() {
+        int rtn = EM_ASM_INT(return Module['_my.func']());
+        printf("got: %d\n", rtn);
+
+        int rtn2 = EM_ASM_INT(return wasmExports['my.func']());
+        printf("got2: %d\n", rtn2);
+        return 0;
+      }
+    ''')
+    expected = 'emcc: error: export name is not a valid JS symbol: "_my.func".  Use `Module` or `wasmExports` to access this symbol'
+    self.assert_fail([EMCC, '-Werror', 'main.c'], expected)
+
+    # With warning suppressed the above program should work.
+    self.do_runf('main.c', 'got: 42\ngot2: 42\n', cflags=['-Wno-js-compiler'])
 
     # When we are generating only wasm and not JS we don't need exports to
     # be valid JS symbols.
-    self.run_process([EMCC, 'test.c', '--no-entry', '-o', 'out.wasm'])
+    self.run_process([EMCC, '-Werror', 'main.c', '--no-entry', '-o', 'out.wasm'])
 
-    # GCC (and clang) and JavaScript also allow $ in symbol names
-    create_file('valid.c', '''
-                #include <emscripten.h>
-                EMSCRIPTEN_KEEPALIVE
-                void my$func() {}
-                ''')
-    self.run_process([EMCC, 'valid.c'])
+  def test_export_with_dollarsign(self):
+    # GCC (and clang) and JavaScript both allow $ in symbol names
+    create_file('main.c', r'''
+      #include <emscripten.h>
+      #include <stdio.h>
+
+      EMSCRIPTEN_KEEPALIVE int my$func() { return 42; }
+
+      int main() {
+        int rtn = EM_ASM_INT(return _my$func());
+        printf("got: %d\n", rtn);
+        return 0;
+      }''')
+    self.do_runf('main.c', 'got: 42\n')
 
   @also_with_modularize
   def test_instantiate_wasm(self):
@@ -15088,7 +15113,7 @@ addToLibrary({
   @requires_git_checkout
   def test_install(self):
     self.run_process([PYTHON, path_from_root('tools/install.py'), 'newdir'], env=shared.env_with_node_in_path())
-    self.assertExists('newdir/emcc')
+    self.assertExists('newdir/emcc.py')
     # Some files, such as as maintenance tools should not be part of the
     # install.
     self.assertNotExists('newdir/tools/maint/')
