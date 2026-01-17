@@ -681,6 +681,7 @@ jobs:
             lsan.test_pthread_create
             lsan.test_pthread_exit_main_stub
             lsan.test_dylink_iostream
+            lsan.test_embind_lib_with_asyncify
             ubsan.test_dlfcn_self
             ubsan.test_externref_emjs_dynlink"
       - freeze-cache
@@ -905,6 +906,7 @@ jobs:
       - run-tests:
           test_targets: "
             core0.test_hello_world
+            core0.test_hello_argc_pthreads
             core2.test_pthread_create
             "
   test-jsc:
