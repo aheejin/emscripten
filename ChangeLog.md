@@ -31,6 +31,12 @@ See docs/process.md for more on how version tagging works.
 - Embind now supports the JS iterable protocol on bound classes via
   `class_<T>::iterable()`. `register_vector` uses this so bound `std::vector`
   works with `for...of`/`Array.from()`/spread. (#25993)
+- ASYNCIFY/JSPI functions in JS library files can now be marked as `__async:
+  'auto'`, which allows async JS function to be used unmodified with
+  ASYNCIFY/JSPI.  In addition, when such function are also marked as `__proxy:
+  'sync'` it is now possible for them to be called from back background threads
+  with the same blocking semantics. (#26130, #26019, #26000)
+- SDL3 port updated to 3.2.30. (#26135)
 
 4.0.23 - 01/10/26
 -----------------

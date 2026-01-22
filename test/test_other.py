@@ -78,7 +78,7 @@ from decorators import (
   requires_native_clang,
   requires_network,
   requires_node,
-  requires_node_canary,
+  requires_node_25,
   requires_pthreads,
   requires_v8,
   requires_wasm64,
@@ -408,7 +408,7 @@ class other(RunnerCore):
     self.assertContained('export default Module;', read_file('hello_world.mjs'))
     self.assertContained('hello, world!', self.run_js('hello_world.mjs'))
 
-  @requires_node_canary
+  @requires_node_25
   def test_esm_source_phase_imports(self):
     self.node_args += ['--experimental-wasm-modules', '--no-warnings']
     self.run_process([EMCC, '-o', 'hello_world.mjs', '-sSOURCE_PHASE_IMPORTS',
@@ -3457,7 +3457,7 @@ More info: https://emscripten.org
 
     self.do_runf('embind/test_return_value_policy.cpp')
 
-  @requires_node_canary
+  @requires_node_25
   def test_embind_resource_management(self):
     self.node_args.append('--js-explicit-resource-management')
 
@@ -5797,7 +5797,7 @@ int main(int argc, char **argv) {
     expected_lang = os.environ.get('LANG')
     if expected_lang is None:
       # If the LANG env. var doesn't exist (Windows), ask Node for the language.
-      cmd = self.js_engines[0] + ['-e', 'console.log(navigator.languages[0] || "en_US")']
+      cmd = self.get_current_js_engine() + ['-e', 'console.log(navigator.languages[0] || "en_US")']
       expected_lang = self.run_process(cmd, stdout=PIPE).stdout
       expected_lang = expected_lang.strip().replace('-', '_')
       expected_lang = f'{expected_lang}.UTF-8'
@@ -6483,7 +6483,7 @@ int main() {
     self.assertContained('done', self.run_js('a.out.js'))
 
   @requires_wasm64
-  @requires_node_canary
+  @requires_node_25
   def test_failing_growth_wasm64(self):
     self.require_wasm64()
     create_file('test.c', r'''
@@ -8499,31 +8499,51 @@ int main() {
     '''
     self.cflags += ['-g']
 
-    # Stack trace and message example for this example code:
-    # exiting due to exception: [object WebAssembly.Exception],Error: std::runtime_error,my message
-    #     at src.wasm.__cxa_throw (wasm://wasm/009a7c9a:wasm-function[1551]:0x24367)
-    #     at src.wasm.bar() (wasm://wasm/009a7c9a:wasm-function[12]:0xf53)
-    #     at src.wasm.foo() (wasm://wasm/009a7c9a:wasm-function[19]:0x154e)
-    #     at __original_main (wasm://wasm/009a7c9a:wasm-function[20]:0x15a6)
-    #     at src.wasm.main (wasm://wasm/009a7c9a:wasm-function[56]:0x25be)
-    #     at test.js:833:22
-    #     at callMain (test.js:4567:15)
-    #     at doRun (test.js:4621:23)
-    #     at run (test.js:4636:5)
-    stack_trace_checks = [
-      'std::runtime_error[:,][ ]?my message',  # 'std::runtime_error: my message' for Emscripten EH
-      'at (src.wasm.)?_?__cxa_throw',  # '___cxa_throw' (JS symbol) for Emscripten EH
-      'at (src.wasm.)?bar',
-      'at (src.wasm.)?foo',
-      'at (src.wasm.)?main']
-
-    if '-fwasm-exceptions' in self.cflags:
-      # FIXME Node v18.13 (LTS as of Jan 2023) has not yet implemented the new
-      # optional 'traceStack' option in WebAssembly.Exception constructor
-      # (https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/Exception/Exception)
-      # and embeds stack traces unconditionally. Change this back to
-      # self.require_wasm_legacy_eh() if this issue is fixed later.
-      self.require_v8()
+    if '-fwasm-exceptions' in self.cflags and engine_is_node(self.js_engines[0]):
+      if not self.try_require_node_version(24):
+        # Node versions prior to v24 do not implement the new 'traceStack' option in
+        # WebAssembly.Exception constructor.
+        # (https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/Exception/Exception)
+        self.skipTest('test requires node v24 or above')
+      # Stack trace and message example for this example code running under node:
+      # Exception [WebAssembly.Exception] {
+      #    message: [ 'std::runtime_error', 'my message' ]
+      # }
+      # Thrown at:
+      #     at ___throw_exception_with_stack_trace (/usr/local/google/home/sbc/dev/wasm/emscripten/out/test/src.js:702:15)
+      #     at $__cxa_throw (wasm://wasm/src.wasm-00512f82:1:15731)
+      #     at $bar() (wasm://wasm/src.wasm-00512f82:1:2562)
+      #     at $foo() (wasm://wasm/src.wasm-00512f82:1:2598)
+      #     at $__original_main (wasm://wasm/src.wasm-00512f82:1:2766)
+      #     at $main (wasm://wasm/src.wasm-00512f82:1:2793)
+      #     at callMain (/usr/local/google/home/sbc/dev/wasm/emscripten/out/test/src.js:920:15)
+      #     at doRun (/usr/local/google/home/sbc/dev/wasm/emscripten/out/test/src.js:959:24)
+      #     at run (/usr/local/google/home/sbc/dev/wasm/emscripten/out/test/src.js:972:5)
+      #     at removeRunDependency (/usr/local/google/home/sbc/dev/wasm/emscripten/out/test/src.js:527:11)
+      stack_trace_checks = [
+        'std::runtime_error.*my message',
+        r'at \$__cxa_throw \(wasm://',
+        r'at \$bar\(\) \(wasm://',
+        r'at \$foo\(\) \(wasm://',
+        r'at \$main \(wasm://']
+    else:
+      # Stack trace and message example for this example code running under v8:
+      # exiting due to exception: [object WebAssembly.Exception],Error: std::runtime_error,my message
+      #     at src.wasm.__cxa_throw (wasm://wasm/009a7c9a:wasm-function[1551]:0x24367)
+      #     at src.wasm.bar() (wasm://wasm/009a7c9a:wasm-function[12]:0xf53)
+      #     at src.wasm.foo() (wasm://wasm/009a7c9a:wasm-function[19]:0x154e)
+      #     at __original_main (wasm://wasm/009a7c9a:wasm-function[20]:0x15a6)
+      #     at src.wasm.main (wasm://wasm/009a7c9a:wasm-function[56]:0x25be)
+      #     at test.js:833:22
+      #     at callMain (test.js:4567:15)
+      #     at doRun (test.js:4621:23)
+      #     at run (test.js:4636:5)
+      stack_trace_checks = [
+        'std::runtime_error[:,][ ]?my message',  # 'std::runtime_error: my message' for Emscripten EH
+        'at (src.wasm.)?_?__cxa_throw',  # '___cxa_throw' (JS symbol) for Emscripten EH
+        'at (src.wasm.)?bar',
+        'at (src.wasm.)?foo',
+        'at (src.wasm.)?main']
 
     # Stack traces are enabled when either of ASSERTIONS or
     # EXCEPTION_STACK_TRACES is enabled. You can't disable
@@ -8557,13 +8577,6 @@ int main() {
   @with_all_eh_sjlj
   def test_exceptions_rethrow_stack_trace_and_message(self):
     self.cflags += ['-g']
-    if '-fwasm-exceptions' in self.cflags:
-      # FIXME Node v18.13 (LTS as of Jan 2023) has not yet implemented the new
-      # optional 'traceStack' option in WebAssembly.Exception constructor
-      # (https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/Exception/Exception)
-      # and embeds stack traces unconditionally. Change this back to
-      # self.require_wasm_legacy_eh() if this issue is fixed later.
-      self.require_v8()
     # Rethrowing exception currently loses the stack trace before the rethrowing
     # due to how rethrowing is implemented. So in the examples below we don't
     # print 'bar' at the moment.
@@ -8605,11 +8618,23 @@ int main() {
         return 0;
       }
     '''
-    rethrow_stack_trace_checks = [
-      'std::runtime_error[:,][ ]?my message',  # 'std::runtime_error: my message' for Emscripten EH
-      'at ((src.wasm.)?_?__cxa_rethrow|___resumeException)',  # '___resumeException' (JS symbol) for Emscripten EH
-      'at (src.wasm.)?foo',
-      'at (src.wasm.)?main']
+    if '-fwasm-exceptions' in self.cflags and engine_is_node(self.js_engines[0]):
+      if not self.try_require_node_version(24):
+        # Node versions prior to v24 do not implement the new 'traceStack' option in
+        # WebAssembly.Exception constructor.
+        # (https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/Exception/Exception)
+        self.skipTest('test requires node v24 or above')
+      rethrow_stack_trace_checks = [
+        'std::runtime_error.*my message',
+        r'at \$__cxa_rethrow.* \(wasm://',
+        r'at \$foo\(\) \(wasm://',
+        r'at \$main \(wasm://']
+    else:
+      rethrow_stack_trace_checks = [
+        'std::runtime_error[:,][ ]?my message',  # 'std::runtime_error: my message' for Emscripten EH
+        'at ((src.wasm.)?_?__cxa_rethrow|___resumeException)',  # '___resumeException' (JS symbol) for Emscripten EH
+        'at (src.wasm.)?foo',
+        'at (src.wasm.)?main']
 
     self.set_setting('ASSERTIONS', 1)
     err = self.do_run(rethrow_src1, assert_all=True, assert_returncode=NON_ZERO,
@@ -8674,7 +8699,7 @@ int main() {
 
   @requires_node
   def test_jsrun(self):
-    engine = self.js_engines[0]
+    engine = self.get_current_js_engine()
     print(engine)
     jsrun.WORKING_ENGINES = {}
     # Test that engine check passes
@@ -10156,7 +10181,7 @@ T6:(else) !ASSERTIONS""", output)
   def test_node_eval(self):
     self.run_process([EMCC, '-sENVIRONMENT=node', test_file('hello_world.c'), '-o', 'a.js', '-O3'])
     js = read_file('a.js')
-    ret = self.run_process(self.js_engines[0] + ['-e', js], stdout=PIPE).stdout
+    ret = self.run_process(self.get_current_js_engine() + ['-e', js], stdout=PIPE).stdout
     self.assertContained('hello, world!', ret)
 
   def test_is_bitcode(self):
@@ -12944,13 +12969,13 @@ void foo() {}
     if '-sGROWABLE_ARRAYBUFFERS' in cflags:
       self.node_args.append('--experimental-wasm-rab-integration')
       self.v8_args.append('--experimental-wasm-rab-integration')
-      self.require_node_canary()
+      self.require_node_25()
     else:
       self.cflags.append('-Wno-pthreads-mem-growth')
     self.set_setting('PTHREAD_POOL_SIZE', pthread_pool_size)
     self.do_runf('pthread/test_pthread_memory_growth_mainthread.c', cflags=['-pthread', '-sALLOW_MEMORY_GROWTH', '-sINITIAL_MEMORY=32MB', '-sMAXIMUM_MEMORY=256MB'] + cflags)
 
-  @requires_node_canary
+  @requires_node_25
   def test_growable_arraybuffers(self):
     self.node_args.append('--experimental-wasm-rab-integration')
     self.v8_args.append('--experimental-wasm-rab-integration')
@@ -12978,13 +13003,13 @@ void foo() {}
     if WINDOWS and platform.machine() == 'ARM64':
       # https://github.com/emscripten-core/emscripten/issues/25627
       # TODO: Switch this to a "require Node.js 24" check
-      self.require_node_canary()
+      self.require_node_25()
 
     self.set_setting('PTHREAD_POOL_SIZE', pthread_pool_size)
     if '-sGROWABLE_ARRAYBUFFERS' in cflags:
       self.node_args.append('--experimental-wasm-rab-integration')
       self.v8_args.append('--experimental-wasm-rab-integration')
-      self.require_node_canary()
+      self.require_node_25()
     else:
       self.cflags.append('-Wno-pthreads-mem-growth')
     self.do_runf('pthread/test_pthread_memory_growth.c', cflags=['-pthread', '-sALLOW_MEMORY_GROWTH', '-sINITIAL_MEMORY=32MB', '-sMAXIMUM_MEMORY=256MB'] + cflags)
@@ -13304,6 +13329,15 @@ myMethod: 43
     print('with old browser + --closure=1')
     self.do_runf('test.c', expected, cflags=['--closure=1'], output_basename='test_closure')
     check_for_es6('test_closure.js', False)
+
+  def test_node_prefix_transpile(self):
+    self.run_process([EMCC, test_file('hello_world.c'),  '-sEXPORT_ES6'])
+    content = read_file('a.out.js')
+    self.assertContained('node:', content)
+
+    self.run_process([EMCC, test_file('hello_world.c'), '-sEXPORT_ES6', '-sMIN_NODE_VERSION=150000', '-Wno-transpile'])
+    content = read_file('a.out.js')
+    self.assertNotContained('node:', content)
 
   def test_gmtime_noleak(self):
     # Confirm that gmtime_r does not leak when called in isolation.
@@ -14996,7 +15030,7 @@ addToLibrary({
                  cflags=['--pre-js', 'pre.js',
                             '--extern-post-js', test_file('modularize_post_js.js')] + args)
 
-  @requires_node_canary
+  @requires_node_25
   def test_js_base64_api(self):
     self.node_args += ['--js_base_64']
     self.do_runf('hello_world.c', 'hello, world!', cflags=['-sSINGLE_FILE'], output_basename='baseline')

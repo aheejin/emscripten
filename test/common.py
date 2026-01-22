@@ -266,23 +266,28 @@ def get_output_suffix(args):
 
 
 def match_engine_executable(engine, name):
+  assert type(engine) is list
   basename = os.path.basename(engine[0])
   return name in basename
 
 
 def engine_is_node(engine):
+  assert type(engine) is list
   return match_engine_executable(engine, 'node')
 
 
 def engine_is_v8(engine):
+  assert type(engine) is list
   return match_engine_executable(engine, 'd8') or match_engine_executable(engine, 'v8')
 
 
 def engine_is_deno(engine):
+  assert type(engine) is list
   return match_engine_executable(engine, 'deno')
 
 
 def engine_is_bun(engine):
+  assert type(engine) is list
   return match_engine_executable(engine, 'bun')
 
 
@@ -434,22 +439,18 @@ class RunnerCore(RetryableTestCase, metaclass=RunnerMeta):
     self.require_engine(nodejs)
     return nodejs
 
-  def node_is_canary(self, nodejs):
-    return nodejs and nodejs[0] and ('canary' in nodejs[0] or 'nightly' in nodejs[0])
-
-  def require_node_canary(self):
-    if 'EMTEST_SKIP_NODE_CANARY' in os.environ:
-      self.skipTest('test requires node canary and EMTEST_SKIP_NODE_CANARY is set')
+  def require_node_25(self):
+    if 'EMTEST_SKIP_NODE_25' in os.environ:
+      self.skipTest('test requires node v25 and EMTEST_SKIP_NODE_25 is set')
     nodejs = self.get_nodejs()
-    if self.node_is_canary(nodejs):
-      self.require_engine(nodejs)
-      return
+    if not nodejs:
+      self.skipTest('Test requires nodejs to run')
+    if not self.try_require_node_version(25, 0, 0):
+      self.fail('node v25 required to run this test.  Use EMTEST_SKIP_NODE_25 to skip')
 
-    self.fail('node canary required to run this test.  Use EMTEST_SKIP_NODE_CANARY to skip')
-
-  def require_engine(self, engine):
+  def require_engine(self, engine, force=False):
     logger.debug(f'require_engine: {engine}')
-    if self.required_engine and self.required_engine != engine:
+    if not force and self.required_engine and self.required_engine != engine:
       self.skipTest(f'Skipping test that requires `{engine}` when `{self.required_engine}` was previously required')
     self.required_engine = engine
     self.js_engines = [engine]

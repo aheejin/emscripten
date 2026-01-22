@@ -1127,10 +1127,13 @@ function ENVIRONMENT_IS_WORKER_THREAD() {
 }
 
 function nodeDetectionCode() {
-  if (ENVIRONMENT == 'node') {
+  if (ENVIRONMENT == 'node' && !ASSERTIONS) {
     // The only environment where this code is intended to run is Node.js.
     // Return unconditional true so that later Closure optimizer will be able to
     // optimize code size.
+    //
+    // Note: we don't do this in debug builds because we have have assertions
+    // that want to be able to check if we really are running on node or not.
     return 'true';
   }
   return "globalThis.process?.versions?.node && globalThis.process?.type != 'renderer'";
@@ -1140,9 +1143,9 @@ function nodePthreadDetection() {
   // Under node we detect that we are running in a pthread by checking the
   // workerData property.
   if (EXPORT_ES6) {
-    return "(await import('worker_threads')).workerData === 'em-pthread'";
+    return "(await import('node:worker_threads')).workerData === 'em-pthread'";
   } else {
-    return "require('worker_threads').workerData === 'em-pthread'";
+    return "require('node:worker_threads').workerData === 'em-pthread'";
   }
 }
 
@@ -1150,9 +1153,9 @@ function nodeWWDetection() {
   // Under node we detect that we are running in a wasm worker by checking the
   // workerData property.
   if (EXPORT_ES6) {
-    return "(await import('worker_threads')).workerData === 'em-ww'";
+    return "(await import('node:worker_threads')).workerData === 'em-ww'";
   } else {
-    return "require('worker_threads').workerData === 'em-ww'";
+    return "require('node:worker_threads').workerData === 'em-ww'";
   }
 }
 

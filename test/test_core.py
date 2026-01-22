@@ -28,6 +28,7 @@ from common import (
   compiler_for,
   create_file,
   engine_is_node,
+  engine_is_v8,
   env_modify,
   path_from_root,
   read_binary,
@@ -60,7 +61,7 @@ from decorators import (
   requires_jspi,
   requires_native_clang,
   requires_node,
-  requires_node_canary,
+  requires_node_25,
   requires_pthreads,
   requires_v8,
   requires_wasm2js,
@@ -448,7 +449,7 @@ class TestCoreBase(RunnerCore):
     return all(f not in self.cflags for f in prohibited) and any(f in self.cflags for f in required)
 
   def setup_esm_integration(self):
-    self.require_node_canary()
+    self.require_node_25()
     self.node_args += ['--experimental-wasm-modules', '--no-warnings']
     self.set_setting('WASM_ESM_INTEGRATION')
     self.cflags += ['-Wno-experimental']
@@ -8489,15 +8490,15 @@ Module.onRuntimeInitialized = () => {
     self.do_core_test('test_hello_world.c')
 
   # Test that pthread_join works correctly with asyncify.
-  @requires_node_canary
+  @requires_node_25
   @requires_pthreads
   def test_pthread_join_and_asyncify(self):
     # TODO Test with ASYNCIFY=1 https://github.com/emscripten-core/emscripten/issues/17552
     self.require_jspi()
     self.do_runf('core/test_pthread_join_and_asyncify.c', 'joining thread!\njoined thread!',
                  cflags=['-sJSPI',
-                            '-sEXIT_RUNTIME=1',
-                            '-pthread', '-sPROXY_TO_PTHREAD'])
+                         '-sEXIT_RUNTIME=1',
+                         '-pthread', '-sPROXY_TO_PTHREAD'])
 
   # Test basic wasm2js functionality in all core compilation modes.
   @no_sanitize('no wasm2js support yet in sanitizers')
@@ -8675,10 +8676,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
         js = read_file(self.output_name('test_hello_world'))
       assert ('require(' in js) == ('node' in self.get_setting('ENVIRONMENT')), 'we should have require() calls only if node js specified'
 
-    for engine in config.JS_ENGINES:
+    for engine in self.js_engines:
       print(f'engine: {engine}')
       # set us to test in just this engine
-      self.require_engine(engine)
+      self.require_engine(engine, force=True)
       # tell the compiler to build with just that engine
       if engine_is_node(engine):
         right = 'node'
@@ -8688,19 +8689,19 @@ NODEFS is no longer included by default; build with -lnodefs.js
         wrong = 'node'
       # test with the right env
       self.set_setting('ENVIRONMENT', right)
-      print('ENVIRONMENT =', self.get_setting('ENVIRONMENT'))
+      print('right ENVIRONMENT =', self.get_setting('ENVIRONMENT'))
       test()
       # test with the wrong env
       self.set_setting('ENVIRONMENT', wrong)
-      print('ENVIRONMENT =', self.get_setting('ENVIRONMENT'))
+      print('wrong ENVIRONMENT =', self.get_setting('ENVIRONMENT'))
       try:
         test(assert_returncode=NON_ZERO)
         raise Exception('unexpected success')
       except Exception as e:
-        self.assertContained('not compiled for this environment', str(e))
+        self.assertContained(['environment detected but not enabled at build time', 'not compiled for this environment'], str(e))
       # test with a combined env
       self.set_setting('ENVIRONMENT', right + ',' + wrong)
-      print('ENVIRONMENT =', self.get_setting('ENVIRONMENT'))
+      print('both ENVIRONMENT =', self.get_setting('ENVIRONMENT'))
       test()
 
   @requires_node
@@ -9604,7 +9605,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.maybe_closure()
     self.do_core_test('test_em_async_js.c')
 
-  @requires_v8
   @no_wasm2js('wasm2js does not support reference types')
   @no_sanitize('.s files cannot be sanitized')
   def test_externref(self):
@@ -9656,6 +9656,12 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @requires_pthreads
   def test_poll_blocking(self):
     self.do_runf('core/test_poll_blocking.c', cflags=['-pthread', '-sPROXY_TO_PTHREAD=1', '-sEXIT_RUNTIME=1'])
+
+  @with_asyncify_and_jspi
+  def test_poll_blocking_asyncify(self):
+    if self.get_setting('JSPI') and engine_is_v8(self.get_current_js_engine()):
+      self.skipTest('test requires setTimeout which is not supported under v8')
+    self.do_runf('core/test_poll_blocking_asyncify.c')
 
   @parameterized({
     '': ([],),
@@ -9847,8 +9853,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
 # Generate tests for everything
 def make_run(name, cflags=None, settings=None, env=None, # noqa
-             require_v8=False, v8_args=None,
-             require_node=False, node_args=None,
+             v8_args=None, node_args=None,
              require_wasm64=False,
              init=None):
   if cflags is None:
@@ -9893,11 +9898,6 @@ def make_run(name, cflags=None, settings=None, env=None, # noqa
     if v8_args:
       self.v8_args += v8_args
 
-    if require_v8:
-      self.require_v8()
-    elif require_node:
-      self.require_node()
-
     if require_wasm64:
       self.require_wasm64()
 
@@ -9931,9 +9931,7 @@ core_2gb = make_run('core_2gb', cflags=['--profiling-funcs'],
 
 # MEMORY64=1
 wasm64 = make_run('wasm64', cflags=['--profiling-funcs'],
-                  settings={'MEMORY64': 1}, require_wasm64=True, require_node=True)
-wasm64_v8 = make_run('wasm64_v8', cflags=['--profiling-funcs'],
-                     settings={'MEMORY64': 1}, require_wasm64=True, require_v8=True)
+                  settings={'MEMORY64': 1}, require_wasm64=True)
 # Run the wasm64 tests with all memory offsets > 4gb.  Be careful running this test
 # suite with any kind of parallelism.
 wasm64_4gb = make_run('wasm64_4gb', cflags=['--profiling-funcs'],
