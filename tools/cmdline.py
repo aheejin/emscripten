@@ -42,6 +42,7 @@ CLANG_FLAGS_WITH_ARGS = {
 EXTRA_INCOMING_JS_API = [
   'fetchSettings',
   'logReadFiles',
+  'loadSplitModule',
 ]
 
 logger = logging.getLogger('args')
@@ -791,10 +792,6 @@ def apply_user_settings():
     if key == 'EXPORTED_FUNCTIONS':
       # used for warnings in emscripten.py
       settings.USER_EXPORTS = settings.EXPORTED_FUNCTIONS.copy()
-
-    # TODO(sbc): Remove this legacy way.
-    if key == 'WASM_OBJECT_FILES':
-      settings.LTO = 0 if value else 'full'
 
     if key == 'JSPI':
       settings.ASYNCIFY = 2

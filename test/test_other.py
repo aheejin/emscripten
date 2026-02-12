@@ -49,6 +49,7 @@ from common import (
   ensure_dir,
   env_modify,
   exe_path_from_root,
+  get_nodejs,
   make_executable,
   path_from_root,
   test_file,
@@ -58,6 +59,7 @@ from decorators import (
   also_with_asan,
   also_with_minimal_runtime,
   also_with_modularize,
+  also_with_nodefs_both,
   also_with_noderawfs,
   also_with_standalone_wasm,
   also_with_wasm2js,
@@ -68,6 +70,8 @@ from decorators import (
   disabled,
   flaky,
   is_slow_test,
+  no_bun,
+  no_deno,
   no_mac,
   no_windows,
   only_windows,
@@ -395,6 +399,7 @@ class other(RunnerCore):
       self.assertContained('LLVM_ROOT', config_contents)
       os.remove(config_path)
 
+  @crossplatform
   @parameterized({
     '': ([],),
     'node': (['-sENVIRONMENT=node'],),
@@ -881,6 +886,15 @@ f.close()
     output = self.run_process([common.LLVM_OBJDUMP, '-h', 'hello.wasm'], stdout=PIPE).stdout
     self.assertContained('.debug_info', output)
     self.run_process([emstrip, 'hello.wasm'])
+    output = self.run_process([common.LLVM_OBJDUMP, '-h', 'hello.wasm'], stdout=PIPE).stdout
+    self.assertNotContained('.debug_info', output)
+
+  def test_emstrip_js(self):
+    # Test that emstrip on a .js file strips the corresponding .wasm file
+    self.run_process([EMCC, test_file('hello_world.c'), '-g', '-o', 'hello.js'])
+    output = self.run_process([common.LLVM_OBJDUMP, '-h', 'hello.wasm'], stdout=PIPE).stdout
+    self.assertContained('.debug_info', output)
+    self.run_process([emstrip, 'hello.js'])
     output = self.run_process([common.LLVM_OBJDUMP, '-h', 'hello.wasm'], stdout=PIPE).stdout
     self.assertNotContained('.debug_info', output)
 
@@ -1665,9 +1679,9 @@ int f() {
     # We must expose __dirname and require globally because emscripten
     # uses those under the hood.
     create_file('main.mjs', '''
-      import { dirname } from 'path';
-      import { createRequire } from 'module';
-      import { fileURLToPath } from 'url';
+      import { dirname } from 'node:path';
+      import { createRequire } from 'node:module';
+      import { fileURLToPath } from 'node:url';
 
       // `fileURLToPath` is used to get a valid path on Windows.
       globalThis.__dirname = dirname(fileURLToPath(import.meta.url));
@@ -4057,6 +4071,7 @@ More info: https://emscripten.org
 
   # `demangle` is a legacy JS function on longer used by emscripten
   # TODO(sbc): Remove `demangle` and this test.
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26197')
   def test_demangle(self):
     create_file('src.cpp', '''
       #include <stdio.h>
@@ -4519,6 +4534,7 @@ Module.print = (x) => { throw '<{(' + x + ')}>' };
     'gch': ['gch'],
     'pch': ['pch'],
   })
+  @crossplatform
   def test_precompiled_headers(self, suffix):
     create_file('header.h', '#define X 5\n')
     self.run_process([EMCC, '-xc++-header', 'header.h', '-c'])
@@ -4526,6 +4542,7 @@ Module.print = (x) => { throw '<{(' + x + ')}>' };
     if suffix != 'pch':
       self.run_process([EMCC, '-xc++-header', 'header.h', '-o', 'header.h.' + suffix])
       self.assertBinaryEqual('header.h.pch', 'header.h.' + suffix)
+      delete_file('header.h.pch')
 
     create_file('src.cpp', r'''
 #include <stdio.h>
@@ -4541,11 +4558,11 @@ int main() {
 
     # also verify that the gch is actually used
     err = self.run_process([EMXX, 'src.cpp', '-include', 'header.h', '-Xclang', '-print-stats'], stderr=PIPE).stderr
-    self.assertTextDataContained('*** PCH/Modules Loaded:\nModule: header.h.pch', err)
+    self.assertContained(r'PCH/Modules Loaded:\nModule: .*header.h.' + suffix, err, regex=True)
     # and sanity check it is not mentioned when not
     delete_file('header.h.' + suffix)
     err = self.run_process([EMXX, 'src.cpp', '-include', 'header.h', '-Xclang', '-print-stats'], stderr=PIPE).stderr
-    self.assertNotContained('*** PCH/Modules Loaded:\nModule: header.h.' + suffix, err.replace('\r\n', '\n'))
+    self.assertNotContained(r'PCH/Modules Loaded:', err, regex=True)
 
     # with specified target via -o
     delete_file('header.h.' + suffix)
@@ -4912,6 +4929,8 @@ Waste<3> *getMore() {
     'wasm2js': [0],
     'wasm2js_2': [2],
   })
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26197')
+  @no_deno('https://github.com/emscripten-core/emscripten/issues/26234')
   def test_symbol_map(self, opts, wasm):
     def read_symbol_map(symbols_file):
       symbols = read_file(symbols_file)
@@ -5097,7 +5116,7 @@ int main() {
     else:
       # otherwise, the error depends on the mode we are in
       # wasm trap raised by the vm
-      self.assertContained('function signature mismatch', output)
+      self.assertContained(['function signature mismatch', 'RuntimeError: call_indirect to a signature that does not match'], output)
 
   def test_bad_export(self):
     for exports in ('_main', '_main,foo'):
@@ -5521,7 +5540,16 @@ __EMSCRIPTEN_MAJOR__ __EMSCRIPTEN_MINOR__ __EMSCRIPTEN_TINY__ EMSCRIPTEN_KEEPALI
   @with_all_fs
   @crossplatform
   def test_fs_bad_lookup(self):
-    self.do_runf(path_from_root('test/fs/test_fs_bad_lookup.c'), expected_output='ok')
+    self.do_runf('fs/test_fs_bad_lookup.c', 'ok')
+
+  @also_with_nodefs_both
+  @crossplatform
+  @parameterized({
+    '': ([],),
+    'pthreads': (['-pthread', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
+  })
+  def test_fsync(self, args):
+    self.do_runf('fs/test_memfs_fsync.c', 'success', cflags=args)
 
   @with_all_fs
   @crossplatform
@@ -6076,7 +6104,12 @@ int main(void) {
     self.run_process([EMCC, test_file('hello_world.c'), '-sMODULARIZE', '-sEXPORT_NAME=Foo'])
     create_file('run.js', 'var m = require("./a.out.js"); new m();')
     err = self.run_js('run.js', assert_returncode=NON_ZERO)
-    self.assertContained('TypeError: m is not a constructor', err)
+    # Different engines have slightly different error message syntax.
+    expected = [
+      "TypeError: function is not a constructor (evaluating 'new m')",
+      'TypeError: m is not a constructor',
+    ]
+    self.assertContained(expected, err)
 
   @parameterized({
     '': ([],),
@@ -6133,7 +6166,7 @@ int main(void) {
     os.remove('out.wasm')
     output = self.run_js('run.mjs')
     self.assertContained('failed to asynchronously prepare wasm', output)
-    self.assertContained('got error: RuntimeError: Aborted', output)
+    self.assertContained('got error:.*RuntimeError: Aborted', output, regex=True)
 
   @crossplatform
   @requires_pthreads
@@ -8036,14 +8069,18 @@ int main() {
     # if user changes INITIAL_MEMORY at runtime, the wasm module may not accept the memory import if
     # it is too big/small
     create_file('pre.js', 'Module.INITIAL_MEMORY = 50 * 1024 * 1024')
-    self.run_process([EMCC, test_file('hello_world.c'), '-sINITIAL_MEMORY=16mb', '--pre-js', 'pre.js', '-sIMPORTED_MEMORY'])
-    out = self.run_js('a.out.js', assert_returncode=NON_ZERO)
+    out = self.do_runf('hello_world.c', cflags=['-sINITIAL_MEMORY=16mb', '--pre-js', 'pre.js', '-sIMPORTED_MEMORY'], assert_returncode=NON_ZERO)
     self.assertContained('LinkError', out)
-    self.assertContained("has a larger maximum size 800 than the module's declared maximum", out)
+    # Different engines have slightly different error message syntax.
+    expected = [
+      "LinkError: Memory import env:memory provided a 'maximum' that is larger than the module's declared 'maximum' import memory size",
+      "LinkError: imported Memory with incompatible size",
+      "has a larger maximum size 800 than the module's declared maximum",
+    ]
+    self.assertContained(expected, out)
     self.assertNotContained('hello, world!', out)
     # and with memory growth, all should be good
-    self.run_process([EMCC, test_file('hello_world.c'), '-sINITIAL_MEMORY=16mb', '--pre-js', 'pre.js', '-sALLOW_MEMORY_GROWTH', '-sIMPORTED_MEMORY'])
-    self.assertContained('hello, world!', self.run_js('a.out.js'))
+    self.do_runf('hello_world.c', 'hello, world!', cflags=['-sINITIAL_MEMORY=16mb', '--pre-js', 'pre.js', '-sALLOW_MEMORY_GROWTH', '-sIMPORTED_MEMORY'])
 
   @parameterized({
     '': ([], 16 * 1024 * 1024), # Default behavior: 16MB initial heap
@@ -8447,8 +8484,6 @@ int main() {
       ([], False),
       (['-flto'], True),
       (['-flto=thin'], True),
-      (['-sWASM_OBJECT_FILES=0'], True),
-      (['-sWASM_OBJECT_FILES'], False),
     ]:
       self.run_process([EMCC, test_file('hello_world.c')] + flags + ['-c', '-o', 'a.o'])
       seen_bitcode = is_bitcode('a.o')
@@ -8482,6 +8517,7 @@ int main() {
     self.assert_fail([EMCC, '-sSTRICT', test_file('other/test_exceptions_c_linker.c')], 'error: undefined symbol: __cxa_find_matching_catch_1')
 
   @with_all_eh_sjlj
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26197')
   def test_exceptions_stack_trace_and_message(self):
     src = r'''
       #include <stdexcept>
@@ -8577,6 +8613,7 @@ int main() {
       self.assertFalse(re.search(check, err), 'Expected regex "%s" to not match on:\n%s' % (check, err))
 
   @with_all_eh_sjlj
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26197')
   def test_exceptions_rethrow_stack_trace_and_message(self):
     self.cflags += ['-g']
     # Rethrowing exception currently loses the stack trace before the rethrowing
@@ -9968,6 +10005,25 @@ int main() {
     self.run_process([EMCC, test_file('hello_world.c'), '-O2'] + args)
     self.verify_custom_sec_existence('a.out.wasm', 'target_features', False)
 
+  @parameterized({
+    '': ([],),
+    'nobigint': (['-sWASM_BIGINT=0'],),
+    'O2': (['-O2'],),
+  })
+  def test_func_attr_section(self, args):
+    # Verify that clang function annotation don't survive in the final wasm binary.
+    create_file('test.c', '''
+      [[clang::annotate("foobar")]]
+      int main() {
+        return 0;
+      }
+    ''')
+    self.run_process([EMCC, 'test.c'] + args)
+    with webassembly.Module('a.out.wasm') as module:
+      for section in module.sections():
+        if section.type == webassembly.SecType.CUSTOM:
+          self.assertNotIn('foobar', section.name)
+
   def test_wasm_features(self):
     # Test that wasm features are explicitly enabled or disabled based on
     # target engine version. Here we are reading the features section and
@@ -10182,6 +10238,10 @@ T6:(else) !ASSERTIONS""", output)
 
   @requires_node
   def test_node_eval(self):
+    if not self.engine_is_node():
+      # The `requires_node` decorator above also allows for node-like environments such as
+      # deno and bun, but this test requires actual node.
+      self.skipTest('requires nodejs')
     self.run_process([EMCC, '-sENVIRONMENT=node', test_file('hello_world.c'), '-o', 'a.js', '-O3'])
     js = read_file('a.js')
     ret = self.run_process(self.get_current_js_engine() + ['-e', js], stdout=PIPE).stdout
@@ -10331,13 +10391,14 @@ _d
       self.do_runf('other/test_asyncify_stack_overflow.cpp',
                    cflags=args,
                    assert_returncode=common.NON_ZERO,
+                   regex=True,
                    expected_output=[expected])
 
     test(['-sASSERTIONS=0'],
-         'Aborted(RuntimeError: unreachable). Build with -sASSERTIONS for more info.')
+         r'Aborted\(RuntimeError: [Uu]nreachable.*\). Build with -sASSERTIONS for more info.')
 
     test(['-sASSERTIONS=1'],
-         'Aborted(RuntimeError: unreachable). "unreachable" may be due to ASYNCIFY_STACK_SIZE not being large enough (try increasing it)')
+         r'Aborted\(RuntimeError: [Uu]nreachable.*\). "unreachable" may be due to ASYNCIFY_STACK_SIZE not being large enough \(try increasing it\)')
 
   def test_async_exit_after_wakeup(self):
     self.do_runf('test_async_exit_after_wakeup.c', cflags=['-sASYNCIFY', '--js-library', test_file('test_async_exit_after_wakeup.js')])
@@ -10919,6 +10980,7 @@ int main(void) {
   def test_malloc_none(self):
     self.assert_fail([EMCC, test_file('malloc_none.c'), '-sMALLOC=none'], 'undefined symbol: malloc')
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   @parameterized({
     'c': ['c', []],
     'cpp': ['cpp', []],
@@ -10937,6 +10999,7 @@ int main(void) {
         'Direct leak of 42 byte(s) in 1 object(s) allocated from',
       ])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   @parameterized({
     'c': ['c', [
       r'in malloc .*lsan_interceptors\.cpp:\d+:\d+',
@@ -10966,6 +11029,7 @@ int main(void) {
         r'Direct leak of 42 byte\(s\) in 1 object\(s\) allocated from',
       ] + regexes)
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   @parameterized({
     'c': ['c'],
     'cpp': ['cpp'],
@@ -10976,6 +11040,7 @@ int main(void) {
                  cflags=['-fsanitize=leak', '-sASSERTIONS=0'],
                  expected_output=[r'^\s*$'])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   def test_lsan_no_stack_trace(self):
     self.do_runf(
       'other/test_lsan_leaks.c',
@@ -10987,6 +11052,7 @@ int main(void) {
         'SUMMARY: LeakSanitizer: 3427 byte(s) leaked in 3 allocation(s).',
       ])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   @also_with_standalone_wasm()
   def test_asan_null_deref(self):
     self.do_runf(
@@ -10997,6 +11063,7 @@ int main(void) {
         'AddressSanitizer: null-pointer-dereference on address',
       ])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   def test_asan_sync_compilation(self):
     self.set_setting('WASM_ASYNC_COMPILATION', 0)
     self.do_runf(
@@ -11007,6 +11074,7 @@ int main(void) {
         'AddressSanitizer: null-pointer-dereference on address',
       ])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   def test_asan_memory_growth(self):
     self.do_runf(
       'other/test_asan_null_deref.c',
@@ -11016,6 +11084,7 @@ int main(void) {
         'AddressSanitizer: null-pointer-dereference on address',
       ])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   def test_asan_no_stack_trace(self):
     self.do_runf(
       'other/test_lsan_leaks.c',
@@ -11027,9 +11096,11 @@ int main(void) {
         'SUMMARY: AddressSanitizer: 3427 byte(s) leaked in 3 allocation(s).',
       ])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   def test_asan_pthread_stubs(self):
     self.do_runf('other/test_asan_pthread_stubs.c', cflags=['-fsanitize=address'])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   def test_asan_strncpy(self):
     # Regression test for asan false positives in strncpy:
     # https://github.com/emscripten-core/emscripten/issues/14618
@@ -11308,13 +11379,17 @@ int main(void) {
     # but after a breaking change in #18743 it is now expected that the
     # user will handle the exception themselves in Modularize mode.
     create_file('test.js', r'''
-      Promise.reject();
+      Promise.reject("oops");
     ''')
     self.run_process([EMCC, test_file('hello_world.c'), '-sMODULARIZE', '-sASSERTIONS', '--extern-post-js', 'test.js'])
     # A return code of 1 is from an uncaught exception not handled by
     # the domain or the 'uncaughtException' event handler.
     out = self.run_js('a.out.js', assert_returncode=1)
-    self.assertContained('UnhandledPromiseRejection: This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). The promise rejected with the reason "undefined".', out)
+    expected = [
+      'UnhandledPromiseRejection: This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). The promise rejected with the reason "oops".',
+      'error: oops',
+    ]
+    self.assertContained(expected, out)
 
   def test_assertions_on_reject_promise(self):
     # Check that promise rejections give the correct error code
@@ -11329,12 +11404,12 @@ int main(void) {
   def test_on_reject_promise(self):
     # Check that promise rejections give the correct error code
     create_file('test.js', r'''
-      Promise.reject();
+      Promise.reject("oops");
     ''')
     self.run_process([EMCC, test_file('hello_world.c'), '--extern-post-js', 'test.js'])
     # Node exits with 1 on Uncaught Fatal Exception (including unhandled rejections)
     err = self.run_js('a.out.js', assert_returncode=1)
-    self.assertContained('UnhandledPromiseRejection', err)
+    self.assertContained(['UnhandledPromiseRejection: .*oops', 'error: oops'], err, regex=True)
 
   def test_em_asm_duplicate_strings(self):
     # We had a regression where two different EM_ASM strings from two different
@@ -12820,6 +12895,7 @@ void foo() {}
     err = self.run_js('a.out.js', assert_returncode=NON_ZERO)
     self.assertContained('`alignMemory` is a library symbol and not included by default; add it to your library.js __deps or to DEFAULT_LIBRARY_FUNCS_TO_INCLUDE on the command line', err)
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   @requires_pthreads
   def test_pthread_lsan_no_leak(self):
     self.set_setting('PROXY_TO_PTHREAD')
@@ -12828,6 +12904,7 @@ void foo() {}
     self.do_run_in_out_file_test('pthread/test_pthread_lsan_no_leak.cpp', cflags=['-fsanitize=leak'])
     self.do_run_in_out_file_test('pthread/test_pthread_lsan_no_leak.cpp', cflags=['-fsanitize=address'])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26198')
   @requires_pthreads
   def test_pthread_lsan_leak(self):
     self.set_setting('PROXY_TO_PTHREAD')
@@ -12853,6 +12930,7 @@ void foo() {}
     self.do_runf('pthread/test_pthread_lsan_leak.cpp', expected, assert_all=True, cflags=['-fsanitize=leak'])
     self.do_runf('pthread/test_pthread_lsan_leak.cpp', expected, assert_all=True, cflags=['-fsanitize=address'])
 
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26199')
   @requires_pthreads
   def test_pthread_js_exception(self):
     # Ensure that JS exceptions propagate back to the main main thread and cause node
@@ -12869,6 +12947,7 @@ void foo() {}
     self.assertContained(sys.executable, err)
     self.assertContained('not execute properly!', err)
 
+  @requires_node
   def test_node_unhandled_rejection(self):
     create_file('pre.js', '''
     async function foo() {
@@ -12902,7 +12981,7 @@ void foo() {}
     self.build('main.c', cflags=['--pre-js=pre.js', '-sNODEJS_CATCH_REJECTION=0'])
     self.assertNotContained('unhandledRejection', read_file('main.js'))
 
-    if shared.get_node_version(self.get_nodejs())[0] >= 15:
+    if not get_nodejs() or shared.get_node_version(get_nodejs())[0] >= 15:
       self.skipTest('old behaviour of node JS cannot be tested on node v15 or above')
 
     output = self.run_js('main.js')
@@ -12942,6 +13021,7 @@ void foo() {}
     self.do_runf('test_emscripten_main_loop_setimmediate.c')
 
   @requires_pthreads
+  @no_bun('https://github.com/emscripten-core/emscripten/issues/26197')
   def test_pthread_trap(self):
     # TODO(https://github.com/emscripten-core/emscripten/issues/15161):
     # Make this work without PROXY_TO_PTHREAD
@@ -13452,7 +13532,7 @@ int main() {
   @also_with_minimal_runtime
   def test_shared_memory(self):
     self.do_runf('wasm_worker/shared_memory.c', '0', cflags=[])
-    self.node_args += shared.node_pthread_flags(self.get_nodejs())
+    self.node_args += shared.node_pthread_flags(get_nodejs())
     self.do_runf('wasm_worker/shared_memory.c', '1', cflags=['-sSHARED_MEMORY'])
     self.do_runf('wasm_worker/shared_memory.c', '1', cflags=['-sWASM_WORKERS'])
     self.do_runf('wasm_worker/shared_memory.c', '1', cflags=['-pthread'])
@@ -13985,7 +14065,11 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
 
   @requires_node
   def test_min_node_version(self):
-    node_version = shared.get_node_version(self.get_nodejs())
+    if not self.engine_is_node():
+      # The `requires_node` decorator above also allows for node-like environments such as
+      # deno and bun, but this test requires actual node.
+      self.skipTest('requires nodejs')
+    node_version = shared.get_node_version(get_nodejs())
     node_version = '.'.join(str(x) for x in node_version)
     self.set_setting('MIN_NODE_VERSION', 300000)
     expected = 'This emscripten-generated code requires node v30.0.0 (detected v%s' % node_version
@@ -14982,7 +15066,12 @@ addToLibrary({
 
     # First run without foo.[m]js present to verify that the pthread creation fails
     err = self.run_js(outfile, assert_returncode=NON_ZERO)
-    self.assertContained('Cannot find module.*foo\\.', err, regex=True)
+    # Different engines have slightly different error message syntax.
+    expected = [
+      r'Cannot find module.*foo\.m?js',
+      r'BuildMessage: ModuleNotFound resolving "\./foo\.m?js" \(entry point\)',
+    ]
+    self.assertContained(expected, err, regex=True)
 
     # Now create foo.[m]js and the program should run as expected.
     shutil.copy(outfile, ('foo.%s' % ext))

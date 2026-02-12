@@ -1026,13 +1026,10 @@ def wasm2js(js_file, wasm_file, opt_level, use_closure_compiler, debug_info, sym
   return js_file
 
 
-def strip(infile, outfile, debug=False, sections=None):
-  """Strip DWARF and/or other specified sections from a wasm file"""
-  cmd = [LLVM_OBJCOPY, infile, outfile]
-  if debug:
-    cmd += ['--remove-section=.debug*']
-  if sections:
-    cmd += ['--remove-section=' + section for section in sections]
+@ToolchainProfiler.profile()
+def strip_sections(infile, outfile, sections):
+  """Strip specified sections from a wasm file"""
+  cmd = [LLVM_OBJCOPY, infile, outfile] + ['--remove-section=' + section for section in sections]
   check_call(cmd)
 
 
@@ -1049,7 +1046,7 @@ def emit_debug_on_side(wasm_file, wasm_file_with_dwarf):
 
   mylog.log_move(wasm_file, wasm_file_with_dwarf)
   shutil.move(wasm_file, wasm_file_with_dwarf)
-  strip(wasm_file_with_dwarf, wasm_file, debug=True)
+  strip_sections(wasm_file_with_dwarf, wasm_file, ['.debug*'])
 
   # Strip code and data from the debug file to limit its size. The other known
   # sections are still required to correctly interpret the DWARF info.
@@ -1059,7 +1056,7 @@ def emit_debug_on_side(wasm_file, wasm_file_with_dwarf):
   # TODO(https://github.com/emscripten-core/emscripten/issues/13084): Re-enable
   # this code once the debugger extension can handle wasm files with name
   # sections but no code sections.
-  # strip(wasm_file_with_dwarf, wasm_file_with_dwarf, sections=['CODE'])
+  # strip_sections(wasm_file_with_dwarf, wasm_file_with_dwarf, ['CODE'])
 
   # embed a section in the main wasm to point to the file with external DWARF,
   # see https://yurydelendik.github.io/webassembly-dwarf/#external-DWARF

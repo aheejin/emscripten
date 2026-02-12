@@ -1645,8 +1645,10 @@ def phase_linker_setup(options, linker_args):  # noqa: C901, PLR0912, PLR0915
   if settings.LEGALIZE_JS_FFI:
     settings.REQUIRED_EXPORTS += ['__get_temp_ret', '__set_temp_ret']
 
-  if settings.SPLIT_MODULE and settings.ASYNCIFY == 2:
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['_load_secondary_module']
+  if settings.SPLIT_MODULE:
+    settings.INCOMING_MODULE_JS_API += ['loadSplitModule']
+    if settings.ASYNCIFY == 2:
+      settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += ['_load_secondary_module']
 
   # wasm side modules have suffix .wasm
   if settings.SIDE_MODULE and utils.suffix(target) in ('.js', '.mjs'):
@@ -2408,7 +2410,7 @@ def phase_binaryen(target, options, wasm_target):
     if generating_wasm:
       building.write_symbol_map(wasm_target, symbols_file)
       if not intermediate_debug_info:
-        building.strip(wasm_target, wasm_target, sections=['name'])
+        building.strip_sections(wasm_target, wasm_target, ['name'])
 
   if settings.GENERATE_DWARF and settings.SEPARATE_DWARF and generating_wasm:
     # if the dwarf filename wasn't provided, use the default target + a suffix
@@ -2426,8 +2428,7 @@ def phase_binaryen(target, options, wasm_target):
   assert intermediate_debug_info == 0
   # strip debug info if it was not already stripped by the last command
   if not debug_function_names and building.binaryen_kept_debug_info and generating_wasm:
-    with ToolchainProfiler.profile_block('strip_name_section'):
-      building.strip(wasm_target, wasm_target, debug=False, sections=["name"])
+    building.strip_sections(wasm_target, wasm_target, ['name'])
 
   # replace placeholder strings with correct subresource locations
   if final_js and settings.SINGLE_FILE and not settings.WASM2JS:
