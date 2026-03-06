@@ -220,7 +220,7 @@ def lld_flags_for_executable(external_symbols):
 
   cmd.extend(f'--export-if-defined={e}' for e in settings.EXPORT_IF_DEFINED)
 
-  if settings.MAIN_MODULE or settings.RELOCATABLE:
+  if settings.MAIN_MODULE or settings.SIDE_MODULE:
     cmd.append('--experimental-pic')
     cmd.append('--unresolved-symbols=import-dynamic')
     if not settings.WASM_BIGINT:
@@ -230,11 +230,8 @@ def lld_flags_for_executable(external_symbols):
       # checking of shared library functions in this case.
       cmd.append('--no-shlib-sigcheck')
 
-  if settings.RELOCATABLE:
-    if settings.SIDE_MODULE:
-      cmd.append('-shared')
-    else:
-      cmd.append('-pie')
+  if settings.SIDE_MODULE:
+    cmd.append('-shared')
     if not settings.LINKABLE:
       cmd.append('--no-export-dynamic')
   else:
@@ -276,7 +273,7 @@ def lld_flags_for_executable(external_symbols):
   else:
     cmd.append('--no-stack-first')
 
-  if not settings.RELOCATABLE:
+  if not settings.SIDE_MODULE:
     cmd.append('--table-base=%s' % settings.TABLE_BASE)
     if not settings.STACK_FIRST:
       cmd.append('--global-base=%s' % settings.GLOBAL_BASE)
@@ -1330,7 +1327,7 @@ def read_and_preprocess(filename, expand_macros=False):
 
 def js_legalization_pass_flags():
   flags = []
-  if settings.RELOCATABLE or settings.MAIN_MODULE:
+  if settings.SIDE_MODULE or settings.MAIN_MODULE:
     # When building in relocatable mode, we also want access the original
     # non-legalized wasm functions (since wasm modules can and do link to
     # the original, non-legalized, functions).

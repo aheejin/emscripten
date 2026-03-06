@@ -62,12 +62,12 @@ def get_base_cflags(build_dir, force_object_files=False, preprocess=True):
   flags = ['-g', '-sSTRICT', '-Werror']
   if settings.LTO and not force_object_files:
     flags += ['-flto=' + settings.LTO]
-  if settings.RELOCATABLE or settings.MAIN_MODULE:
-    # Explicitly include `-sRELOCATABLE` when building system libraries.
+  if settings.MAIN_MODULE:
+    # Explicitly include `-sMAIN_MODULE` when building system libraries.
     # `-fPIC` alone is not enough to configure trigger the building and
     # caching of `pic` libraries (see `get_lib_dir` in `cache.py`)
     # FIXME(sbc): `-fPIC` should really be enough here.
-    flags += ['-fPIC', '-sRELOCATABLE']
+    flags += ['-fPIC', '-sMAIN_MODULE']
     if preprocess:
       flags += ['-DEMSCRIPTEN_DYNAMIC_LINKING']
   if settings.MEMORY64:
@@ -717,7 +717,7 @@ class MTLibrary(Library):
     if self.is_mt:
       cflags += ['-pthread', '-sWASM_WORKERS']
     if self.is_ww:
-      cflags += ['-sWASM_WORKERS']
+      cflags += ['-sWASM_WORKERS', '-DWASM_WORKERS_ONLY']
     return cflags
 
   def get_base_name(self):
@@ -1182,7 +1182,6 @@ class libc(MuslInternalLibrary,
     ]
 
     ignore += LIBC_SOCKETS
-
     if self.is_mt:
       ignore += [
         'clone.c',
@@ -1208,9 +1207,6 @@ class libc(MuslInternalLibrary,
           'pthread_create.c',
           'pthread_kill.c',
           'emscripten_thread_init.c',
-          'emscripten_thread_state.S',
-          'emscripten_futex_wait.c',
-          'emscripten_futex_wake.c',
           'emscripten_yield.c',
         ])
     else:
@@ -1261,12 +1257,40 @@ class libc(MuslInternalLibrary,
           'thrd_sleep.c',
           'thrd_yield.c',
         ])
+
+      libc_files += files_in_path(
+        path='system/lib/libc',
+        filenames=['emscripten_yield_stub.c'])
+
+      if self.is_ww:
+        libc_files += files_in_path(
+          path='system/lib/libc/musl/src/thread',
+          filenames=[
+            '__lock.c',
+            '__wait.c',
+            'lock_ptc.c',
+          ])
+      else:
+        # Include stub version of thread functions when building
+        # in single theaded mode.
+        # Note: We do *not* include these stubs in the Wasm Workers build since it would
+        # never be safe to call these from a Wasm Worker.
+        libc_files += files_in_path(
+          path='system/lib/pthread',
+          filenames=[
+            'library_pthread_stub.c',
+            'pthread_self_stub.c',
+            'proxying_stub.c',
+          ])
+
+    if self.is_mt or self.is_ww:
+      # Low level thread primitives available in both pthreads and wasm workers builds.
       libc_files += files_in_path(
         path='system/lib/pthread',
         filenames=[
-          'library_pthread_stub.c',
-          'pthread_self_stub.c',
-          'proxying_stub.c',
+          'emscripten_thread_state.S',
+          'emscripten_futex_wait.c',
+          'emscripten_futex_wake.c',
         ])
 
     # These files are in libc directories, but only built in libc_optz.
@@ -1381,7 +1405,7 @@ class libc(MuslInternalLibrary,
           'system.c',
         ])
 
-    if settings.RELOCATABLE or settings.MAIN_MODULE:
+    if settings.MAIN_MODULE:
       libc_files += files_in_path(path='system/lib/libc', filenames=['dynlink.c'])
 
     libc_files += files_in_path(
@@ -1539,7 +1563,7 @@ class libwasm_workers(DebugLibrary):
 
   def can_use(self):
     # see src/library_wasm_worker.js
-    return super().can_use() and not settings.SINGLE_FILE and not settings.RELOCATABLE
+    return super().can_use() and not settings.SINGLE_FILE and not settings.MAIN_MODULE
 
 
 class libsockets(MuslInternalLibrary, MTLibrary):
@@ -1629,6 +1653,7 @@ class libcxxabi(ExceptionLibrary, MTLibrary, DebugLibrary):
   name = 'libc++abi'
   cflags = [
       '-Oz',
+      '-D_LIBCXXABI_USE_FUTEX',
       '-D_LIBCPP_BUILDING_LIBRARY',
       '-D_LIBCXXABI_BUILDING_LIBRARY',
       '-DLIBCXXABI_NON_DEMANGLING_TERMINATE',
@@ -2430,7 +2455,7 @@ def get_libs_to_link(options):
   else:
     add_library('libsockets')
 
-  if settings.WASM_WORKERS and (not settings.SINGLE_FILE and not settings.RELOCATABLE):
+  if settings.WASM_WORKERS and (not settings.SINGLE_FILE and not settings.MAIN_MODULE):
     # When we include libwasm_workers we use `--whole-archive` to ensure
     # that the static constructor (`emscripten_wasm_worker_main_thread_initialize`)
     # is run.

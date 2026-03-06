@@ -29,6 +29,11 @@ import tarfile
 from dataclasses import dataclass
 from enum import Enum, auto, unique
 
+# This assert needs to happen early, before any too-recent python syntax is used.
+# In particular it needs to happen before we import any python file that uses the
+# `match` keyword.
+assert sys.version_info >= (3, 10), f'emscripten requires python 3.10 or above ({sys.executable} {sys.version})'
+
 from tools import (
   building,
   cache,
@@ -399,9 +404,6 @@ def phase_setup(state):
         diagnostics.warning(
             'unused-command-line-argument',
             "linker flag ignored during compilation: '%s'" % arg)
-
-  if settings.SIDE_MODULE:
-    settings.RELOCATABLE = 1
 
   if 'USE_PTHREADS' in user_settings:
     settings.PTHREADS = settings.USE_PTHREADS

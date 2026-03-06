@@ -83,7 +83,6 @@ COMPILE_TIME_SETTINGS = {
     'WASM_LEGACY_EXCEPTIONS',
     'MAIN_MODULE',
     'SIDE_MODULE',
-    'RELOCATABLE',
     'LINKABLE',
     'STRICT',
     'EMSCRIPTEN_TRACING',
@@ -115,7 +114,6 @@ DEPRECATED_SETTINGS = {
     'LEGALIZE_JS_FFI': 'to disable JS type legalization use `-sWASM_BIGINT` or `-sSTANDALONE_WASM`',
     'ASYNCIFY_EXPORTS': 'please use JSPI_EXPORTS instead',
     'LINKABLE': 'under consideration for removal (https://github.com/emscripten-core/emscripten/issues/25262)',
-    'RELOCATABLE': ' under consideration for removal (https://github.com/emscripten-core/emscripten/issues/25262)',
 }
 
 # Settings that don't need to be externalized when serializing to json because they
@@ -126,12 +124,11 @@ INTERNAL_SETTINGS = {
 
 # List of incompatible settings, of the form (SETTINGS_A, SETTING_B, OPTIONAL_REASON_FOR_INCOMPAT)
 INCOMPATIBLE_SETTINGS = [
-    ('MINIMAL_RUNTIME', 'RELOCATABLE', None),
+    ('MINIMAL_RUNTIME', 'MAIN_MODULE', None),
     ('WASM2JS', 'MAIN_MODULE', 'wasm2js does not support dynamic linking'),
     ('WASM2JS', 'SIDE_MODULE', 'wasm2js does not support dynamic linking'),
     ('MODULARIZE', 'NO_DECLARE_ASM_MODULE_EXPORTS', None),
     ('EVAL_CTORS', 'WASM2JS', None),
-    ('EVAL_CTORS', 'RELOCATABLE', 'movable segments'),
     # In Asyncify exports can be called more than once, and this seems to not
     # work properly yet (see test_emscripten_scan_registers).
     ('EVAL_CTORS', 'ASYNCIFY', None),
@@ -145,7 +142,6 @@ INCOMPATIBLE_SETTINGS = [
     ('MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION', 'SINGLE_FILE', None),
     ('SEPARATE_DWARF', 'WASM2JS', 'as there is no wasm file'),
     ('GL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS', 'NO_GL_SUPPORT_SIMPLE_ENABLE_EXTENSIONS', None),
-    ('MODULARIZE', 'NODEJS_CATCH_REJECTION', None),
     ('LEGACY_VM_SUPPORT', 'MEMORY64', None),
     ('CROSS_ORIGIN', 'NO_DYNAMIC_EXECUTION', None),
     ('CROSS_ORIGIN', 'NO_PTHREADS', None),
@@ -252,6 +248,9 @@ LEGACY_SETTINGS = [
     ['USE_WEBGPU', [0], 'No longer supported; replaced by --use-port=emdawnwebgpu, which implements a newer (but incompatible) version of webgpu.h - see tools/ports/emdawnwebgpu.py'],
     ['PROXY_TO_WORKER', [0], 'No longer supported'],
     ['NODEJS_CATCH_EXIT', [0], 'No longer supported'],
+    ['NODEJS_CATCH_REJECTION', [0], 'No longer supported'],
+    ['POLYFILL_OLD_MATH_FUNCTIONS', [0], 'No longer supported'],
+    ['RELOCATABLE', [0], 'No longer supported'],
 ]
 
 user_settings: dict[str, str] = {}
