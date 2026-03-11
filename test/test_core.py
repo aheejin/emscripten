@@ -26,6 +26,7 @@ from common import (
   WEBIDL_BINDER,
   RunnerCore,
   compiler_for,
+  copy_asset,
   create_file,
   engine_is_bun,
   engine_is_node,
@@ -682,7 +683,7 @@ class TestCoreBase(RunnerCore):
     self.do_runf('core/test_core_types.c')
 
   def test_cube2md5(self):
-    shutil.copy(test_file('core/test_cube2md5.txt'), '.')
+    copy_asset('core/test_cube2md5.txt')
     self.do_core_test('test_cube2md5.c', cflags=['--embed-file', 'test_cube2md5.txt'])
 
   @also_with_standalone_wasm()
@@ -884,16 +885,7 @@ class TestCoreBase(RunnerCore):
     self.do_core_test('test_stack.c')
 
   def test_stack_align(self):
-    src = test_file('core/test_stack_align.c')
-
-    def test():
-      self.do_runf(src, ['''align 4: 0
-align 8: 0
-align 16: 0
-align 32: 0
-base align: 0, 0, 0, 0'''])
-
-    test()
+    self.do_core_test('test_stack_align.c')
 
   @no_asan('stack size is too low for asan to work properly')
   def test_stack_placement(self):
@@ -2719,7 +2711,7 @@ The current type of b is: 9
     if not self.is_optimizing() and ('-flto' in self.cflags or '-flto=thin' in self.cflags):
       self.skipTest('https://github.com/emscripten-core/emscripten/issues/25015')
 
-    shutil.copy(test_file('pthread/foo.js'), '.')
+    copy_asset('pthread/foo.js')
     self.do_runf('pthread/test_pthread_run_script.c')
 
     # Run the test again with PROXY_TO_PTHREAD
@@ -2752,6 +2744,10 @@ The current type of b is: 9
     if self.get_setting('MINIMAL_RUNTIME') and is_sanitizing(self.cflags):
       self.skipTest('MINIMAL_RUNTIME + threads + asan does not work')
     self.do_run_in_out_file_test('pthread/test_pthread_run_on_main_thread.c')
+
+  @requires_pthreads
+  def test_pthread_is_lock_free(self):
+    self.do_runf('pthread/is_lock_free.c', 'done\n', cflags=['-pthread'])
 
   def test_tcgetattr(self):
     self.do_runf('termios/test_tcgetattr.c', 'success')
@@ -6306,7 +6302,6 @@ PORT: 3979
   @with_env_modify({'LC_ALL': 'latin-1', 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0'})
   @crossplatform
   @no_modularize_instance('uses MODULARIZE')
-  @no_strict_js('MODULARIZE is not compatible with STRICT_JS')
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
   def test_unicode_js_library(self):
     # First verify that we have correct overridden the default python file encoding.
@@ -6721,7 +6716,7 @@ void* operator new(size_t size) {
   @is_slow_test
   def test_freetype(self):
     # Not needed for js, but useful for debugging
-    shutil.copy(test_file('freetype/LiberationSansBold.ttf'), 'font.ttf')
+    copy_asset('freetype/LiberationSansBold.ttf', 'font.ttf')
     ftlib = self.get_freetype_library()
 
     if self.get_setting('WASMFS'):
@@ -6843,7 +6838,7 @@ void* operator new(size_t size) {
     # See https://github.com/emscripten-core/emscripten/issues/20757
     self.cflags.extend(['-Wno-deprecated-declarations', '-Wno-nontrivial-memaccess'])
     poppler = self.get_poppler_library()
-    shutil.copy(test_file('poppler/paper.pdf'), '.')
+    copy_asset('poppler/paper.pdf')
 
     create_file('pre.js', '''
     Module.preRun = () => {
@@ -7906,7 +7901,7 @@ void* operator new(size_t size) {
   def test_dwarf(self):
     self.cflags.append('-g')
 
-    shutil.copy(test_file('core/test_dwarf.c'), '.')
+    copy_asset('core/test_dwarf.c')
 
     self.emcc('test_dwarf.c')
 
@@ -8038,7 +8033,6 @@ void* operator new(size_t size) {
 
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
   @no_modularize_instance('uses -sMODULARIZE')
-  @no_strict_js('MODULARIZE is not compatible with STRICT_JS')
   def test_modularize_closure_pre(self):
     # test that the combination of modularize + closure + pre-js works. in that mode,
     # closure should not minify the Module object in a way that the pre-js cannot use it.
@@ -8985,7 +8979,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.do_core_test('test_asan_api.c', cflags=['-fsanitize=address'])
 
   @asan
-  @no_strict_js('MODULARIZE is not compatible with STRICT_JS')
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
   @no_modularize_instance('uses MODULARIZE')
   def test_asan_modularized_with_closure(self):
@@ -9573,17 +9566,14 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.do_core_test('test_syscall_intercept.c')
 
   @requires_pthreads
-  @flaky('https://github.com/emscripten-core/emscripten/issues/26256')
   def test_select_blocking(self):
     self.do_runf('core/test_select_blocking.c', cflags=['-pthread', '-sPROXY_TO_PTHREAD=1', '-sEXIT_RUNTIME=1'])
 
   @requires_pthreads
-  @flaky('https://github.com/emscripten-core/emscripten/issues/26256')
   def test_poll_blocking(self):
     self.do_runf('core/test_poll_blocking.c', cflags=['-pthread', '-sPROXY_TO_PTHREAD=1', '-sEXIT_RUNTIME=1'])
 
   @with_asyncify_and_jspi
-  @flaky('https://github.com/emscripten-core/emscripten/issues/26256')
   def test_poll_blocking_asyncify(self):
     if self.get_setting('JSPI') and engine_is_v8(self.get_current_js_engine()):
       self.skipTest('test requires setTimeout which is not supported under v8')
@@ -9680,7 +9670,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.assertFileContents(test_file('core/test_esm_integration.expected.mjs'), read_file('hello_world.mjs'))
 
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
-  @no_strict_js('MODULARIZE is not compatible with STRICT_JS')
+  @no_strict_js('EXPORT_ES6 is not compatible with STRICT_JS')
   def test_modularize_instance_hello(self):
     self.do_core_test('test_hello_world.c', cflags=['-sMODULARIZE=instance', '-Wno-experimental'])
 
@@ -9689,7 +9679,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     'pthreads': (['-pthread'],),
   })
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
-  @no_strict_js('MODULARIZE is not compatible with STRICT_JS')
+  @no_strict_js('EXPORT_ES6 is not compatible with STRICT_JS')
   def test_modularize_instance(self, args):
     if args:
       self.require_pthreads()
@@ -9725,7 +9715,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
 
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
   @no_4gb('EMBIND_AOT can\'t lower 4gb')
-  @no_strict_js('MODULARIZE is not compatible with STRICT_JS')
+  @no_strict_js('EXPORT_ES6 is not compatible with STRICT_JS')
   def test_modularize_instance_embind(self):
     self.run_process([EMXX, test_file('modularize_instance_embind.cpp'),
                       '-sMODULARIZE=instance',
