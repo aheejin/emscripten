@@ -6,10 +6,22 @@
  */
 
 #include <stdio.h>
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
+#include <assert.h>
 #include <emscripten.h>
+#include <unistd.h>
 
 int main() {
-  emscripten_sleep(1);
-  printf("Hello, world!\n");
+  SDL_Init(SDL_INIT_VIDEO);
+
+  if (!TTF_Init()) {
+    printf("TTF_Init: %s\n", SDL_GetError());
+    return 1;
+  }
+
+  TTF_Quit();
+  SDL_Quit();
+
   return 0;
 }

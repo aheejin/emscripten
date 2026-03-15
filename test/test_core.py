@@ -283,6 +283,23 @@ def also_with_asyncify_and_jspi(func):
   return metafunc
 
 
+def also_with_wasm_workers(func):
+  assert callable(func)
+
+  @wraps(func)
+  def metafunc(self, ww, *args, **kwargs):
+    if ww:
+      if self.get_setting('WASM_ESM_INTEGRATION'):
+        self.skipTest('WASM_ESM_INTEGRATION is not compatible with WASM_WORKERS')
+      if is_sanitizing(self.cflags):
+        self.skipTest('sanitizers are not compatible with WASM_WORKERS')
+      self.cflags += ['-sWASM_WORKERS']
+    return func(self, *args, **kwargs)
+
+  parameterize(metafunc, {'': (False,), 'ww': (True,)})
+  return metafunc
+
+
 def no_optimize(note=''):
   assert not callable(note)
 
@@ -2748,6 +2765,34 @@ The current type of b is: 9
   @requires_pthreads
   def test_pthread_is_lock_free(self):
     self.do_runf('pthread/is_lock_free.c', 'done\n', cflags=['-pthread'])
+
+  # These wasm_worker tests are also tested in pure wasm-worker mode in test_browser.py.
+  # We test them here in pthread-mode and in pthread+wasm-worker mode.
+
+  @requires_pthreads
+  @also_with_wasm_workers
+  def test_emscripten_lock_waitinf_acquire(self):
+    self.do_runf('wasm_worker/lock_waitinf_acquire.c', 'done\n', cflags=['-pthread', '-sPTHREAD_POOL_SIZE=4'])
+
+  @requires_pthreads
+  @also_with_wasm_workers
+  def test_emscripten_lock_wait_acquire(self):
+    self.do_runf('wasm_worker/lock_wait_acquire.c', 'done\n', cflags=['-pthread'])
+
+  @requires_pthreads
+  @also_with_wasm_workers
+  def test_emscripten_lock_busyspin_waitinf(self):
+    self.do_runf('wasm_worker/lock_busyspin_waitinf_acquire.c', 'done\n', cflags=['-pthread'])
+
+  @requires_pthreads
+  @also_with_wasm_workers
+  def test_emscripten_semaphore_waitinf_acquire(self):
+    self.do_runf('wasm_worker/semaphore_waitinf_acquire.c', 'done\n', cflags=['-pthread', '-sPTHREAD_POOL_SIZE=7'])
+
+  @requires_pthreads
+  @also_with_wasm_workers
+  def test_emscripten_semaphore_try_acquire(self):
+    self.do_runf('wasm_worker/semaphore_try_acquire.c', 'done\n', cflags=['-pthread'])
 
   def test_tcgetattr(self):
     self.do_runf('termios/test_tcgetattr.c', 'success')
@@ -5926,7 +5971,7 @@ Module.onRuntimeInitialized = () => {
       #include <emscripten.h>
       #include <stdio.h>
       int main(void) {
-        printf("hello world\n"); // should work with strict mode
+        printf("Hello, world!\n"); // should work with strict mode
         EM_ASM(
           try {
             FS.readFile('/dummy.txt');
@@ -6238,7 +6283,7 @@ PORT: 3979
       #include <iostream>
 
       int main() {
-        std::cout << "hello world" << std::endl << 77 << "." << std::endl;
+        std::cout << "Hello, world!" << std::endl << 77 << "." << std::endl;
         return 0;
       }
     ''')
@@ -6250,7 +6295,7 @@ PORT: 3979
 
       # add some timing nondeterminism here, not that we need it, but whatever
       time.sleep(random.random() / (10 * num))
-      self.do_runf('src.cpp', 'hello world\n77.\n')
+      self.do_runf('src.cpp', 'Hello, world!\n77.\n')
 
       # Verify that this build is identical to the previous one
       if os.path.exists('src.js.previous'):
@@ -6479,10 +6524,10 @@ void* operator new(size_t size) {
       int main() {
         std::set<int> fetchOriginatorNums;
         fetchOriginatorNums.insert(171);
-        printf("hello world\\n");
+        printf("Hello, world!\\n");
         return 0;
       }
-      ''', 'hello world')
+      ''', 'Hello, world!')
 
   def test_typeid(self):
     self.do_core_test('test_typeid.cpp')
@@ -7183,7 +7228,7 @@ void* operator new(size_t size) {
     response_data = '--start-group ' + objfile + ' --end-group'
     create_file('rsp_file', response_data.replace('\\', '\\\\'))
     self.run_process([EMCC, "-Wl,@rsp_file", '-o', out_js] + self.get_cflags())
-    self.do_run(out_js, 'hello, world', no_build=True)
+    self.do_run(out_js, 'Hello, world!', no_build=True)
 
   @no_modularize_instance('uses Module object directly')
   def test_exported_response(self):
@@ -7369,10 +7414,9 @@ void* operator new(size_t size) {
     do_test(test1)
 
     print('libcxx - remove 2 ctors from iostream code')
-    output = 'hello, world!'
 
     def test2():
-      self.do_runf('hello_libcxx.cpp', output)
+      self.do_runf('hello_libcxx.cpp', 'Hello, world!')
 
     # in standalone more there is more usage of WASI APIs, which mode 2 is
     # needed to avoid in order to fully optimize, so do not test mode 1 in
@@ -8080,7 +8124,7 @@ void* operator new(size_t size) {
 
       int main() {
         atexit(cleanup); // this atexit should still be called
-        printf("hello, world!\n");
+        printf("Hello, world!\n");
         // Unusual exit status to make sure it's working!
         #if defined(NORMAL_EXIT)
           exit(117);
@@ -8100,11 +8144,11 @@ void* operator new(size_t size) {
     ''')
     self.cflags += ['--pre-js', 'pre.js', '-sINCOMING_MODULE_JS_API=onExit']
     print('.. exit')
-    self.do_runf('exit.c', 'hello, world!\ncleanup\nI see exit status: 117', assert_returncode=117, cflags=['-DNORMAL_EXIT'])
+    self.do_runf('exit.c', 'Hello, world!\ncleanup\nI see exit status: 117', assert_returncode=117, cflags=['-DNORMAL_EXIT'])
     print('.. _exit')
-    self.do_runf('exit.c', 'hello, world!\nI see exit status: 118', assert_returncode=118, cflags=['-DUNDER_EXIT'])
+    self.do_runf('exit.c', 'Hello, world!\nI see exit status: 118', assert_returncode=118, cflags=['-DUNDER_EXIT'])
     print('.. _Exit')
-    self.do_runf('exit.c', 'hello, world!\nI see exit status: 119', assert_returncode=119, cflags=['-DCAPITAL_EXIT'])
+    self.do_runf('exit.c', 'Hello, world!\nI see exit status: 119', assert_returncode=119, cflags=['-DCAPITAL_EXIT'])
 
   def test_minmax(self):
     self.do_runf('test_minmax.c', 'NAN != NAN\nSuccess!')
@@ -8640,7 +8684,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.add_post_run('ThisFunctionDoesNotExist()')
     out_js = self.build('core/test_hello_world.c')
     output = self.run_js(out_js, assert_returncode=NON_ZERO)
-    self.assertStartswith(output, 'hello, world!')
+    self.assertStartswith(output, 'Hello, world!')
     self.assertContained('ThisFunctionDoesNotExist is not defined', output)
 
   def test_postrun_exit_runtime(self):
@@ -9654,7 +9698,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   })
   @esm_integration
   def test_esm_integration_main(self, args):
-    self.do_runf('hello_world.c', 'hello, world!', cflags=args)
+    self.do_runf('hello_world.c', 'Hello, world!', cflags=args)
 
   @esm_integration
   def test_esm_integration(self):
@@ -9666,7 +9710,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
       await init({arguments: ['foo', 'bar']});
       err('this is a pointer:', stringToNewUTF8('hello'));
     ''')
-    self.assertContained('hello, world! (3)', self.run_js('runner.mjs'))
+    self.assertContained('Hello, world! (3)', self.run_js('runner.mjs'))
     self.assertFileContents(test_file('core/test_esm_integration.expected.mjs'), read_file('hello_world.mjs'))
 
   @no_omit_asm_module_exports('MODULARIZE is not compatible with DECLARE_ASM_MODULE_EXPORTS=0')
@@ -9752,10 +9796,11 @@ NODEFS is no longer included by default; build with -lnodefs.js
     6|       | */
     7|       |
     8|       |#include <stdio.h>
-    9|      1|int main() {
-   10|      1|  printf("hello, world!\\n");
-   11|      1|  return 0;
-   12|      1|}
+    9|       |
+   10|      1|int main() {
+   11|      1|  printf("Hello, world!\\n");
+   12|      1|  return 0;
+   13|      1|}
 
 '''
     self.set_setting('NODERAWFS')
