@@ -917,6 +917,8 @@ class MuslInternalLibrary(Library):
     '-std=c99',
     '-D_XOPEN_SOURCE=700',
     '-Wno-unused-result',  # system call results are often ignored in musl, and in wasi that warns
+    '-Wno-bitwise-op-parentheses',
+    '-Wno-shift-op-parentheses',
   ]
 
 
@@ -1069,11 +1071,9 @@ class libc(MuslInternalLibrary,
   cflags += ['-Wno-ignored-attributes',
              # tre.h defines NDEBUG internally itself
              '-Wno-macro-redefined',
-             '-Wno-shift-op-parentheses',
              '-Wno-string-plus-int',
              '-Wno-missing-braces',
              '-Wno-logical-op-parentheses',
-             '-Wno-bitwise-op-parentheses',
              '-Wno-unused-but-set-variable',
              '-Wno-unused-variable',
              '-Wno-unused-label',
@@ -1081,6 +1081,8 @@ class libc(MuslInternalLibrary,
 
   def __init__(self, **kwargs):
     self.non_lto_files = self.get_libcall_files()
+    # TODO(https://github.com/emscripten-core/emscripten/issues/26506)
+    self.non_lto_files.append(utils.path_from_root('system/lib/libc/musl/src/locale/uselocale.c'))
     super().__init__(**kwargs)
 
   def get_libcall_files(self):
@@ -1504,7 +1506,7 @@ class libprintf_long_double(libc):
     return super().can_use() and settings.PRINTF_LONG_DOUBLE
 
 
-class libwasm_workers(DebugLibrary):
+class libwasm_workers(MuslInternalLibrary, DebugLibrary):
   name = 'libwasm_workers'
   includes = ['system/lib/libc']
   src_dir = 'system/lib/wasm_worker'
