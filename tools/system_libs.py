@@ -1212,6 +1212,7 @@ class libc(MuslInternalLibrary,
           'pthread_kill.c',
           'emscripten_thread_init.c',
           'emscripten_yield.c',
+          'thread_profiler.c',
         ])
     else:
       ignore += ['thread']
@@ -1412,10 +1413,6 @@ class libc(MuslInternalLibrary,
 
     if settings.MAIN_MODULE:
       libc_files += files_in_path(path='system/lib/libc', filenames=['dynlink.c'])
-
-    libc_files += files_in_path(
-        path='system/lib/pthread',
-        filenames=['thread_profiler.c'])
 
     libc_files += glob_in_path('system/lib/libc/compat', '*.c')
 
