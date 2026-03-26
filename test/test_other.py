@@ -1653,7 +1653,7 @@ int f() {
     self.do_runf('lib.c', 'libfunc\n', cflags=['-sEXPORTED_FUNCTIONS=_libfunc2', '-sEXPORT_ALL', '--pre-js', 'pre.js'])
 
   @all_engines
-  @also_with_wasmfs
+  @with_all_fs
   @crossplatform
   @parameterized({
     '': ([],),
@@ -2558,6 +2558,42 @@ F1 -> ''
     self.do_runf('jpeg_test.c', 'Image is 600 by 450 with 3 components',
                  cflags=['--embed-file', 'screenshot.jpg', '--use-port=libjpeg'],
                  args=['screenshot.jpg'])
+
+  @requires_network
+  def test_side_module_with_ports(self):
+    # Verify that ports can be used in side modules, and that the resulting
+    # side module can be used from a main module.
+    create_file('side.c', r'''
+      #include <stdio.h>
+      #include <gif_lib.h>
+
+      void gif_side_test(void) {
+        ColorMapObject* map = GifMakeMapObject(2, NULL);
+        if (map) {
+          GifFreeMapObject(map);
+        }
+        puts("gif side ok");
+      }
+    ''')
+
+    create_file('main.c', r'''
+      #include <stdio.h>
+
+      void gif_side_test(void);
+
+      int main() {
+        gif_side_test();
+        puts("main ok");
+        return 0;
+      }
+    ''')
+
+    self.emcc('side.c', args=['-sSIDE_MODULE', '-sUSE_GIFLIB', '-lgif', '-o', 'libgif_side.so'])
+    self.assertExists('libgif_side.so')
+
+    # Linking the side module into the main module should cause it to be loaded
+    # automatically at runtime.
+    self.do_runf('main.c', 'gif side ok\n', cflags=['-sMAIN_MODULE=2', 'libgif_side.so'])
 
   @requires_network
   @also_with_wasm64
@@ -13128,7 +13164,18 @@ void foo() {}
   def test_unistd_swab(self):
     self.do_run_in_out_file_test('unistd/swab.c')
 
+  @also_with_noderawfs
+  @crossplatform
+  @no_deno('https://github.com/denoland/deno/issues/32995')
   def test_unistd_isatty(self):
+    if '-DNODERAWFS' in self.cflags:
+      # Under NODERAWFS istty reports accurate information about the file descriptors
+      # of the node process. When we run tests we always capture stdout so we never expect
+      # stdout to be a tty.
+      stdin_isatty = os.isatty(0)
+      self.cflags += ['-DEXPECT_STDOUT=0', f'-DEXPECT_STDIN={int(stdin_isatty)}']
+      if WINDOWS:
+        self.skipTest('depends on /dev filesystem')
     self.do_runf('unistd/isatty.c', 'success')
 
   def test_unistd_login(self):
@@ -13141,7 +13188,7 @@ void foo() {}
   @with_all_fs
   def test_unistd_fstatfs(self):
     if '-DNODERAWFS' in self.cflags and WINDOWS:
-      self.skipTest('Cannot look up /dev/stdout on windows')
+      self.skipTest('depends on /dev filesystem')
     self.do_run_in_out_file_test('unistd/fstatfs.c', cflags=['-sASSERTIONS=2'])
 
   @no_windows("test is Linux-specific")

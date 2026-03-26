@@ -62,7 +62,7 @@ def get_base_cflags(build_dir, force_object_files=False, preprocess=True):
   flags = ['-g', '-sSTRICT', '-Werror']
   if settings.LTO and not force_object_files:
     flags += ['-flto=' + settings.LTO]
-  if settings.MAIN_MODULE:
+  if settings.MAIN_MODULE or settings.SIDE_MODULE:
     # Explicitly include `-sMAIN_MODULE` when building system libraries.
     # `-fPIC` alone is not enough to configure trigger the building and
     # caching of `pic` libraries (see `get_lib_dir` in `cache.py`)
@@ -955,7 +955,15 @@ class libcompiler_rt(MTLibrary, SjLjLibrary):
   # restriction soon: https://reviews.llvm.org/D71738
   force_object_files = True
 
-  cflags = ['-fno-builtin', '-DNDEBUG', '-DCOMPILER_RT_HAS_ATOMICS=1']
+  cflags = [
+      '-fno-builtin',
+      '-DNDEBUG',
+      '-DCOMPILER_RT_HAS_ATOMICS=1',
+      # TODO: Remove this if the emutls_key_created variable in emutls.c is
+      # fixed or if the scope of the warning is modified again (see
+      # https://github.com/llvm/llvm-project/pull/178342)
+      '-Wno-unused-but-set-variable',
+  ]
   src_dir = 'system/lib/compiler-rt/lib/builtins'
   profile_src_dir = 'system/lib/compiler-rt/lib/profile'
   includes = ['system/lib/libc', 'system/lib/compiler-rt/include']
@@ -1074,6 +1082,9 @@ class libc(MuslInternalLibrary,
              '-Wno-string-plus-int',
              '-Wno-missing-braces',
              '-Wno-logical-op-parentheses',
+             # TODO: remove this if the cause variable in cxa_default_handlers
+             # is fixed or if the scope of the warning is reduced (see
+             # https://github.com/llvm/llvm-project/pull/178342)
              '-Wno-unused-but-set-variable',
              '-Wno-unused-variable',
              '-Wno-unused-label',
@@ -1622,6 +1633,7 @@ class libcxxabi(ExceptionLibrary, MTLibrary, DebugLibrary):
       '-D_LIBCXXABI_BUILDING_LIBRARY',
       '-DLIBCXXABI_NON_DEMANGLING_TERMINATE',
       '-std=c++23',
+      '-Wno-unused-but-set-variable',
     ]
   includes = ['system/lib/libcxx/src']
 
