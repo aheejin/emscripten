@@ -291,7 +291,7 @@ def inspect_code(headers, cflags):
 def parse_json(path):
   header_files = []
 
-  with open(path) as stream:
+  with open(path, encoding='utf-8') as stream:
     # Remove comments before loading the JSON.
     data = json.loads(re.sub(r'//.*\n', '', stream.read()))
 
@@ -300,7 +300,7 @@ def parse_json(path):
 
   for item in data:
     for key in item:
-      if key not in ['file', 'defines', 'structs']:
+      if key not in {'file', 'defines', 'structs'}:
         raise 'Unexpected key in json file: %s' % key
 
     header = {'name': item['file'], 'structs': {}, 'defines': {}}
@@ -394,7 +394,7 @@ def main(args):
   else:
     output_file = utils.path_from_root('src/struct_info_generated.json')
 
-  with open(output_file, 'w') as f:
+  with open(output_file, 'w', encoding='utf-8') as f:
     output_json(info, f)
 
   return 0
