@@ -11753,6 +11753,16 @@ int main(void) {
     expected = ['got: hello world string, longer than 16 chars', 'pthread_create: environment does not support SharedArrayBuffer, pthreads are not available']
     self.do_runf('hello_world.c', expected, assert_all=True, assert_returncode=NON_ZERO, cflags=['--pre-js=pre.js'])
 
+  @requires_node
+  @requires_pthreads
+  def test_pthread_mem_leak(self):
+    self.set_setting('MODULARIZE')
+    self.set_setting('EXIT_RUNTIME')
+    self.set_setting('EXPORTED_RUNTIME_METHODS', ['wasmMemory'])
+    self.node_args.append('--expose-gc')
+    self.cflags += ['--extern-post-js', test_file('pthread/test_pthread_mem_leak_post.js')]
+    self.do_runf('hello_world.c', 'SUCCESS: No leak detected', cflags=['-pthread'])
+
   def test_stdin_preprocess(self):
     create_file('temp.h', '#include <string>')
     outputStdin = self.run_process([EMCC, '-x', 'c++', '-dM', '-E', '-'], input="#include <string>", stdout=PIPE).stdout
@@ -13047,6 +13057,14 @@ void foo() {}
   def test_pthread_kill_self(self, args):
     self.do_runf('pthread/test_pthread_kill_self.c', 'main\n', assert_returncode=NON_ZERO, cflags=args)
 
+  @requires_pthreads
+  @parameterized({
+    '': (['-sPTHREAD_POOL_SIZE=1'],),
+    'proxied': (['-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'],),
+  })
+  def test_pthread_sigmask(self, args):
+    self.do_runf('pthread/test_pthread_sigmask.c', 'done\n', cflags=args)
+
   # Tests memory growth in pthreads mode, but still on the main thread.
   @requires_pthreads
   @parameterized({
@@ -13173,7 +13191,6 @@ void foo() {}
 
   @also_with_noderawfs
   @crossplatform
-  @no_deno('https://github.com/denoland/deno/issues/32995')
   def test_unistd_isatty(self):
     if '-DNODERAWFS' in self.cflags:
       # Under NODERAWFS istty reports accurate information about the file descriptors

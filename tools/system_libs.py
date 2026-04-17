@@ -1306,6 +1306,7 @@ class libc(MuslInternalLibrary,
       libc_files += files_in_path(
         path='system/lib/pthread',
         filenames=[
+          'emscripten_get_next_tid.c',
           'emscripten_thread_state.S',
           'emscripten_thread_primitives.c',
           'emscripten_futex_wait.c',
@@ -1526,7 +1527,7 @@ class libwasm_workers(MuslInternalLibrary, DebugLibrary):
   name = 'libwasm_workers'
   includes = ['system/lib/libc']
   src_dir = 'system/lib/wasm_worker'
-  src_files = ['library_wasm_worker.c', 'wasm_worker_initialize.S']
+  src_files = ['library_wasm_worker.c', 'wasm_worker_initialize.S', 'audio_worklet.c']
 
   def get_cflags(self):
     cflags = super().get_cflags() + ['-sWASM_WORKERS']
@@ -1609,8 +1610,10 @@ class crt1_proxy_main(MuslInternalLibrary):
     return super().can_use() and settings.PROXY_TO_PTHREAD
 
 
-class crtbegin(MuslInternalLibrary):
-  name = 'crtbegin'
+class crtbegin_mt(MuslInternalLibrary):
+  # This library defines _emscripten_tls_init/_emscripten_tls_free which are linked into
+  # every module (i.e. not just the main module).
+  name = 'crtbegin-mt'
   cflags = ['-pthread']
   src_dir = 'system/lib/pthread'
   src_files = ['emscripten_tls_init.c']
@@ -1621,7 +1624,7 @@ class crtbegin(MuslInternalLibrary):
     return '.o'
 
   def can_use(self):
-    return super().can_use() and settings.SHARED_MEMORY
+    return super().can_use() and settings.PTHREADS
 
 
 class libcxxabi(ExceptionLibrary, MTLibrary, DebugLibrary):
@@ -2331,8 +2334,8 @@ def get_libs_to_link(options):
     libs_to_link.append((lib.get_link_flag(), whole_archive or need_whole_archive))
 
   if not options.nostartfiles:
-    if settings.SHARED_MEMORY:
-      add_library('crtbegin')
+    if settings.PTHREADS:
+      add_library('crtbegin-mt')
 
     if not settings.SIDE_MODULE:
       if settings.STANDALONE_WASM:
