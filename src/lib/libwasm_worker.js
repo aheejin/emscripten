@@ -18,9 +18,6 @@
 #if WASM2JS && MODULARIZE
 #error "-sWASM=0 + -sMODULARIZE + -sWASM_WORKERS is not supported"
 #endif
-#if EXPORT_ES6 && (MIN_FIREFOX_VERSION < 114 || MIN_CHROME_VERSION < 80 || MIN_SAFARI_VERSION < 150000)
-#error "internal error, feature_matrix should not allow this"
-#endif
 
 #endif // ~WASM_WORKERS
 
@@ -92,14 +89,15 @@ addToLibrary({
     '_emscripten_wasm_worker_initialize',
 #if PTHREADS
     '__set_thread_state',
+    '$alignMemory',
 #endif
   ],
   $_wasmWorkerInitializeRuntime: () => {
 #if ASSERTIONS
     assert(wwParams);
     assert(wwParams.wwID);
-    assert(wwParams.stackLowestAddress % 16 == 0);
-    assert(wwParams.stackSize % 16 == 0);
+    assert(wwParams.stackLowestAddress % {{{ STACK_ALIGN }}} == 0);
+    assert(wwParams.stackSize % {{{ STACK_ALIGN }}} == 0);
 #endif
 #if RUNTIME_DEBUG
     dbg("wasmWorkerInitializeRuntime wwID:", wwParams.wwID);
@@ -126,7 +124,7 @@ addToLibrary({
 #if PTHREADS
     // Record the pthread configuration, and whether this Wasm Worker supports synchronous blocking in emscripten_futex_wait().
     // (regular Wasm Workers do, AudioWorklets don't)
-    ___set_thread_state(/*thread_ptr=*/0, /*is_main_thread=*/0, /*is_runtime_thread=*/0, /*supports_wait=*/ {{{ workerSupportsFutexWait() }}});
+    ___set_thread_state(wwParams.pthreadPtr ?? 0, /*is_main_thread=*/0, /*is_runtime_thread=*/0, /*supports_wait=*/ {{{ workerSupportsFutexWait() }}});
 #endif
 #if STACK_OVERFLOW_CHECK >= 2
     // Fix up stack base. (TLS frame is created at the bottom address end of the stack)
@@ -181,7 +179,7 @@ if (ENVIRONMENT_IS_WASM_WORKER
   _wasmWorkers[0] = globalThis;
   addEventListener("message", _wasmWorkerAppendToQueue);
 }`,
-  _emscripten_create_wasm_worker: (wwID, stackLowestAddress, stackSize) => {
+  _emscripten_create_wasm_worker: (wwID, stackLowestAddress, stackSize, pthreadPtr) => {
 #if ASSERTIONS
     if (!_emscripten_has_threading_support()) {
       err('create_wasm_worker: environment does not support SharedArrayBuffer, wasm workers are not available');
@@ -206,8 +204,11 @@ if (ENVIRONMENT_IS_WASM_WORKER
       wwID,
       wasm: wasmModule,
       wasmMemory,
-      stackLowestAddress, // sb = stack bottom (lowest stack address, SP points at this when stack is full)
-      stackSize,          // sz = stack size
+      stackLowestAddress,
+      stackSize,
+#if PTHREADS
+      pthreadPtr,
+#endif
     });
     worker.onmessage = _wasmWorkerRunPostMessage;
 #if ENVIRONMENT_MAY_BE_NODE
@@ -234,7 +235,7 @@ if (ENVIRONMENT_IS_WASM_WORKER
 
   emscripten_terminate_wasm_worker: (id) => {
 #if ASSERTIONS
-    assert(id != 0, 'emscripten_terminate_wasm_worker() cannot be called with id=0!');
+    assert(id != 0, 'emscripten_terminate_wasm_worker() cannot be called with id=0');
 #endif
     if (_wasmWorkers[id]) {
       _wasmWorkers[id].terminate();
@@ -244,7 +245,7 @@ if (ENVIRONMENT_IS_WASM_WORKER
 
   emscripten_terminate_all_wasm_workers: () => {
 #if ASSERTIONS
-    assert(!ENVIRONMENT_IS_WASM_WORKER, 'emscripten_terminate_all_wasm_workers() cannot be called from a Wasm Worker: only the main browser thread has visibility to terminate all Workers!');
+    assert(!ENVIRONMENT_IS_WASM_WORKER, 'emscripten_terminate_all_wasm_workers() should only be called from the main thread');
 #endif
     Object.values(_wasmWorkers).forEach((worker) => worker.terminate());
     _wasmWorkers = {};
@@ -282,7 +283,7 @@ if (ENVIRONMENT_IS_WASM_WORKER
     assert(id >= 0);
     assert(funcPtr);
     assert(sigPtr);
-    assert(UTF8ToString(sigPtr)[0] != 'v', 'Do NOT specify the return argument in the signature string for a call to emscripten_wasm_worker_post_function_sig(), just pass the function arguments.');
+    assert(UTF8ToString(sigPtr)[0] != 'v', 'emscripten_wasm_worker_post_function_sig() supports only void return type');
     assert(varargs);
 #endif
     _wasmWorkers[id].postMessage({'_wsc': funcPtr, 'x': readEmAsmArgs(sigPtr, varargs) });

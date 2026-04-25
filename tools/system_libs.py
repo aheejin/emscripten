@@ -1270,10 +1270,27 @@ class libc(MuslInternalLibrary,
             'pthread_attr_setscope.c',
             'pthread_attr_setstack.c',
             'pthread_attr_setstacksize.c',
+            'pthread_condattr_destroy.c',
+            'pthread_condattr_init.c',
+            'pthread_condattr_setpshared.c',
+            'pthread_condattr_setclock.c',
+            'pthread_mutexattr_destroy.c',
+            'pthread_mutexattr_init.c',
+            'pthread_mutexattr_setprotocol.c',
+            'pthread_mutexattr_settype.c',
+            'pthread_mutexattr_setpshared.c',
+            'pthread_rwlockattr_destroy.c',
+            'pthread_rwlockattr_init.c',
+            'pthread_rwlockattr_setpshared.c',
             'pthread_getattr_np.c',
             'pthread_getconcurrency.c',
             'pthread_getcpuclockid.c',
             'pthread_getschedparam.c',
+            'pthread_spin_destroy.c',
+            'pthread_spin_init.c',
+            'pthread_spin_lock.c',
+            'pthread_spin_trylock.c',
+            'pthread_spin_unlock.c',
             'pthread_setschedprio.c',
             'pthread_setconcurrency.c',
             'default_attr.c',
@@ -1294,6 +1311,8 @@ class libc(MuslInternalLibrary,
             'mtx_timedlock.c',
             'mtx_trylock.c',
             'mtx_unlock.c',
+            'sem_destroy.c',
+            'sem_init.c',
             'thrd_create.c',
             'thrd_exit.c',
             'thrd_join.c',
@@ -1529,8 +1548,14 @@ class libwasm_workers(MuslInternalLibrary, DebugLibrary):
   src_dir = 'system/lib/wasm_worker'
   src_files = ['library_wasm_worker.c', 'wasm_worker_initialize.S', 'audio_worklet.c']
 
+  def __init__(self, **kwargs):
+    self.is_mt = kwargs.pop('is_mt')
+    super().__init__(**kwargs)
+
   def get_cflags(self):
     cflags = super().get_cflags() + ['-sWASM_WORKERS']
+    if self.is_mt:
+      cflags += ['-pthread']
     if self.is_debug:
       # library_wasm_worker.c contains an assert that a nonnull parameter
       # is no NULL, which llvm now warns is redundant/tautological.
@@ -1542,6 +1567,23 @@ class libwasm_workers(MuslInternalLibrary, DebugLibrary):
     else:
       cflags += ['-Oz']
     return cflags
+
+  def get_base_name(self):
+    name = super().get_base_name()
+    if self.is_mt:
+      name += '-mt'
+    return name
+
+  @classmethod
+  def vary_on(cls):
+    return super().vary_on() + ['is_mt']
+
+  @classmethod
+  def get_default_variation(cls, **kwargs):
+    return super().get_default_variation(
+      is_mt=settings.PTHREADS,
+      **kwargs,
+    )
 
   def can_use(self):
     # see src/library_wasm_worker.js
@@ -1870,14 +1912,28 @@ class libmimalloc(MTLibrary):
     # build emmalloc as only a system allocator, without exporting itself onto
     # malloc/free in the global scope
     '-DEMMALLOC_NO_STD_EXPORTS',
+    # disable large pages by default, see:
+    # https://github.com/microsoft/mimalloc/commit/9199d54bcf1e6dea0deb61a3a8a4b3ea4b45a341
+    '-DMI_ENABLE_LARGE_PAGES=0',
+    # halve the page size to 32KiB on wasm64 and to 16KiB on wasm32
+    # https://github.com/microsoft/mimalloc/issues/647#issuecomment-1324109021
+    # https://github.com/emscripten-core/emscripten/issues/20645#issuecomment-1962964755
+    '-DMI_ARENA_SLICE_SHIFT=(12 + MI_SIZE_SHIFT)',
+    # `malloc`ed pointers must be aligned at least as strictly as max_align_t
+    '-DMI_MAX_ALIGN_SIZE=8',
+    # reserve memory in 64 MiB chunks (internally divided by 4)
+    # Note: keep in sync with the -sINITIAL_HEAP default
+    '-DMI_DEFAULT_ARENA_RESERVE=65536',
     # build mimalloc with an override of malloc/free
     '-DMI_MALLOC_OVERRIDE',
     # TODO: add build modes that include debug checks 1,2,3
     '-DMI_DEBUG=0',
     # disable `assert()` in the underlying emmalloc allocator
     '-DNDEBUG',
-    # avoid use of `__builtin_thread_pointer()`
+    # Emscripten uses musl libc internally
     '-DMI_LIBC_MUSL',
+    # enable use of `__builtin_thread_pointer()`
+    '-DMI_USE_BUILTIN_THREAD_POINTER',
   ]
 
   # malloc/free/calloc are runtime functions and can be generated during LTO

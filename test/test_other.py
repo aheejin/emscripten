@@ -345,6 +345,11 @@ class other(RunnerCore):
       os.close(master)
       os.close(slave)
 
+  def run_tsc(self, args):
+    # We use skipLibCheck to prevent tsc from type checking the node_modules in the parent directory
+    # (e.g. in a single test mode).
+    return self.run_process(shared.get_npm_cmd('tsc') + ['--skipLibCheck'] + args)
+
   # Test that running `emcc -v` always works even in the presence of `EMCC_CFLAGS`.
   # This needs to work because many tools run `emcc -v` internally and it should
   # always work even if the user has `EMCC_CFLAGS` set.
@@ -2617,20 +2622,18 @@ F1 -> ''
   @requires_network
   @crossplatform
   def test_freetype(self):
-    # copy the Liberation Sans Bold truetype file located in the
-    # <emscripten_root>/test/freetype to the compilation folder
-    shutil.copy2(test_file('freetype/LiberationSansBold.ttf'), os.getcwd())
+    copy_asset('freetype/LiberationSansBold.ttf')
     self.cflags += ['--embed-file', 'LiberationSansBold.ttf']
     # the test program will print an ascii representation of a bitmap where the
     # 'w' character has been rendered using the Liberation Sans Bold font.
     # See test_freetype.out
-    self.do_run_in_out_file_test('test_freetype.c', cflags=['-sUSE_FREETYPE'])
     self.do_run_in_out_file_test('test_freetype.c', cflags=['--use-port=freetype'])
 
   @requires_network
-  def test_freetype_with_pthreads(self):
-    # Verify that freetype supports compilation requiring pthreads
-    self.emcc('test_freetype.c', ['-pthread', '-sUSE_FREETYPE', '-o', 'a.out.js'])
+  def test_freetype_pthreads(self):
+    # This test also verifies the `-sUSE_FREETYPE` alternative to --use-port=freetype works.
+    copy_asset('freetype/LiberationSansBold.ttf')
+    self.do_run_in_out_file_test('test_freetype.c', cflags=['--embed-file=LiberationSansBold.ttf', '-pthread', '-sUSE_FREETYPE'])
 
   @requires_network
   def test_icu(self):
@@ -3523,8 +3526,7 @@ More info: https://emscripten.org
     self.cflags += [
       '-sJSPI',
       '-sEXPORTED_RUNTIME_METHODS=addFunction,dynCall',
-      '-sALLOW_TABLE_GROWTH=1',
-      '-Wno-experimental']
+      '-sALLOW_TABLE_GROWTH=1']
     self.do_runf('other/test_jspi_add_function.c', 'done')
 
   @requires_jspi
@@ -3548,10 +3550,7 @@ More info: https://emscripten.org
         console.log('done');
       };
     ''')
-    self.do_runf('main.c', 'done', cflags=['-sJSPI',
-                                           '--js-library=lib.js',
-                                           '-Wno-experimental',
-                                           '--post-js=post.js'])
+    self.do_runf('main.c', 'done', cflags=['-sJSPI', '--js-library=lib.js', '--post-js=post.js'])
 
   @requires_dev_dependency('typescript')
   @parameterized({
@@ -3566,14 +3565,13 @@ More info: https://emscripten.org
               ['-o', 'embind_tsgen.js', '-lembind', '--emit-tsd', 'embind_tsgen.d.ts'] + opts)
 
     # Test that the output compiles with a TS file that uses the definitions.
-    shutil.copyfile(test_file('other/embind_tsgen_main.ts'), 'main.ts')
+    copy_asset('other/embind_tsgen_main.ts', 'main.ts')
     if '-sEXPORT_ES6' in opts:
       # A package file with type=module is needed to enabled ES modules in TSC and
       # also run the output JS file as a module in node.
-      shutil.copyfile(test_file('other/embind_tsgen_package.json'), 'package.json')
+      copy_asset('other/embind_tsgen_package.json', 'package.json')
 
-    cmd = shared.get_npm_cmd('tsc') + ['embind_tsgen.d.ts', 'main.ts', '--target', 'es2021'] + tsc_opts
-    shared.check_call(cmd)
+    self.run_tsc(['embind_tsgen.d.ts', 'main.ts', '--target', 'es2021'] + tsc_opts)
     actual = read_file('embind_tsgen.d.ts')
     self.assertFileContents(test_file('other/embind_tsgen_module.d.ts'), actual)
     self.assertContained('main ran\nts ran', self.run_js('main.js'))
@@ -3729,12 +3727,11 @@ More info: https://emscripten.org
     self.run_process([EMCC, test_file('other/test_emit_tsd.c'),
                       '--emit-tsd', 'test_emit_tsd.d.ts', '-sEXPORT_ES6',
                       '-sMODULARIZE', '-sEXPORTED_RUNTIME_METHODS=UTF8ArrayToString,wasmTable',
-                      '-Wno-experimental', '-o', 'test_emit_tsd.js'] +
+                      '-o', 'test_emit_tsd.js'] +
                      self.get_cflags())
     self.assertFileContents(test_file('other/test_emit_tsd.d.ts'), read_file('test_emit_tsd.d.ts'))
     # Test that the output compiles with a TS file that uses the definitions.
-    cmd = shared.get_npm_cmd('tsc') + [test_file('other/test_tsd.ts'), '--noEmit']
-    shared.check_call(cmd)
+    self.run_tsc([test_file('other/test_tsd.ts'), '--noEmit'])
 
   @requires_dev_dependency('typescript')
   def test_emit_tsd_sync_compilation(self):
@@ -3745,8 +3742,7 @@ More info: https://emscripten.org
                      self.get_cflags())
     self.assertFileContents(test_file('other/test_emit_tsd_sync.d.ts'), read_file('test_emit_tsd_sync.d.ts'))
     # Test that the output compiles with a TS file that uses the definitions.
-    cmd = shared.get_npm_cmd('tsc') + [test_file('other/test_tsd_sync.ts'), '--noEmit']
-    shared.check_call(cmd)
+    self.run_tsc([test_file('other/test_tsd_sync.ts'), '--noEmit'])
 
   def test_emit_tsd_wasm_only(self):
     expected = 'Wasm only output is not compatible with --emit-tsd'
@@ -3757,7 +3753,7 @@ More info: https://emscripten.org
     self.run_process([EMCC, test_file('other/test_emit_tsd.c'),
                       '--emit-tsd', 'test_emit_tsd.d.ts',
                       '-sEXPORTED_RUNTIME_METHODS=HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAPF64',
-                      '-Wno-experimental', '-o', 'test_emit_tsd.js'] +
+                      '-o', 'test_emit_tsd.js'] +
                      self.get_cflags())
     actual = read_file('test_emit_tsd.d.ts')
     self.assertContained("    let HEAP8: Int8Array;", actual)
@@ -5604,7 +5600,9 @@ int main()
 
   @also_with_standalone_wasm(impure=True)
   def test_time(self):
-    self.do_other_test('test_time.c')
+    if self.get_setting('STANDALONE_WASM'):
+      self.cflags.append('-DSTANDALONE')
+    self.do_other_test('test_time.c', cflags=['-sASSERTIONS=2'])
 
   @parameterized({
     '1': ('EST+05EDT',),
@@ -7397,10 +7395,10 @@ addToLibrary({
     'O2': (['-O2'], 137000),
     'emmalloc': (['-sMALLOC=emmalloc'], 185000),
     'dlmalloc': (['-sMALLOC=dlmalloc'], 191000),
-    'mimalloc': (['-sMALLOC=mimalloc'], 245000),
+    'mimalloc': (['-sMALLOC=mimalloc'], 255000),
     'emmalloc_O2': (['-sMALLOC=emmalloc', '-O2'], 130000),
     'dlmalloc_O2': (['-sMALLOC=dlmalloc', '-O2'], 137000),
-    'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 181000),
+    'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 193000),
   })
   # This test verifies the output code size of the different -sMALLOC= modes.
   def test_malloc_size(self, args, max_size):
@@ -11699,7 +11697,8 @@ int main(void) {
     # Verify that we're unable to detach or join the proxied main thread
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('EXIT_RUNTIME')
-    self.do_other_test('test_pthread_self_join_detach.c')
+    output = self.do_other_test('test_pthread_self_join_detach.c')
+    self.assertNotContained('user callback triggered after runtime exited', output)
 
   @requires_pthreads
   def test_pthread_asyncify(self):
@@ -12071,7 +12070,7 @@ int main () {
   printf("JS random: %d\n", EM_ASM_INT({ return Math.random() }));
 }
 ''')
-    self.run_process([EMCC, 'src.c', '-sDETERMINISTIC', '-Wno-deprecated'] + self.get_cflags())
+    self.run_process([EMCC, 'src.c', '--pre-js', path_from_root('src/deterministic.js')] + self.get_cflags())
     one = self.run_js('a.out.js')
     # ensure even if the time resolution is 1 second, that if we see the real
     # time we'll see a difference
@@ -12942,7 +12941,7 @@ void foo() {}
     # By default shell support is not included
     self.run_process([EMCC, test_file('hello_world.c')])
     err = self.run_js('a.out.js', assert_returncode=NON_ZERO)
-    self.assertContained('shell environment detected but not enabled at build time.', err)
+    self.assertContained('shell environment detected but not enabled at build time', err)
 
   def test_removed_runtime_function(self):
     create_file('post.js', 'alignMemory(100, 4);')
@@ -13080,6 +13079,10 @@ void foo() {}
       self.cflags.append('-Wno-pthreads-mem-growth')
     self.set_setting('PTHREAD_POOL_SIZE', pthread_pool_size)
     self.do_runf('pthread/test_pthread_memory_growth_mainthread.c', cflags=['-pthread', '-sALLOW_MEMORY_GROWTH', '-sINITIAL_MEMORY=32MB', '-sMAXIMUM_MEMORY=256MB'] + cflags)
+
+  @requires_pthreads
+  def test_phtread_join_interrupted(self):
+    self.do_runf('pthread/test_pthread_join_interrupted.c', cflags=['-pthread', '-sPTHREAD_POOL_SIZE=1'])
 
   @requires_node_25
   def test_growable_arraybuffers(self):
@@ -13502,6 +13505,7 @@ int main() {
     # Ensure that files referenced in Tutorial.rst are buildable
     self.run_process([EMCC, test_file('hello_world_file.cpp')])
 
+  @crossplatform
   @also_with_wasm64
   def test_stdint_limits(self):
     if self.is_wasm64():
@@ -13575,6 +13579,12 @@ int main() {
   @also_with_minimal_runtime
   def test_wasm_worker_pthread_api_usage(self):
     self.assert_fail([EMCC, test_file('wasm_worker/wasm_worker_pthread_api_usage.c'), '-sWASM_WORKERS'], 'undefined symbol: pthread_mutex_lock')
+
+  @also_with_minimal_runtime
+  def test_wasm_worker_and_pthread(self):
+    self.set_setting('STACK_OVERFLOW_CHECK', 2)
+    self.set_setting('SAFE_HEAP', 2)
+    self.do_runf('wasm_worker/wasm_worker_and_pthread.c', 'done\n', cflags=['-sWASM_WORKERS', '-pthread'])
 
   @also_with_minimal_runtime
   def test_wasm_worker_cxx_init(self):
@@ -14441,11 +14451,36 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
 
   @requires_wasm64
   def test_explicit_target(self):
-    self.do_runf('hello_world.c', cflags=['-target', 'wasm32'])
-    self.do_runf('hello_world.c', cflags=['-target', 'wasm64-unknown-emscripten', '-Wno-experimental'])
+    def is_64(path):
+      with webassembly.Module(path) as wasm:
+        m = wasm.get_memories()[0]
+        return m.limits.flags & webassembly.LIMITS_IS_64
+      assert False
 
-    self.do_runf('hello_world.c', cflags=['--target=wasm32'])
-    self.do_runf('hello_world.c', cflags=['--target=wasm64-unknown-emscripten', '-Wno-experimental'])
+    self.build('hello_world.c', cflags=['-target', 'wasm32'])
+    self.assertFalse(is_64('hello_world.wasm'))
+
+    self.build('hello_world.c', cflags=['-target', 'wasm64'])
+    self.assertTrue(is_64('hello_world.wasm'))
+
+    self.build('hello_world.c', cflags=['-target', 'wasm64-unknown-emscripten'])
+    self.assertTrue(is_64('hello_world.wasm'))
+
+    self.build('hello_world.c', cflags=['--target=wasm32'])
+    self.assertFalse(is_64('hello_world.wasm'))
+
+    self.build('hello_world.c', cflags=['--target=wasm64'])
+    self.assertTrue(is_64('hello_world.wasm'))
+
+    self.build('hello_world.c', cflags=['--target=wasm64-unknown-emscripten'])
+    self.assertTrue(is_64('hello_world.wasm'))
+
+    # Test -m32 and -m64 flags
+    self.build('hello_world.c', cflags=['-m64'])
+    self.assertTrue(is_64('hello_world.wasm'))
+
+    self.build('hello_world.c', cflags=['-m64', '-m32'])
+    self.assertFalse(is_64('hello_world.wasm'))
 
     self.assert_fail([EMCC, test_file('hello_world.c'), '-target', 'wasm32', '-sMEMORY64'], 'emcc: error: wasm32 target is not compatible with -sMEMORY64')
 

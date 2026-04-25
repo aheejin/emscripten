@@ -249,6 +249,10 @@ def webgl2_disabled():
   return browser_should_skip_feature('EMTEST_LACKS_WEBGL2', Feature.WEBGL2) or browser_should_skip_feature('EMTEST_LACKS_GRAPHICS_HARDWARE', Feature.WEBGL2)
 
 
+def es6_module_workers_disabled():
+  return browser_should_skip_feature('EMTEST_LACKS_ES6_WORKERS', Feature.WORKER_ES6_MODULES)
+
+
 requires_graphics_hardware = skipIfFeatureNotAvailable('EMTEST_LACKS_GRAPHICS_HARDWARE', None, 'This test requires graphics hardware')
 requires_webgl2 = skipIfFeatureNotAvailable(['EMTEST_LACKS_WEBGL2', 'EMTEST_LACKS_GRAPHICS_HARDWARE'], Feature.WEBGL2, 'This test requires WebGL2 to be available')
 requires_webgpu = skipIfFeatureNotAvailable(['EMTEST_LACKS_WEBGPU', 'EMTEST_LACKS_GRAPHICS_HARDWARE'], Feature.WEBGPU, 'This test requires WebGPU to be available')
@@ -274,8 +278,8 @@ class browser(BrowserCore):
       print()
 
   def require_jspi(self):
-    if not is_chrome():
-      self.skipTest(f'Current browser ({get_browser()}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) support JSPI today.')
+    if not is_chrome() and not is_firefox():
+      self.skipTest(f'Current browser ({get_browser()}) does not support JSPI. Only chromium-based browsers ({CHROMIUM_BASED_BROWSERS}) and firefox support JSPI today.')
     super().require_jspi()
 
   def post_manual_reftest(self):
@@ -2165,7 +2169,7 @@ void *getBindBuffer() {
 
   def test_sdl3_ttf_render_text_solid(self):
     self.cflags.append('-Wno-experimental')
-    shutil.copy2(test_file('freetype/LiberationSansBold.ttf'), self.get_dir())
+    copy_asset('freetype/LiberationSansBold.ttf')
     self.reftest('test_sdl3_ttf_render_text_solid.c', 'test_sdl3_ttf_render_text_solid.png',
                  cflags=[
                   '-O2', '-sUSE_SDL=3', '-sUSE_SDL_TTF=3', '-lGL', '-Wno-experimental',
@@ -3139,7 +3143,7 @@ Module["preRun"] = () => {
 
   @requires_graphics_hardware
   def test_sdl3_ttf(self):
-    shutil.copy2(test_file('freetype/LiberationSansBold.ttf'), self.get_dir())
+    copy_asset('freetype/LiberationSansBold.ttf')
     self.reftest('test_sdl3_ttf.c', 'test_sdl3_ttf.png',
                  cflags=['-O2', '-sUSE_SDL=3', '-sUSE_SDL_TTF=3', '--embed-file', 'LiberationSansBold.ttf', '-Wno-experimental'])
 
@@ -5077,8 +5081,8 @@ Module["preRun"] = () => {
 
   # Tests Wasm Worker+pthreads simultaneously
   @also_with_minimal_runtime
-  def test_wasm_worker_and_pthreads(self):
-    self.btest('wasm_worker/wasm_worker_and_pthread.c', expected='0', cflags=['-sWASM_WORKERS', '-pthread', '-sPTHREAD_POOL_SIZE=1'])
+  def test_wasm_worker_and_pthread(self):
+    self.btest_exit('wasm_worker/wasm_worker_and_pthread.c', cflags=['-sWASM_WORKERS', '-pthread', '-sPTHREAD_POOL_SIZE=1'])
 
   # Tests emscripten_wasm_worker_self_id() function
   @also_with_minimal_runtime
@@ -5237,7 +5241,7 @@ Module["preRun"] = () => {
 
   # Tests that calling any proxied function in a Wasm Worker will abort at runtime when ASSERTIONS are enabled.
   def test_wasm_worker_proxied_function(self):
-    error_msg = "abort:Assertion failed: Attempted to call proxied function '_proxied_js_function' in a Wasm Worker, but in Wasm Worker enabled builds, proxied function architecture is not available!"
+    error_msg = "abort:Assertion failed: attempt to call proxied function '_proxied_js_function' from a Wasm Worker (where proxying is not possible)"
     # Test that program aborts in ASSERTIONS-enabled builds
     self.btest('wasm_worker/proxied_function.c', expected=error_msg, cflags=['--js-library', test_file('wasm_worker/proxied_function.js'), '-sWASM_WORKERS', '-sASSERTIONS'])
     # Test that code does not crash in ASSERTIONS-disabled builds
@@ -5332,7 +5336,7 @@ Module["preRun"] = () => {
   })
   @no_safari('TODO: Fails with abort:Assertion failed: err == 0') # Fails in Safari 17.6 (17618.3.11.11.7, 17618), Safari 26.0.1 (21622.1.22.11.15)
   def test_wasmfs_opfs(self, args):
-    if '-sJSPI' in args:
+    if is_jspi(args):
       self.require_jspi()
     test = test_file('wasmfs/wasmfs_opfs.c')
     args = ['-sWASMFS', '-O3'] + args
@@ -5476,9 +5480,10 @@ Module["preRun"] = () => {
     'audio_params_disabled': (['-sAUDIO_WORKLET_SUPPORT_AUDIO_PARAMS=0'],),
   })
   @requires_sound_hardware
-  @requires_es6_workers
   @requires_shared_array_buffer
   def test_audio_worklet(self, args):
+    if '-sEXPORT_ES6' in args and es6_module_workers_disabled():
+      self.skipTest('This test requires a browser with ES6 Module Workers support')
     self.btest_exit('webaudio/audioworklet.c', cflags=['-sAUDIO_WORKLET', '-sWASM_WORKERS', '-DTEST_AND_EXIT'] + args)
 
   # Tests that audioworklets and workers can be used at the same time
@@ -5529,6 +5534,9 @@ Module["preRun"] = () => {
     self.btest_exit('webaudio/audioworklet_emscripten_locks.c', cflags=['-sAUDIO_WORKLET', '-sWASM_WORKERS', '-pthread'])
 
   def test_audio_worklet_direct(self):
+    if es6_module_workers_disabled():
+      self.skipTest('This test requires a browser with ES6 Module Workers support')
+
     self.add_browser_reporting()
     self.emcc('hello_world.c', ['-o', 'hello_world.mjs', '-sEXPORT_ES6', '-sSINGLE_FILE', '-sENVIRONMENT=worklet'])
     create_file('worklet.mjs', '''
@@ -5754,6 +5762,7 @@ class emrun(RunnerCore):
     self.assertContained('error: unrecognized arguments: --foo', err)
     self.assertContained('remember to add `--` between arguments', err)
 
+  @also_with_threads
   def test_emrun(self):
     self.emcc('test_emrun.c', ['--emrun', '-o', 'test_emrun.html'])
     if not has_browser():
