@@ -133,9 +133,7 @@ def link_to_object(args, target):
 
 
 def side_module_external_deps(external_symbols):
-  """Find the list of the external symbols that are needed by the
-  linked side modules.
-  """
+  """Find the list of the external symbols that are needed by the linked side modules."""
   deps = set()
   for sym in settings.SIDE_MODULE_IMPORTS:
     sym = demangle_c_symbol_name(sym)
@@ -145,9 +143,7 @@ def side_module_external_deps(external_symbols):
 
 
 def create_stub_object(external_symbols):
-  """Create a stub object, based on the JS library symbols and their
-  dependencies, that we can pass to wasm-ld.
-  """
+  """Create a stub object, based on the JS library symbols and their dependencies, for use by wasm-ld."""
   stubfile = shared.get_temp_files().get('libemscripten_js_symbols.so').name
   stubs = ['#STUB']
   for name, deps in external_symbols.items():
@@ -532,8 +528,7 @@ def get_closure_compiler_and_env(user_args):
 
 
 def version_split(v):
-  """Split version setting number (e.g. 162000) into versions string (e.g. "16.2.0")
-  """
+  """Split version setting number (e.g. 162000) into versions string (e.g. "16.2.0")."""
   v = str(v).rjust(6, '0')
   assert len(v) == 6
   m = re.match(r'(\d{2})(\d{2})(\d{2})', v)
@@ -1051,7 +1046,7 @@ def wasm2js(js_file, wasm_file, opt_level, use_closure_compiler, debug_info, sym
 
 @ToolchainProfiler.profile()
 def strip_sections(infile, outfile, sections):
-  """Strip specified sections from a wasm file"""
+  """Strip specified sections from a wasm file."""
   cmd = [LLVM_OBJCOPY, infile, outfile] + ['--remove-section=' + section for section in sections]
   check_call(cmd)
 
@@ -1157,8 +1152,7 @@ def write_symbol_map(wasm_file, symbols_file):
 
 
 def is_ar(filename):
-  """Return True if the given filename is an ar archive, False otherwise.
-  """
+  """Return True if the given filename is an ar archive, False otherwise."""
   try:
     header = open(filename, 'rb').read(8)
   except Exception as e:
@@ -1322,7 +1316,7 @@ def new_intermediate_filename(name):
 
 
 def save_intermediate(src, name):
-  """Copy an existing file CANONICAL_TEMP_DIR"""
+  """Copy an existing file CANONICAL_TEMP_DIR."""
   if DEBUG:
     new_file = new_intermediate_filename(name)
     mylog.log_copy(src, new_file)
@@ -1330,7 +1324,7 @@ def save_intermediate(src, name):
 
 
 def write_intermediate(content, name):
-  """Generate a new debug file CANONICAL_TEMP_DIR"""
+  """Generate a new debug file CANONICAL_TEMP_DIR."""
   if DEBUG:
     utils.write_file(new_intermediate_filename(name), content)
 

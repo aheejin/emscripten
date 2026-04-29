@@ -3,11 +3,9 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
-import argparse
 import os
 import random
 import re
-import shlex
 import shutil
 import struct
 import subprocess
@@ -33,15 +31,12 @@ from browser_common import (
   find_browser_test_file,
   get_browser,
   get_safari_version,
-  has_browser,
   is_chrome,
   is_firefox,
   is_safari,
 )
 from common import (
-  EMRUN,
   WEBIDL_BINDER,
-  RunnerCore,
   copy_asset,
   copytree,
   create_file,
@@ -73,7 +68,7 @@ from decorators import (
 from tools import ports, shared, utils
 from tools.feature_matrix import Feature
 from tools.link import binary_encode
-from tools.shared import EMCC, FILE_PACKAGER, PIPE
+from tools.shared import EMCC, FILE_PACKAGER
 from tools.utils import WINDOWS, delete_dir, write_binary, write_file
 
 
@@ -311,8 +306,7 @@ window.close = () => {
     ''' + read_file(test_file('reftest.js')))
 
   def reftest(self, filename, reference=None, reference_slack=0, *args, **kwargs):
-    """Special case of `btest` that uses reference image
-    """
+    """Like `btest` but uses a reference image."""
     if not reference:
       reference = utils.replace_suffix(filename, '.png')
     reference = find_browser_test_file(reference)
@@ -2226,8 +2220,6 @@ void *getBindBuffer() {
   def test_gl_subdata(self, args):
     if '-sMIN_WEBGL_VERSION=2' in args and webgl2_disabled():
       self.skipTest('This test requires WebGL2 to be available')
-    if self.is_4gb() and '-sMIN_WEBGL_VERSION=2' in args:
-      self.skipTest('texSubImage2D fails: https://crbug.com/325090165')
     self.reftest('test_gl_subdata.c', 'test_gl_float_tex.png', cflags=['-lGL', '-lglut'] + args)
 
   @requires_graphics_hardware
@@ -2660,7 +2652,6 @@ Module["preRun"] = () => {
 
   # Tests the WebGL 2 glGetBufferSubData() functionality.
   @requires_webgl2
-  @no_4gb('getBufferSubData fails: https://crbug.com/325090165')
   def test_webgl2_get_buffer_sub_data(self):
     self.btest_exit('webgl2_get_buffer_sub_data.c', cflags=['-sMAX_WEBGL_VERSION=2', '-lGL'])
 
@@ -2710,8 +2701,6 @@ Module["preRun"] = () => {
   def test_webgl2_garbage_free_entrypoints(self, args):
     if '-DTEST_WEBGL2=1' in args and webgl2_disabled():
       self.skipTest('This test requires WebGL2 to be available')
-    if args and self.is_4gb():
-      self.skipTest('readPixels fails: https://crbug.com/324992397')
     self.btest_exit('webgl2_garbage_free_entrypoints.c', cflags=args)
 
   @requires_webgl2
@@ -2723,7 +2712,7 @@ Module["preRun"] = () => {
     # tests that if we support WebGL1 and 2, and WebGL2RenderingContext exists,
     # but context creation fails, that we can then manually try to create a
     # WebGL1 context and succeed.
-    self.btest_exit('test_webgl2_runtime_no_context.cpp', cflags=['-sMAX_WEBGL_VERSION=2'])
+    self.btest_exit('test_webgl2_runtime_no_context.c', cflags=['-sMAX_WEBGL_VERSION=2'])
 
   @requires_graphics_hardware
   def test_webgl_context_major_version(self):
@@ -2760,7 +2749,6 @@ Module["preRun"] = () => {
     self.btest_exit('webgl2_draw_packed_triangle.c', cflags=['-lGL', '-sMAX_WEBGL_VERSION=2', '-sGL_ASSERTIONS'])
 
   @requires_graphics_hardware
-  @no_4gb('compressedTexSubImage2D fails: https://crbug.com/324562920')
   def test_webgl2_pbo(self):
     self.btest_exit('webgl2_pbo.c', cflags=['-sMAX_WEBGL_VERSION=2', '-lGL'])
 
@@ -4113,8 +4101,8 @@ Module["preRun"] = () => {
   def test_main_thread_em_asm_blocking(self):
     copy_asset('browser/test_em_asm_blocking.html', 'page.html')
 
-    self.compile_btest('browser/test_em_asm_blocking.cpp', ['-O2', '-o', 'wasm.js', '-pthread', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'])
-    self.run_browser('page.html', '/report_result?exit:8')
+    self.compile_btest('browser/test_em_asm_blocking.c', ['-O2', '-o', 'wasm.js', '-pthread', '-sPROXY_TO_PTHREAD', '-sEXIT_RUNTIME'])
+    self.run_browser('page.html', '/report_result?exit:0')
 
   # Test that it is possible to send a signal via calling alarm(timeout), which in turn calls to the signal handler set by signal(SIGALRM, func);
   def test_sigalrm(self):
@@ -4229,8 +4217,6 @@ Module["preRun"] = () => {
   # For testing WebGL draft extensions like this, if using chrome as the browser,
   # We might want to append the --enable-webgl-draft-extensions to the EMTEST_BROWSER env arg.
   @requires_graphics_hardware
-  @no_2gb('https://crbug.com/324562920')
-  @no_4gb('https://crbug.com/324562920')
   @parameterized({
     'arrays': (['-DMULTI_DRAW_ARRAYS'],),
     'arrays_instanced': (['-DMULTI_DRAW_ARRAYS_INSTANCED'],),
@@ -4238,7 +4224,7 @@ Module["preRun"] = () => {
     'elements_instanced': (['-DMULTI_DRAW_ELEMENTS_INSTANCED'],),
   })
   def test_webgl_multi_draw(self, args):
-    self.reftest('webgl_multi_draw_test.c', 'webgl_multi_draw.png',
+    self.reftest('test_webgl_multi_draw.c', 'test_webgl_multi_draw.png',
                  cflags=['-lGL', '-sOFFSCREEN_FRAMEBUFFER', '-DEXPLICIT_SWAP'] + args)
 
   # Tests for base_vertex/base_instance extension
@@ -4256,7 +4242,7 @@ Module["preRun"] = () => {
     'drawelements': (1,),
   })
   def test_webgl_draw_base_vertex_base_instance(self, multi_draw, draw_elements):
-    self.reftest('webgl_draw_base_vertex_base_instance_test.c', 'webgl_draw_instanced_base_vertex_base_instance.png',
+    self.reftest('test_webgl_draw_base_vertex_base_instance.c', 'test_webgl_draw_base_vertex_base_instance.png',
                  cflags=['-lGL',
                             '-sMAX_WEBGL_VERSION=2',
                             '-sOFFSCREEN_FRAMEBUFFER',
@@ -4428,7 +4414,7 @@ Module["preRun"] = () => {
   # Preallocating the buffer in this was is asm.js only (wasm needs a Memory).
   @requires_wasm2js
   def test_preallocated_heap(self):
-    self.btest_exit('test_preallocated_heap.cpp', cflags=['-sWASM=0', '-sIMPORTED_MEMORY', '-sINITIAL_MEMORY=16MB', '-sABORTING_MALLOC=0', '--shell-file', test_file('browser/test_preallocated_heap_shell.html')])
+    self.btest_exit('test_preallocated_heap.c', cflags=['-sWASM=0', '-sIMPORTED_MEMORY', '-sINITIAL_MEMORY=16MB', '-sABORTING_MALLOC=0', '--shell-file', test_file('browser/test_preallocated_heap_shell.html')])
 
   # Tests emscripten_fetch() usage to XHR data directly to memory without persisting results to IndexedDB.
   @also_with_wasm2js
@@ -5260,7 +5246,7 @@ Module["preRun"] = () => {
     # test that we can allocate in the 2-4GB range, if we enable growth and
     # set the max appropriately
     self.cflags += ['-O2', '-sALLOW_MEMORY_GROWTH', '-sMAXIMUM_MEMORY=4GB']
-    self.do_run_in_out_file_test('browser/test_4GB.cpp')
+    self.do_run_in_out_file_test('browser/test_4gb.cpp')
 
   # Tests that emmalloc supports up to 4GB Wasm heaps.
   @no_firefox('no 4GB support yet')
@@ -5399,7 +5385,7 @@ Module["preRun"] = () => {
     # test that growth doesn't go beyond 2GB without the max being set for that,
     # and that we can catch an allocation failure exception for that
     self.cflags += ['-O2', '-sALLOW_MEMORY_GROWTH', '-sMAXIMUM_MEMORY=2GB']
-    self.do_run_in_out_file_test('browser/test_2GB_fail.cpp')
+    self.do_run_in_out_file_test('browser/test_2gb_fail.c')
 
   @no_firefox('no 4GB support yet')
   @no_2gb('uses MAXIMUM_MEMORY')
@@ -5415,7 +5401,7 @@ Module["preRun"] = () => {
     # 4GB.
     self.set_setting('MAXIMUM_MEMORY', '4GB')
     self.cflags += ['-O2', '-sALLOW_MEMORY_GROWTH', '-sABORTING_MALLOC=0', '-sASSERTIONS']
-    self.do_run_in_out_file_test('browser/test_4GB_fail.cpp')
+    self.do_run_in_out_file_test('browser/test_4gb_fail.c')
 
   # Tests that Emscripten-compiled applications can be run when a slash in the URL query or fragment of the js file
   def test_browser_run_with_slash_in_query_and_hash(self):
@@ -5714,118 +5700,6 @@ fetch('report_result?0');
   })
   def test_shell_minimal(self, args):
     self.btest_exit('browser_test_hello_world.c', cflags=['--shell-file', path_from_root('html/shell_minimal.html')] + args)
-
-
-class emrun(RunnerCore):
-  def test_emrun_info(self):
-    if not has_browser():
-      self.skipTest('need a browser')
-    result = self.run_process([EMRUN, '--system-info', '--browser_info'], stdout=PIPE).stdout
-    assert 'CPU' in result
-    assert 'Browser' in result
-    assert 'Traceback' not in result
-
-    result = self.run_process([EMRUN, '--list-browsers'], stdout=PIPE).stdout
-    assert 'Traceback' not in result
-
-  def test_no_browser(self):
-    # Test --no-browser mode where we have to take care of launching the browser ourselves
-    # and then killing emrun when we are done.
-    if not has_browser():
-      self.skipTest('need a browser')
-
-    self.run_process([EMCC, test_file('test_emrun.c'), '--emrun', '-o', 'hello_world.html'])
-    proc = subprocess.Popen([EMRUN, '--no-browser', '.', '--port=3333'], stdout=PIPE)
-    try:
-      if get_browser():
-        print('Starting browser')
-        browser_cmd = shlex.split(get_browser())
-        browser = subprocess.Popen(browser_cmd + ['http://localhost:3333/hello_world.html'])
-        try:
-          while True:
-            stdout = proc.stdout.read()
-            if b'Dumping out file' in stdout:
-              break
-        finally:
-          print('Terminating browser')
-          browser.terminate()
-          browser.wait()
-    finally:
-      print('Terminating emrun server')
-      proc.terminate()
-      proc.wait()
-
-  def test_program_arg_separator(self):
-    # Verify that trying to pass argument to the page without the `--` separator will
-    # generate an actionable error message
-    err = self.expect_fail([EMRUN, '--foo'])
-    self.assertContained('error: unrecognized arguments: --foo', err)
-    self.assertContained('remember to add `--` between arguments', err)
-
-  @also_with_threads
-  def test_emrun(self):
-    self.emcc('test_emrun.c', ['--emrun', '-o', 'test_emrun.html'])
-    if not has_browser():
-      self.skipTest('need a browser')
-
-    # We cannot run emrun from the temp directory the suite will clean up afterwards, since the
-    # browser that is launched will have that directory as startup directory, and the browser will
-    # not close as part of the test, pinning down the cwd on Windows and it wouldn't be possible to
-    # delete it. Therefore switch away from that directory before launching.
-    os.chdir(path_from_root())
-
-    args_base = [EMRUN, '--timeout', '30', '--safe_firefox_profile',
-                 '--kill-exit', '--port', '6939', '--verbose',
-                 '--log-stdout', self.in_dir('stdout.txt'),
-                 '--log-stderr', self.in_dir('stderr.txt')]
-
-    if get_browser() is not None:
-      # If EMTEST_BROWSER carried command line arguments to pass to the browser,
-      # (e.g. "firefox -profile /path/to/foo") those can't be passed via emrun,
-      # so strip them out.
-      browser_cmd = shlex.split(get_browser())
-      browser_path = browser_cmd[0]
-      args_base += ['--browser', browser_path]
-      if len(browser_cmd) > 1:
-        browser_args = browser_cmd[1:]
-        if 'firefox' in browser_path and ('-profile' in browser_args or '--profile' in browser_args):
-          # emrun uses its own -profile, strip it out
-          parser = argparse.ArgumentParser(add_help=False) # otherwise it throws with -headless
-          parser.add_argument('-profile')
-          parser.add_argument('--profile')
-          browser_args = parser.parse_known_args(browser_args)[1]
-        if browser_args:
-          args_base += ['--browser_args', ' ' + ' '.join(browser_args)]
-
-    for args in [
-        [],
-        ['--port', '0'],
-        ['--private_browsing', '--port', '6941'],
-        ['--dump_out_directory', 'other dir/multiple', '--port', '6942'],
-        ['--dump_out_directory=foo_bar', '--port', '6942'],
-    ]:
-      args = args_base + args + [self.in_dir('test_emrun.html'), '--', '1', '2', '--3', 'escaped space', 'with_underscore']
-      print(shlex.join(args))
-      proc = self.run_process(args, check=False)
-      self.assertEqual(proc.returncode, 100)
-      dump_dir = 'dump_out'
-      if '--dump_out_directory' in args:
-        dump_dir = 'other dir/multiple'
-      elif '--dump_out_directory=foo_bar' in args:
-        dump_dir = 'foo_bar'
-      self.assertExists(self.in_dir(f'{dump_dir}/test.dat'))
-      self.assertExists(self.in_dir(f'{dump_dir}/heap.dat'))
-      self.assertExists(self.in_dir(f'{dump_dir}/nested/with space.dat'))
-      stdout = read_file(self.in_dir('stdout.txt'))
-      stderr = read_file(self.in_dir('stderr.txt'))
-      self.assertContained('argc: 6', stdout)
-      self.assertContained('argv[3]: --3', stdout)
-      self.assertContained('argv[4]: escaped space', stdout)
-      self.assertContained('argv[5]: with_underscore', stdout)
-      self.assertContained('Hello, world!', stdout)
-      self.assertContained('Testing ASCII characters: !"$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', stdout)
-      self.assertContained('Testing char sequences: %20%21 &auml;', stdout)
-      self.assertContained('hello, error stream!', stderr)
 
 
 class browser64(browser):
