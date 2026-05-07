@@ -219,7 +219,7 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
       'WEBGL_polygon_mode'
     ];
     // .getSupportedExtensions() can return null if context is lost, so coerce to empty array.
-    return (ctx.getSupportedExtensions() || []).filter(ext => supportedExtensions.includes(ext));
+    return ctx.getSupportedExtensions()?.filter(ext => supportedExtensions.includes(ext)) ?? [];
   },
 
   $GLctx__internal: true,
@@ -603,7 +603,9 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
 
 #if GL_ASSERTIONS
     validateGLObjectID: (objectHandleArray, objectID, callerFunctionName, objectReadableType) => {
-      if (objectID != 0) {
+      // `objectHandleArray` may be uninitialized when GL uniforms are lazily initialized, and `glUniform*` is called
+      // for the first time before uniforms have been populated. So ignore this validation if the handle array is not present.
+      if (objectID != 0 && objectHandleArray) {
         if (objectHandleArray[objectID] === null) {
           err(`${callerFunctionName} called with an already deleted ${objectReadableType} ID ${objectID}!`);
         } else if (!(objectID in objectHandleArray)) {
@@ -2171,6 +2173,7 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
 
   // Returns the WebGLUniformLocation object corresponding to the location index
   // integer on the currently active shader in this GL context.
+  $webglGetUniformLocation__deps: ['$webglPrepareUniformLocationsBeforeFirstUse'],
   $webglGetUniformLocation: (location) => {
     var p = GLctx.currentProgram;
 
@@ -2182,6 +2185,14 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
 
 #if GL_TRACK_ERRORS
     if (p) {
+#endif
+#if GL_EXPLICIT_UNIFORM_LOCATION
+      // Ensure `uniformLocsById`/`uniformArrayNamesById` are populated. Without
+      // this, calling `glUniform*()` on a freshly linked program before any
+      // `glGetUniformLocation()` silently no-ops: `glLinkProgram` resets
+      // `uniformLocsById` to 0 and only `$webglPrepareUniformLocationsBeforeFirstUse`
+      // refills it. The call below is idempotent (guards on `!uniformLocsById`).
+      webglPrepareUniformLocationsBeforeFirstUse(p);
 #endif
       var webglLoc = p.uniformLocsById[location];
       // p.uniformLocsById[location] stores either an integer, or a
@@ -3317,7 +3328,7 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
 #endif
     GLctx.compileShader(GL.shaders[shader]);
 #if GL_DEBUG
-    var log = (GLctx.getShaderInfoLog(GL.shaders[shader]) || '').trim();
+    var log = GLctx.getShaderInfoLog(GL.shaders[shader])?.trim();
     if (log) dbg(`glCompileShader: ${log}`);
 #endif
   },
@@ -3501,7 +3512,7 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
     program = GL.programs[program];
     GLctx.linkProgram(program);
 #if GL_DEBUG
-    var log = (GLctx.getProgramInfoLog(program) || '').trim();
+    var log = GLctx.getProgramInfoLog(program)?.trim();
     if (log) dbg(`glLinkProgram: ${log}`);
     if (program.uniformLocsById) dbg(`glLinkProgram invalidated ${Object.keys(program.uniformLocsById).length} uniform location mappings`);
 #endif
@@ -3865,7 +3876,7 @@ for (/**@suppress{duplicate}*/var i = 0; i <= {{{ GL_POOL_TEMP_BUFFERS_SIZE }}};
       GLctx.bufferSubData(0x8893 /*GL_ELEMENT_ARRAY_BUFFER*/,
                           0,
                           HEAPU8.subarray(indices, indices + size));
-      
+
       // Calculating vertex count if shader's attribute data is on client side
       if (count > 0) {
         for (var i = 0; i < GL.currentContext.maxVertexAttribs; ++i) {

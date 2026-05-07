@@ -130,35 +130,31 @@ page_last_served_time = None
 http_mutex = threading.RLock()
 
 
-def logi(msg):
-  """Prints a log message to 'info' stdout channel. Always printed."""
+def print_message(msg, file):
   global last_message_time
   with http_mutex:
-    sys.stdout.write(msg + '\n')
-    sys.stdout.flush()
+    file.write(msg + '\n')
+    file.flush()
     last_message_time = tick()
+
+
+def logi(msg):
+  """Prints a log message to stdout. Always printed."""
+  print_message(msg, sys.stdout)
 
 
 def logv(msg):
-  """Prints a verbose log message to stdout channel.
+  """Prints a verbose log message to stdout.
 
   Only shown if run with --verbose.
   """
-  global last_message_time
   if emrun_options.verbose:
-    with http_mutex:
-      sys.stdout.write(msg + '\n')
-      sys.stdout.flush()
-      last_message_time = tick()
+    print_message(msg, sys.stdout)
 
 
 def loge(msg):
-  """Prints an error message to stderr channel."""
-  global last_message_time
-  with http_mutex:
-    sys.stderr.write(msg + '\n')
-    sys.stderr.flush()
-    last_message_time = tick()
+  """Prints an error message to stderr."""
+  print_message(msg, sys.stderr)
 
 
 def format_eol(msg):
@@ -774,7 +770,11 @@ def get_cpu_info():
       cpu_name = check_output(['sysctl', '-n', 'machdep.cpu.brand_string']).strip()
       physical_cores = int(check_output(['sysctl', '-n', 'machdep.cpu.core_count']).strip())
       logical_cores = int(check_output(['sysctl', '-n', 'machdep.cpu.thread_count']).strip())
-      frequency = int(check_output(['sysctl', '-n', 'hw.cpufrequency']).strip()) // 1000000
+      frequency = check_output(['sysctl', '-n', 'hw.cpufrequency']).strip()
+      if not frequency:
+        # Apple Silicon macOS devices have hw.tbfrequency instead of hw.cpufrequency
+        frequency = check_output(['sysctl', '-n', 'hw.tbfrequency']).strip()
+      frequency = int(frequency) // 1000000
     elif LINUX:
       for line in open('/proc/cpuinfo', encoding='utf-8').readlines():
         if 'model name' in line:
@@ -917,12 +917,15 @@ def macos_get_gpu_info():
     info = info.split("Chipset Model:")[1:]
     for gpu in info:
       model_name = gpu.split('\n')[0].strip()
-      bus = re.search("Bus: (.*)", gpu).group(1).strip()
-      memory = int(re.search("VRAM (.*?): (.*) MB", gpu).group(2).strip())
-      gpus += [{'model': model_name + ' (' + bus + ')', 'ram': memory * 1024 * 1024}]
-    return gpus
+      if 'Bus' in gpu and 'VRAM' in gpu:
+        bus = re.search("Bus: (.*)", gpu).group(1).strip()
+        memory = int(re.search("VRAM (.*?): (.*) MB", gpu).group(2).strip())
+        gpus += [{'model': model_name + ' (' + bus + ')', 'ram': memory * 1024 * 1024}]
+      else:
+        gpus += [{'model': model_name, 'ram': 0}]
   except Exception:
     pass
+  return gpus
 
 
 def get_gpu_info():

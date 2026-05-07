@@ -16,11 +16,8 @@ import os
 import unittest
 
 import test_posixtest_browser
-from browser_common import browser_should_skip_feature
 from common import RunnerCore, path_from_root
 from decorators import requires_pthreads
-
-from tools.feature_matrix import Feature
 
 testsuite_root = path_from_root('test/third_party/posixtestsuite')
 
@@ -74,6 +71,7 @@ unsupported_noreturn = {
 
 unsupported = {
   'test_pthread_cond_init_4_2': 'PTHREAD_PROCESS_SHARED not supported',
+  'test_pthread_barrierattr_setpshared_1_1': 'PTHREAD_PROCESS_SHARED not supported',
   'test_pthread_condattr_getpshared_1_2': 'PTHREAD_PROCESS_SHARED not supported',
   'test_pthread_mutexattr_setpshared_1_1': 'PTHREAD_PROCESS_SHARED not supported',
   'test_pthread_rwlockattr_setpshared_1_1': 'PTHREAD_PROCESS_SHARED not supported',
@@ -172,8 +170,6 @@ def make_test(name, testfile, browser):
   def f(self):
     if not NORETURN_ONLY and name in disabled:
       self.skipTest(disabled[name])
-    if browser and browser_should_skip_feature('EMTEST_LACKS_SHARED_ARRAY_BUFFER', Feature.THREADS):
-      self.skipTest('This test requires a browser with SharedArrayBuffer support')
 
     args = ['-I' + os.path.join(testsuite_root, 'include'),
             '-Werror',
