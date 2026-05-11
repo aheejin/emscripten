@@ -3556,7 +3556,9 @@ More info: https://emscripten.org
 
   @requires_dev_dependency('typescript')
   @parameterized({
-    'commonjs': [['-sMODULARIZE'], ['--module', 'commonjs', '--moduleResolution', 'node']],
+    # Use `node16` to avoid the deprecated `node` moduleResolution in TS 6.0+. Since there is no
+    # `type: "module"` in package.json, this still tests CommonJS.
+    'commonjs': [['-sMODULARIZE'], ['--module', 'node16', '--moduleResolution', 'node16']],
     'esm': [['-sEXPORT_ES6'], ['--module', 'NodeNext', '--moduleResolution', 'nodenext']],
     'esm_with_jsgen': [['-sEXPORT_ES6', '-sEMBIND_AOT'], ['--module', 'NodeNext', '--moduleResolution', 'nodenext']],
   })
@@ -9091,6 +9093,7 @@ end
     'pthread_offscreen': [['-pthread', '-Wno-experimental', '-sOFFSCREEN_FRAMEBUFFER']],
     'wasmfs': [['-sWASMFS']],
     'min_webgl_version': [['-sMIN_WEBGL_VERSION=2', '-sLEGACY_GL_EMULATION=0']],
+    'full_es3': [['-sMIN_WEBGL_VERSION=2', '-sLEGACY_GL_EMULATION=0', '-sFULL_ES3']],
   })
   def test_closure_full_js_library(self, args):
     # Test for closure errors and warnings in the entire JS library.

@@ -38,9 +38,7 @@ commands:
           command: |
             # TODO: Make these part of the base image
             apt-get install -q -y libu2f-udev libvulkan1 xdg-utils
-            # Temporarily pinning to beta rather than unstable:
-            # See https://github.com/emscripten-core/emscripten/issues/26720
-            wget -O ~/chrome.deb https://dl.google.com/linux/direct/google-chrome-beta_current_amd64.deb
+            wget -O ~/chrome.deb https://dl.google.com/linux/direct/google-chrome-unstable_current_amd64.deb
             # If that download link breaks, temporarily use this URL instead:
             # wget -O ~/chrome.deb https://storage.googleapis.com/webassembly/chrome/google-chrome-stable_current_amd64.deb
             dpkg -i ~/chrome.deb
@@ -712,6 +710,7 @@ jobs:
             core2g.test_externref
             corez.test_dylink_iostream
             core2ss.test_pthread_dylink
+            core2ss.test_pthread_dylink_tls
             core2ss.test_pthread_thread_local_storage
             core2ss.test_wasm_worker_futex_wait
             core2s.test_dylink_syslibs_missing_assertions
@@ -1096,6 +1095,7 @@ jobs:
             core0.test_async_ccall_promise_jspi*
             core0.test_cubescript_jspi
             core0.test_poll_blocking_asyncify_jspi
+            wasm64.test_pthread_join_and_asyncify
             "
       - upload-test-results
   test-other:

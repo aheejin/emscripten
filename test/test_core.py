@@ -7118,6 +7118,9 @@ void* operator new(size_t size) {
       print(str(extra_args) + ' ' + which)
       self.do_core_test('test_dyncall_specific.c', cflags=['-D' + which] + extra_args)
 
+  def test_dyncall_ptr_handling(self):
+    self.do_core_test('test_dyncall_ptr_handling.c', cflags=['--js-library', test_file('core/test_dyncall_ptr_handling.js')])
+
   @parameterized({
     '': ([],),
     'legacy': (['-sDYNCALLS'],),
@@ -9364,9 +9367,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @needs_dylink
   @requires_pthreads
   def test_pthread_dylink_tls(self):
-    if self.get_setting('STACK_OVERFLOW_CHECK') == 2:
-      self.skipTest('https://github.com/emscripten-core/emscripten/issues/24964: fails with stack overflow (Attempt to set SP to 0x000114d0, with stack limits [0x00000000 - 0x00000000])')
-
     self.cflags += ['-Wno-experimental', '-pthread']
     main = test_file('core/pthread/test_pthread_dylink_tls.c')
     self.dylink_testf(main, main_cflags=['-sPTHREAD_POOL_SIZE=1'])
