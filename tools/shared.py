@@ -208,7 +208,7 @@ def run_js_tool(filename, jsargs=[], node_args=[], **kw):  # noqa: B006
   This is used by emcc to run parts of the build process that are
   implemented in javascript.
   """
-  command = config.NODE_JS + node_args + [filename] + jsargs
+  command = [*config.NODE_JS, *node_args, filename, *jsargs]
   return check_call(command, **kw).stdout
 
 
@@ -216,7 +216,7 @@ def get_npm_cmd(name, missing_ok=False):
   if utils.WINDOWS:
     cmd = [path_from_root('node_modules/.bin', name + '.cmd')]
   else:
-    cmd = config.NODE_JS + [path_from_root('node_modules/.bin', name)]
+    cmd = [*config.NODE_JS, path_from_root('node_modules/.bin', name)]
   if not os.path.exists(cmd[-1]):
     if missing_ok:
       return None
@@ -286,7 +286,7 @@ def env_with_node_in_path():
 
 
 def _get_node_version_pair(nodejs):
-  actual = utils.run_process(nodejs + ['--version'], stdout=PIPE).stdout.strip()
+  actual = utils.run_process([*nodejs, '--version'], stdout=PIPE).stdout.strip()
   version = actual.removeprefix('v')
   version = version.split('-')[0].split('.')
   version = tuple(int(v) for v in version)
@@ -339,7 +339,7 @@ def node_exception_flags(nodejs):
 @ToolchainProfiler.profile()
 def check_node():
   try:
-    utils.run_process(config.NODE_JS + ['-e', 'console.log("hello")'], stdout=PIPE)
+    utils.run_process([*config.NODE_JS, '-e', 'console.log("hello")'], stdout=PIPE)
   except Exception as e:
     exit_with_error('the configured node executable (%s) does not seem to work, check the paths in %s (%s)', config.NODE_JS, config.EM_CONFIG, e)
 
@@ -580,7 +580,7 @@ def is_internal_global(name):
                                  '__start_em_lib_deps', '__stop_em_lib_deps',
                                  '__em_lib_deps'}
   internal_prefixes = ('__em_js__', '__em_lib_deps')
-  return name in internal_start_stop_symbols or any(name.startswith(p) for p in internal_prefixes)
+  return name in internal_start_stop_symbols or name.startswith(internal_prefixes)
 
 
 def is_user_export(name):

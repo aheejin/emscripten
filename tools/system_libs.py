@@ -3,6 +3,8 @@
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
+# ruff: noqa: RUF005
+
 import itertools
 import logging
 import os
@@ -71,7 +73,7 @@ def get_base_cflags(build_dir, force_object_files=False, preprocess=True):
     if preprocess:
       flags += ['-DEMSCRIPTEN_DYNAMIC_LINKING']
   if settings.MEMORY64:
-    flags += ['-sMEMORY64']
+    flags += ['-m64']
 
   source_dir = utils.path_from_root()
   relative_source_dir = os.path.relpath(source_dir, build_dir)
@@ -144,7 +146,7 @@ def create_lib_emar(output_filename, filenames):
   utils.delete_file(output_filename)
   cmd = [shared.EMAR, 'cr', output_filename] + filenames
   cmd = building.get_command_with_possible_response_file(cmd)
-  utils.run_process(cmd)
+  shared.check_call(cmd)
 
 
 def create_lib(libname, inputs):
@@ -1284,6 +1286,7 @@ class libc(MuslInternalLibrary,
           'emscripten_thread_primitives.c',
           'emscripten_futex_wait.c',
           'emscripten_futex_wake.c',
+          'emscripten_atomic_wait_suspending.c',
         ])
 
     # These files are in libc directories, but only built in libc_optz.
@@ -1323,6 +1326,7 @@ class libc(MuslInternalLibrary,
           '__map_file.c',
           'strftime.c',
           '__tz.c',
+          '__utc.c',
           '__tm_to_secs.c',
           '__year_to_secs.c',
           '__month_to_secs.c',
@@ -2206,7 +2210,7 @@ class libasan_rt(SanitizerLibrary):
 # things that we'd normally do in JS. That includes some general things
 # as well as some additional musl components (that normally we reimplement
 # in JS as it's more efficient that way).
-class libstandalonewasm(MuslInternalLibrary):
+class libstandalonewasm(MuslInternalLibrary, MTLibrary):
   name = 'libstandalonewasm'
   # LTO defeats the weak linking trick used in __original_main.c
   force_object_files = True
@@ -2265,6 +2269,7 @@ class libstandalonewasm(MuslInternalLibrary):
         path='system/lib/libc/musl/src/time',
         filenames=['__secs_to_tm.c',
                    '__tz.c',
+                   '__utc.c',
                    'gettimeofday.c',
                    'localtime_r.c',
                    'gmtime_r.c',
