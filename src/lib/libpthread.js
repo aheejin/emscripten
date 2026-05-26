@@ -293,7 +293,7 @@ var LibraryPThread = {
           return;
         }
 
-        if (d === 'setimmediate') {
+        if (d === 'setimmediate' || d === '_si') {
           // Worker wants to postMessage() to itself to implement setImmediate()
           // emulation.
           worker.postMessage(d);
@@ -312,6 +312,7 @@ var LibraryPThread = {
             // back into user code to free thread data. Without this it's possible
             // the unwind or ExitStatus exception could escape here.
             callUserCallback(() => cleanupThread(d.thread));
+            break;
 #if MAIN_MODULE
           case {{{ CMD_MARK_AS_FINISHED }}}:
             markAsFinished(d.thread);
@@ -1312,9 +1313,6 @@ var LibraryPThread = {
   },
 
   _emscripten_thread_mailbox_await__deps: ['$checkMailbox', '$waitAsyncPolyfilled'],
-  // Closure's Atomics.waitAsync extern incorrectly returns Promise<string>,
-  // but the spec returns a result object with async/value fields.
-  _emscripten_thread_mailbox_await__docs: '/** @suppress {missingProperties} */',
   _emscripten_thread_mailbox_await: (pthread_ptr) => {
     if (!waitAsyncPolyfilled) {
       // Wait on the pthread's initial self-pointer field because it is easy and
