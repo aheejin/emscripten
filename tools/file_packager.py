@@ -680,24 +680,13 @@ def generate_preload_js(data_target, data_files, metadata):
         try {
           // canOwn this data in the filesystem, it is a slice into the heap that will never change
           await Module['FS_preloadFile'](name, null, data, true, true, false, true);
-          Module['removeRunDependency'](`fp ${name}`);
         } catch (e) {
           err(`Preloading file ${name} failed`, e);
         }\n'''
   create_data = '''// canOwn this data in the filesystem, it is a slice into the heap that will never change
-        Module['FS_createDataFile'](name, null, data, true, true, true);
-        Module['removeRunDependency'](`fp ${name}`);'''
+        Module['FS_createDataFile'](name, null, data, true, true, true);'''
 
   finish_handler = create_preloaded if options.use_preload_plugins else create_data
-
-  if not options.lz4:
-    # Data requests - for getting a block of data out of the big archive - have
-    # a similar API to XHRs
-    code += '''
-    for (var file of metadata['files']) {
-      var name = file['filename']
-      Module['addRunDependency'](`fp ${name}`);
-    }\n'''
 
   catch_handler = ''
   if options.export_es6:
@@ -737,7 +726,7 @@ def generate_preload_js(data_target, data_files, metadata):
       use_data = '''var compressedData = %s;
             compressedData['data'] = byteArray;
             assert(typeof Module['LZ4'] === 'object', 'LZ4 not present - was your app build with -sLZ4?');
-            Module['LZ4'].loadPackage({ 'metadata': metadata, 'compressedData': compressedData }, %s);
+            await Module['LZ4'].loadPackage({ 'metadata': metadata, 'compressedData': compressedData }, %s);
             Module['removeRunDependency']('datafile_%s');''' % (meta, "true" if options.use_preload_plugins else "false", js_manipulation.escape_for_js_string(data_target))
 
     if options.export_es6:
@@ -995,7 +984,7 @@ def generate_preload_js(data_target, data_files, metadata):
         async function preloadFallback(error) {
           console.error(error);
           console.error('falling back to default preload behavior');
-          processPackageData(await fetchRemotePackage(REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE));
+          await processPackageData(await fetchRemotePackage(REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE));
         }
 
         try {
@@ -1004,14 +993,14 @@ def generate_preload_js(data_target, data_files, metadata):
           var useCached = !!pkgMetadata;
           Module['preloadResults'][PACKAGE_NAME] = {fromCache: useCached};
           if (useCached) {
-            processPackageData(await fetchCachedPackage(db, PACKAGE_PATH + PACKAGE_NAME, pkgMetadata));
+            await processPackageData(await fetchCachedPackage(db, PACKAGE_PATH + PACKAGE_NAME, pkgMetadata));
           } else {
             var packageData = await fetchRemotePackage(REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE);
             try {
-              processPackageData(await cacheRemotePackage(db, PACKAGE_PATH + PACKAGE_NAME, packageData, {uuid:PACKAGE_UUID}))
+              await processPackageData(await cacheRemotePackage(db, PACKAGE_PATH + PACKAGE_NAME, packageData, {uuid:PACKAGE_UUID}))
             } catch (error) {
               console.error(error);
-              processPackageData(packageData);
+              await processPackageData(packageData);
             }
           }
         } catch(e) {
@@ -1039,7 +1028,7 @@ def generate_preload_js(data_target, data_files, metadata):
       if (!fetched) {
         fetched = await fetchPromise;
       }
-      processPackageData(fetched);\n'''
+      await processPackageData(fetched);\n'''
 
   ret += '''
     async function runWithFS(Module) {\n'''
@@ -1079,7 +1068,7 @@ def generate_preload_js(data_target, data_files, metadata):
       throw new Error(`${response.status}: ${response.url}`);
     }
     var json = await response.json();
-    await loadPackage(json);
+    loadPackage(json);
   }
 
   if (Module['calledRun']) {
