@@ -66,6 +66,10 @@ addToLibrary({
   setTempRet0: '$setTempRet0',
   getTempRet0: '$getTempRet0',
 
+  // Used by the file_packager-generated code to detect if the program has already
+  // be started.
+  $isInitialized: () => runtimeInitialized,
+
   // Assign a name to a given function. This is mostly useful for debugging
   // purposes in cases where new functions are created at runtime.
   $createNamedFunction: (name, func) => Object.defineProperty(func, 'name', { value: name }),
@@ -154,9 +158,6 @@ addToLibrary({
     // if exit() was called explicitly, warn the user if the runtime isn't actually being shut down
     if (keepRuntimeAlive() && !implicit) {
       var msg = `program exited (with status: ${status}), but keepRuntimeAlive() is set (counter=${runtimeKeepaliveCounter}) due to an async operation, so halting execution but not exiting the runtime or preventing further async execution (you can use emscripten_force_exit, if you want to force a true shutdown)`;
-#if MODULARIZE
-      readyPromiseReject?.(msg);
-#endif // MODULARIZE
       err(msg);
     }
 #endif // ASSERTIONS

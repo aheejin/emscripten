@@ -1035,7 +1035,7 @@ def generate_preload_js(data_target, data_files, metadata):
   ret += code
   ret += '''
     }
-    if (Module['calledRun']) {
+    if (Module['isInitialized']?.()) {
       runWithFS(Module)%s;
     } else {
       if (!Module['preRun']) Module['preRun'] = [];
@@ -1071,7 +1071,7 @@ def generate_preload_js(data_target, data_files, metadata):
     loadPackage(json);
   }
 
-  if (Module['calledRun']) {
+  if (Module['isInitialized']?.()) {
     runMetaWithFS();
   } else {
     if (!Module['preRun']) Module['preRun'] = [];
