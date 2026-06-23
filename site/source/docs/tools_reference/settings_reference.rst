@@ -2812,13 +2812,15 @@ NOTE: Binary encoding requires that the HTML/JS files are served with UTF-8
 encoding, and will not work with the default legacy Windows-1252 encoding
 that browsers might use on Windows. To enable UTF-8 encoding in a
 hand-crafted index.html file, apply any of:
+
 1. Add `<meta charset="utf-8">` inside the <head> section of HTML, or
 2. Add `<meta http-equiv="content-type" content="text/html; charset=UTF-8" />`` inside <head>, or
 3. Add `<meta http-equiv="content-type" content="application/json; charset=utf-8" />` inside <head>
-(if using -o foo.js with SINGLE_FILE mode to build HTML+JS), or
+   (if using -o foo.js with SINGLE_FILE mode to build HTML+JS), or
 4. pass the header `Content-Type: text/html; charset=utf-8` and/or header
-`Content-Type: application/javascript; charset=utf-8` when serving the
-relevant files that contain binary encoded content.
+   `Content-Type: application/javascript; charset=utf-8` when serving the
+   relevant files that contain binary encoded content.
+
 If none of these are possible, disable binary encoding with
 -sSINGLE_FILE_BINARY_ENCODE=0 to fall back to base64 encoding.
 
@@ -3359,6 +3361,49 @@ CROSS_ORIGIN uses an inline worker to instead load the worker script
 indirectly using `importScripts`
 
 Default value: false
+
+.. _cross_origin_storage:
+
+CROSS_ORIGIN_STORAGE
+====================
+
+Enables Cross-Origin Storage (COS) API support for Wasm loading on the
+Web target. At link time Emscripten computes the SHA-256 hash of the
+final ``.wasm`` binary and embeds it in the generated JS. At runtime the
+COS API is used as a progressive enhancement: the binary is fetched from
+the shared cross-origin cache on a hit, or stored there after a network
+fetch on a miss; when the API is absent or errors the runtime falls
+through to the standard fetch path.
+
+Requires the Web environment; using it without ``-sENVIRONMENT=web`` is a
+hard link-time error. Incompatible with SINGLE_FILE and
+WASM_ASYNC_COMPILATION=0 (both produce hard link-time errors).
+
+See :ref:`CrossOriginStorage` for the full guide.
+
+.. note:: This is an experimental setting
+
+Default value: false
+
+.. _cross_origin_storage_origins:
+
+CROSS_ORIGIN_STORAGE_ORIGINS
+============================
+
+Controls which origins may read the Wasm binary from the COS cache. Only
+meaningful when ``-sCROSS_ORIGIN_STORAGE`` is set. Applied only during the
+write (cache-miss) path, not the read (cache-hit) path.
+
+``['*']`` (default) — any origin can retrieve the file.
+Explicit HTTPS origin list — restricted to those origins only::
+
+  -sCROSS_ORIGIN_STORAGE_ORIGINS=https://app.example.com,https://api.example.com
+
+``[]`` — same-site only (omits the ``origins`` field entirely).
+
+Mixing ``'*'`` with explicit origins is a link-time error.
+
+Default value: ['*']
 
 .. _fake_dylibs:
 
