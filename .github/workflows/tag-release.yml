@@ -7,21 +7,24 @@ on:
       release-sha:
         required: true
         type: string
+permissions:
+  contents: read
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           token: ${{ secrets.EMSCRIPTEN_BOT_TOKEN }}
           fetch-depth: 0
       - name: Create Release
-        run: python3 tools/maint/create_release.py --release-commit ${{ inputs.release-sha }}
         env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
           GH_TOKEN: ${{ secrets.EMSCRIPTEN_BOT_TOKEN }}
           GIT_AUTHOR_NAME: emscripten-bot
           GIT_AUTHOR_EMAIL: emscripten-bot@users.noreply.github.com
           GIT_COMMITTER_NAME: emscripten-bot
           GIT_COMMITTER_EMAIL: emscripten-bot@users.noreply.github.com
+        run: python3 tools/maint/create_release.py --release-commit "$RELEASE_SHA"

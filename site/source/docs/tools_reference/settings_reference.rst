@@ -588,6 +588,35 @@ sockets calls from browser to native world.
 
 Default value: false
 
+.. _noderawsockets:
+
+NODERAWSOCKETS
+==============
+
+If enabled, the POSIX sockets API is backed by Node.js's ``node:net``
+module, giving real non-blocking outgoing TCP sockets with no WebSockets,
+proxy process or pthreads. This is the sockets counterpart to
+:ref:`NODERAWFS`: where :ref:`NODERAWFS` gives direct access to the host
+filesystem, this gives direct access to host sockets. It only works under
+node and is ignored elsewhere.
+
+It supports full TCP (outgoing connect plus bind, listen and accept for
+servers) and UDP. TCP clients use the public ``node:net`` API when possible,
+falling back to the private ``tcp_wrap``/``udp_wrap`` handles on older
+Node.js.
+
+It is event-driven. Socket readiness comes through the same
+``emscripten_set_socket_*_callback`` hooks the WebSocket backend uses, so it
+works with existing readiness reactors. It cannot be combined with the
+WebSocket emulation, :ref:`PROXY_POSIX_SOCKETS` or :ref:`SOCKET_WEBRTC`.
+
+It works under -pthread with :ref:`PROXY_TO_PTHREAD`, where main() and every socket
+syscall run on a single worker alongside the node handles and their event
+loop. As with the WebSocket backend, sharing a socket across threads under a
+plain -pthread build (without PROXY_TO_PTHREAD) is not supported.
+
+Default value: false
+
 .. _websocket_subprotocol:
 
 WEBSOCKET_SUBPROTOCOL
@@ -1418,7 +1447,35 @@ Setting this list to [], or at least a short and concise set of names you
 actually use, can be very useful for reducing code size. By default, the
 list contains a set of commonly used symbols.
 
-FIXME: should this just be  0  if we want everything?
+In addition to the default symbols, the following are also available:
+
+- fetchSettings
+- logReadFiles
+- loadSplitModule
+- onMalloc
+- onRealloc
+- onFree
+- onSbrkGrow
+- onCOSCacheHit
+- onCOSCacheMiss
+- onCOSStore
+- GL_MAX_TEXTURE_IMAGE_UNITS
+- SDL_canPlayWithWebAudio
+- SDL_numSimultaneouslyQueuedBuffers
+- freePreloadedMediaOnUse
+- preinitializedWebGLContext
+- keyboardListeningElement
+- doNotCaptureKeyboard
+- extraStackTrace
+- preloadPlugins
+- preMainLoop
+- postMainLoop
+- forcedAspectRatio
+- mainScriptUrlOrBlob
+- onFullScreen
+- INITIAL_MEMORY
+- wasmMemory
+- wasmBinary
 
 Default value: (multi-line value, see settings.js)
 
@@ -3344,11 +3401,16 @@ Default value: false
 GROWABLE_ARRAYBUFFERS
 =====================
 
-Enable support for GrowableSharedArrayBuffer.
-This feature has only recently become available across major browser engines
-and Node.js.
+Enable support for growable views of Wasm memory. This is a recent Web
+platform feature that can make growing the Wasm memory more efficient,
+especially in multi-threaded builds.
+Setting this to 1 will auto-detect the presence of this API and use it
+when available.
+Setting this to 2 will unconditionally require it. This is the only way
+to completely remove the overhead of growable memory + pthreads.
+This settings does nothing unless ALLOW_MEMORY_GROWTH is set.
 
-Default value: false
+Default value: 0
 
 .. _cross_origin:
 
