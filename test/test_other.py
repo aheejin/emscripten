@@ -6216,6 +6216,71 @@ int main(void) {
     expected = 'add-dep\nremove-dep\nHello, world!\ngot module\n'
     self.assertContained(expected, self.run_js('run.mjs'))
 
+  def test_modularize_instance_auto_init(self):
+    create_file('library.js', '''\
+    addToLibrary({
+      $baz: () => console.log('baz'),
+      $qux: () => console.log('qux'),
+    });''')
+    # With AUTO_INIT the module self-initializes via top-level await and does not
+    # export `init`.
+    self.run_process([EMCC, test_file('modularize_instance.c'),
+                      '-sMODULARIZE=instance', '-sAUTO_INIT',
+                      '-Wno-experimental',
+                      '-sEXPORTED_RUNTIME_METHODS=baz,addOnExit,HEAP32',
+                      '-sEXPORTED_FUNCTIONS=_bar,_main,qux',
+                      '--js-library', 'library.js',
+                      '-o', 'modularize_instance.mjs'] + self.get_cflags())
+
+    # Named exports are usable directly on import; there is no `init` export.
+    create_file('runner.mjs', '''
+      import { strict as assert } from 'assert';
+      import * as mod from "./modularize_instance.mjs";
+      import { _foo as foo, _bar as bar, baz, qux, addOnExit, HEAP32 } from "./modularize_instance.mjs";
+      assert(mod.default === undefined); // no `init` export when self-initializing
+      foo(); // exported with EMSCRIPTEN_KEEPALIVE
+      bar(); // exported with EXPORTED_FUNCTIONS
+      baz(); // exported library function with EXPORTED_RUNTIME_METHODS
+      qux(); // exported library function with EXPORTED_FUNCTIONS
+      assert(typeof addOnExit === 'function'); // exported runtime function with EXPORTED_RUNTIME_METHODS
+      assert(typeof HEAP32 === 'object'); // exported runtime value by default
+    ''')
+
+    self.assertContained('main1\nmain2\nfoo\nbar\nbaz\n', self.run_js('runner.mjs'))
+
+  @also_with_pthreads
+  @requires_node_25
+  def test_esm_integration_auto_init(self):
+    # Instance-phase wasm imports currently generate an ExperimentalWarning under node.
+    self.node_args += ['--no-warnings']
+    create_file('library.js', '''\
+    addToLibrary({
+      $baz: () => console.log('baz'),
+      $qux: () => console.log('qux'),
+    });''')
+    self.run_process([EMCC, test_file('modularize_instance.c'),
+                      '-Wno-experimental',
+                      '-sWASM_ESM_INTEGRATION', '-sAUTO_INIT',
+                      '-sEXPORTED_RUNTIME_METHODS=baz,addOnExit,HEAP32',
+                      '-sEXPORTED_FUNCTIONS=_bar,_main,qux',
+                      '--js-library', 'library.js',
+                      '-o', 'modularize_instance.mjs'] + self.get_cflags())
+
+    create_file('runner.mjs', '''
+      import { strict as assert } from 'assert';
+      import * as mod from "./modularize_instance.mjs";
+      import { _foo as foo, _bar as bar, baz, qux, addOnExit, HEAP32 } from "./modularize_instance.mjs";
+      assert(mod.default === undefined); // no `init` export when self-initializing
+      foo();
+      bar();
+      baz();
+      qux();
+      assert(typeof addOnExit === 'function');
+      assert(typeof HEAP32 === 'object');
+    ''')
+
+    self.assertContained('main1\nmain2\nfoo\nbar\nbaz\n', self.run_js('runner.mjs'))
+
   def test_modularize_instantiation_error(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-o', 'out.mjs'] + self.get_cflags())
     create_file('run.mjs', '''
@@ -9051,8 +9116,8 @@ int main() {
         print('header: ' + header)
         # These headers cannot be included in isolation.
         # e.g: error: unknown type name 'EGLDisplay'
-        # Don't include avxintrin.h and avx2inrin.h directly, include immintrin.h instead
-        if header in {'eglext.h', 'SDL_config_macosx.h', 'glext.h', 'gl2ext.h', 'avxintrin.h', 'avx2intrin.h'}:
+        # Don't include avxintrin.h, avx2intrin.h, fmaintrin.h directly, include immintrin.h instead
+        if header in {'eglext.h', 'SDL_config_macosx.h', 'glext.h', 'gl2ext.h', 'avxintrin.h', 'avx2intrin.h', 'fmaintrin.h'}:
           continue
         # These headers are C++ only and cannot be included from C code.
         # But we still want to check they can be included on there own without
@@ -9067,7 +9132,7 @@ int main() {
         inc = f'#include <{header}>\n__attribute__((weak)) int foo;\n'
         cflags = ['-Werror', '-Wall', '-pedantic', '-msimd128', '-msse4']
         if header == 'immintrin.h':
-          cflags.append('-mavx2')
+          cflags += ['-mavx2', '-mfma']
         if cxx_only:
           create_file('a.cxx', inc)
           create_file('b.cxx', inc)
@@ -13251,6 +13316,7 @@ void foo() {}
     self.do_runf('pthread/test_pthread_sigmask.c', 'done\n', cflags=args)
 
   # Tests memory growth in pthreads mode, but still on the main thread.
+  @crossplatform
   @requires_pthreads
   @parameterized({
     '': ([],),
@@ -13259,7 +13325,8 @@ void foo() {}
   })
   def test_pthread_growth_mainthread(self, cflags):
     if '-sGROWABLE_ARRAYBUFFERS=2' in cflags:
-      self.require_node_26()
+      if self.engine_is_node():
+        self.require_node_26()
     else:
       self.cflags.append('-Wno-pthreads-mem-growth')
     self.do_runf('pthread/test_pthread_memory_growth_mainthread.c', cflags=['-pthread', '-sALLOW_MEMORY_GROWTH', '-sINITIAL_MEMORY=32MB', '-sMAXIMUM_MEMORY=256MB'] + cflags)
@@ -13282,6 +13349,8 @@ void foo() {}
     self.assertLess(growable_size, no_growable_size)
 
   # Tests memory growth in a pthread.
+  @crossplatform
+  @no_deno('https://github.com/denoland/deno/issues/35658')
   @requires_pthreads
   @parameterized({
     '': ([],),
@@ -13297,7 +13366,8 @@ void foo() {}
       self.require_node_25()
 
     if '-sGROWABLE_ARRAYBUFFERS=2' in cflags:
-      self.require_node_26()
+      if self.engine_is_node():
+        self.require_node_26()
     else:
       self.cflags.append('-Wno-pthreads-mem-growth')
     self.do_runf('pthread/test_pthread_memory_growth.c', cflags=['-pthread', '-sALLOW_MEMORY_GROWTH', '-sINITIAL_MEMORY=32MB', '-sMAXIMUM_MEMORY=256MB'] + cflags)
