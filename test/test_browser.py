@@ -1049,41 +1049,9 @@ window.close = () => {
   def test_glut_resize(self):
     self.btest_exit('test_glut_resize.c')
 
-  def test_sdl_joystick_1(self):
-    # Generates events corresponding to the Working Draft of the HTML5 Gamepad API.
-    # http://www.w3.org/TR/2012/WD-gamepad-20120529/#gamepad-interface
-    create_file('pre.js', '''
-      var gamepads = [];
-      // Spoof this function.
-      navigator['getGamepads'] = () => gamepads;
-      window['addNewGamepad'] = (id, numAxes, numButtons) => {
-        var index = gamepads.length;
-        gamepads.push({
-          axes: new Array(numAxes),
-          buttons: new Array(numButtons),
-          id: id,
-          index: index
-        });
-        var i;
-        for (i = 0; i < numAxes; i++) gamepads[index].axes[i] = 0;
-        for (i = 0; i < numButtons; i++) gamepads[index].buttons[i] = 0;
-      };
-      window['simulateGamepadButtonDown'] = (index, button) => {
-        gamepads[index].buttons[button] = 1;
-      };
-      window['simulateGamepadButtonUp'] = (index, button) => {
-        gamepads[index].buttons[button] = 0;
-      };
-      window['simulateAxisMotion'] = (index, axis, value) => {
-        gamepads[index].axes[axis] = value;
-      };
-    ''')
-
-    self.btest_exit('test_sdl_joystick.c', cflags=['-O2', '--minify=0', '-o', 'page.html', '--pre-js', 'pre.js', '-lSDL', '-lGL'])
-
-  def test_sdl_joystick_2(self):
-    # Generates events corresponding to the Editor's Draft of the HTML5 Gamepad API.
-    # https://dvcs.w3.org/hg/gamepad/raw-file/default/gamepad.html#idl-def-Gamepad
+  def test_sdl_joystick(self):
+    # Generates events corresponding to the HTML5 Gamepad API.
+    # https://www.w3.org/TR/gamepad/#idl-def-Gamepad
     create_file('pre.js', '''
       var gamepads = [];
       // Spoof this function.
@@ -1119,8 +1087,8 @@ window.close = () => {
 
   @requires_graphics_hardware
   def test_glfw_joystick(self):
-    # Generates events corresponding to the Editor's Draft of the HTML5 Gamepad API.
-    # https://dvcs.w3.org/hg/gamepad/raw-file/default/gamepad.html#idl-def-Gamepad
+    # Generates events corresponding to the HTML5 Gamepad API.
+    # https://www.w3.org/TR/gamepad/#idl-def-Gamepad
     create_file('pre.js', '''
       var gamepads = [];
       // Spoof this function.
@@ -3953,6 +3921,12 @@ Module["preRun"] = () => {
   # work
   def test_pthread_run_on_main_thread(self):
     self.btest_exit('pthread/test_pthread_run_on_main_thread.c', cflags=['-O3', '-pthread', '-sPTHREAD_POOL_SIZE'])
+
+  # Test that proxying operations work when Atomics.waitAsync is disabled,
+  # forcing the waitAsyncPolyfilled/postMessage fallback path.
+  def test_pthread_no_waitasync(self):
+    create_file('pre.js', 'delete Atomics.waitAsync;\n')
+    self.btest_exit('pthread/test_pthread_proxy_to_pthread.c', cflags=['-O3', '-pthread', '-sPROXY_TO_PTHREAD', '-sASSERTIONS', '--pre-js=pre.js'])
 
   # Test how a lot of back-to-back called proxying operations behave.
   def test_pthread_run_on_main_thread_flood(self):

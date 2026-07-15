@@ -18,8 +18,13 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-6.0.3 (in development)
+6.0.4 (in development)
 ----------------------
+- Legacy support for ancient vendor-prefixed DOM APIs was removed (#27341,
+  #27339, #27338, #27340, #27347)
+
+6.0.3 - 07/13/26
+----------------
 - Fixed `UTF8ToString` with `GROWABLE_ARRAYBUFFERS` set. String decoding now
   copies the data when the heap buffer is resizable, just like it does in
   the shared memory case. (#27242)
@@ -3020,7 +3025,7 @@ v1.39.5: 12/20/2019
 v1.39.4: 12/03/2019
 -------------------
 - Remove deprecated `requestFullScreen` method from `library_browser.js`, please
-  use `requestFullscreen` (without the capital S).
+  use `requestFullscreen` (without the capital S). (#9861)
 - Remove deprecated `requestFullScreen` and `cancelFullScreen` from `library_glut.js`
 - Remove deprecated `requestFullScreen` and `cancelFullScreen` from `library_glfw.js`
 - Fix SDL2_mixer support for ogg vorbis. See #9849
