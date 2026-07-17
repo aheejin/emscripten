@@ -691,11 +691,13 @@ def create_tsd(metadata, embind_tsd, bindgen_tsd):
     for index, type in enumerate(functype.params):
       arguments.append(f"_{index}: {type_to_ts_type(type)}")
     out += f'  {mangled}({", ".join(arguments)}): '
-    assert len(functype.returns) <= 1, 'One return type only supported'
-    if functype.returns:
+    if not functype.returns:
+      ret_ts_type = 'void'
+    elif len(functype.returns) == 1:
       ret_ts_type = type_to_ts_type(functype.returns[0])
     else:
-      ret_ts_type = 'void'
+      tuple_types = [type_to_ts_type(t) for t in functype.returns]
+      ret_ts_type = f'[{", ".join(tuple_types)}]'
     if settings.ASYNCIFY == 2 and any(fnmatch.fnmatch(name, pat) for pat in settings.ASYNCIFY_EXPORTS):
       ret_ts_type = f'Promise<{ret_ts_type}>'
     out += f'{ret_ts_type};\n'
@@ -891,11 +893,11 @@ def create_sending(metadata, library_symbols):
   sorted_items = sorted(send_items_map.items())
 
   if settings.WASM_ESM_INTEGRATION:
-    elems = []
-    for k, v in sorted_items:
-      elems.append(f'{v} as {k}')
-    elems = ',\n  '.join(elems)
     exports = '// Export JS functions to the wasm module with demangled names.\n'
+    if not sorted_items:
+      # With no JS->wasm imports emit no `export {}` at all rather than an empty one.
+      return exports
+    elems = ',\n  '.join(f'{v} as {k}' for k, v in sorted_items)
     exports += f"export {{\n  {elems}\n}};"
     return exports
 
@@ -928,7 +930,9 @@ def create_reexports(metadata):
         wasm_exports.append(exp)
       elif demangled == 'main' and '__main_argc_argv' in settings.WASM_EXPORTS:
         wasm_exports.append('_main')
-  exports += f"export {{ {', '.join(wasm_exports)} }};"
+  if wasm_exports:
+    # With nothing to re-export emit no `export {}` at all rather than an empty one.
+    exports += f"export {{ {', '.join(wasm_exports)} }};"
   return exports
 
 

@@ -3069,10 +3069,14 @@ More info: https://emscripten.org
     'emitDCEGraph-sig': (['emitDCEGraph', '--no-print'],),
     'emitDCEGraph-prefixing': (['emitDCEGraph', '--no-print'],),
     'emitDCEGraph-scopes': (['emitDCEGraph', '--no-print'],),
+    'emitDCEGraph-esm': (['emitDCEGraph', '--no-print', '--export-es6'],),
+    'emitDCEGraph-sourcePhaseImports': (['emitDCEGraph', '--no-print', '--export-es6'],),
     'minimal-runtime-applyDCEGraphRemovals': (['applyDCEGraphRemovals'],),
     'applyDCEGraphRemovals': (['applyDCEGraphRemovals'],),
+    'applyDCEGraphRemovals-esm': (['applyDCEGraphRemovals', '--export-es6'],),
     'applyImportAndExportNameChanges': (['applyImportAndExportNameChanges'],),
     'applyImportAndExportNameChanges2': (['applyImportAndExportNameChanges'],),
+    'applyImportAndExportNameChanges-esm': (['applyImportAndExportNameChanges', '--export-es6'],),
     'minimal-runtime-emitDCEGraph': (['emitDCEGraph', '--no-print'],),
     'minimal-runtime-2-emitDCEGraph': (['emitDCEGraph', '--no-print'],),
     'standalone-emitDCEGraph': (['emitDCEGraph', '--no-print'],),
@@ -15145,6 +15149,26 @@ addToLibrary({
 
     self.run_process(['cargo', 'install', 'wasm-bindgen-cli'])
     self.do_runf('empty.c', '42', cflags=[lib, '-sWASM_BINDGEN', '--post-js=post.js', '-lexports.js'])
+
+  @requires_rust
+  @requires_dev_dependency('typescript')
+  def test_wasm_bindgen_tsd_multi_return(self):
+    copytree(test_file('rust/bindgen_integration'), '.')
+    create_file('src/lib.rs', '''
+      use wasm_bindgen::prelude::*;
+      #[wasm_bindgen]
+      pub fn multi_value_return() -> Result<i32, JsValue> {
+          Ok(42)
+      }
+    ''')
+    self.run_process(['cargo', 'add', 'wasm-bindgen'])
+    self.run_process(['cargo', 'build'])
+    lib = 'target/wasm32-unknown-emscripten/debug/libbindgen_integration.a'
+    create_file('empty.c', '')
+    self.run_process(['cargo', 'install', 'wasm-bindgen-cli'])
+    self.run_process([EMCC, 'empty.c', '--emit-tsd', 'test_multi.d.ts', '-sWASM_BINDGEN', '-o', 'test_multi.js'] + [lib] + self.get_cflags())
+    actual = read_file('test_multi.d.ts')
+    self.assertContained("multi_value_return(): [number, number, number];", actual)
 
   def test_relative_em_cache(self):
     with env_modify({'EM_CACHE': 'foo'}):
