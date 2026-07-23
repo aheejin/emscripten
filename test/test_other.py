@@ -7676,7 +7676,7 @@ addToLibrary({
     'O2': (['-O2'], 137000),
     'emmalloc': (['-sMALLOC=emmalloc'], 185000),
     'dlmalloc': (['-sMALLOC=dlmalloc'], 191000),
-    'mimalloc': (['-sMALLOC=mimalloc'], 255000),
+    'mimalloc': (['-sMALLOC=mimalloc'], 256000),
     'emmalloc_O2': (['-sMALLOC=emmalloc', '-O2'], 130000),
     'dlmalloc_O2': (['-sMALLOC=dlmalloc', '-O2'], 137000),
     'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 193000),
@@ -13271,6 +13271,7 @@ void foo() {}
     self.set_setting('EXIT_RUNTIME')
     self.do_runf('other/test_pthread_js_exception.c', 'missing is not defined', assert_returncode=NON_ZERO, cflags=['-pthread'])
 
+  @crossplatform
   def test_config_closure_compiler(self):
     self.run_process([EMCC, test_file('hello_world.c'), '--closure=1'])
     with env_modify({'EM_CLOSURE_COMPILER': sys.executable}):
