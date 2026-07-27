@@ -6940,7 +6940,7 @@ void* operator new(size_t size) {
     zlib = self.get_zlib_library(use_cmake)
 
     # example.c uses K&R style function declarations
-    self.cflags += ['-Wno-deprecated-non-prototype']
+    self.cflags += ['-Wno-deprecated-non-prototype', '-Wno-unused-command-line-argument']
     self.do_core_test('test_zlib.c', libraries=zlib, includes=[test_file('third_party/zlib')])
 
   @needs_make('make')
@@ -9953,8 +9953,9 @@ int main() {
     self.assertExists('out.profdata')
     self.assertEqual(expected, self.run_process([LLVM_COV, 'show', 'test_hello_world.wasm', '-instr-profile=out.profdata'], stdout=PIPE).stdout)
 
+
 # Generate tests for everything
-def make_run(name, cflags=None, settings=None, env=None, # noqa
+def make_run(name, cflags=None, settings=None, env=None,
              v8_args=None, node_args=None,
              require_wasm64=False,
              init=None):
@@ -9969,7 +9970,7 @@ def make_run(name, cflags=None, settings=None, env=None, # noqa
     # we need to pass this flag here to avoid warnings from compile-only commands.
     cflags.append('-Wno-unused-command-line-argument')
 
-  TT = type(name, (TestCoreBase,), dict(run_name=name, env=env, __module__=__name__))  # noqa
+  TT = type(name, (TestCoreBase,), dict(run_name=name, env=env, __module__=__name__))  # ruff: ignore[unnecessary-collection-call, undefined-name]
 
   def tearDown(self):
     try:

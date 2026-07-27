@@ -329,11 +329,6 @@ def lld_flags(args, linker_inputs=None):
   if settings.WASM_EXCEPTIONS:
     args += ['-mllvm', '-wasm-enable-eh']
   if settings.WASM_EXCEPTIONS or settings.SUPPORT_LONGJMP == 'wasm':
-    if settings.WASM_LEGACY_EXCEPTIONS:
-      args += ['-mllvm', '-wasm-use-legacy-eh']
-    else:
-      args += ['-mllvm', '-wasm-use-legacy-eh=0']
-  if settings.WASM_EXCEPTIONS or settings.SUPPORT_LONGJMP == 'wasm':
     args += ['-mllvm', '-exception-model=wasm']
 
   return args
@@ -1300,7 +1295,7 @@ def run_binaryen_command(tool, infile, outfile=None, args=None, debug=False, std
   return ret
 
 
-def run_wasm_opt(infile, outfile=None, args=[], **kwargs):  # noqa
+def run_wasm_opt(infile, outfile=None, args=[], **kwargs):  # ruff: ignore[mutable-argument-default]
   return run_binaryen_command('wasm-opt', infile, outfile, args=args, **kwargs)
 
 
