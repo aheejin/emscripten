@@ -18,11 +18,15 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-6.0.5 (in development)
+6.0.6 (in development)
 ----------------------
+
+6.0.5 - 07/29/26
+----------------
 - Revert #27397, which changed the way config keys such as NODE_JS were parsed
   when reading the config file.  This change broke emsdk installations that
   contained spaces. (#27421)
+- OpenMP was updated to LLVM 22.1.8 (#27437)
 
 6.0.4 - 07/24/26
 ----------------
