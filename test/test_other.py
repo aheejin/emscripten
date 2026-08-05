@@ -248,7 +248,7 @@ def requires_tool(tool, env_name=None):
         env_var = f'EMTEST_SKIP_{tool.upper()}'
       if not shutil.which(tool):
         if env_var in os.environ:
-          self.skipTest(f'test requires ccache and {env_var} is set')
+          self.skipTest(f'test requires {tool} and {env_var} is set')
         else:
           self.fail(f'{tool} required to run this test.  Use {env_var} to skip')
       return func(self, *args, **kwargs)
@@ -594,12 +594,16 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       self.run_process([compiler, target, '-o', target + '.js'])
       self.assertContained('Hello, world!', self.run_js(target + '.js'))
 
-  def test_bc_output_warning(self):
-    err = self.run_process([EMCC, '-c', test_file('hello_world.c'), '-o', 'out.bc'], stderr=PIPE).stderr
-    self.assertContained('emcc: warning: .bc output file suffix used without -flto or -emit-llvm', err)
+  def test_bc_output_suffix(self):
+    # Emscripten doe not use the output name when compiling to decide on the type
+    # of output.  For example, specifying an output filename that ends in `.bc` does
+    # *not* imply the output is actually bitcode.
+    self.run_process([EMCC, '-c', test_file('hello_world.c'), '-o', 'out.bc'])
+    self.assertTrue(building.is_wasm('out.bc'))
 
   def test_bc_as_archive(self):
     self.run_process([EMCC, '-c', test_file('hello_world.c'), '-flto', '-o', 'out.a'])
+    self.assertTrue(is_bitcode('out.a'))
     self.run_process([EMCC, 'out.a'])
 
   @parameterized({
@@ -2951,6 +2955,9 @@ More info: https://emscripten.org
     self.run_process([EMCC, 'main.c', '-Wl,--unresolved-symbols=ignore-all'])
     self.run_process([EMCC, 'main.c', '-Wl,--allow-undefined'])
 
+  def test_emcc_cxx_link_hint(self):
+    self.assert_fail([EMCC, test_file('hello_libcxx.cpp')], "warning: link failed with undefined C++ symbols. Try linking with 'em++' or passing '-sDEFAULT_TO_CXX'")
+
   def test_GetProcAddress_LEGACY_GL_EMULATION(self):
     # without legacy gl emulation, getting a proc from there should fail
     self.do_other_test('test_GetProcAddress_LEGACY_GL_EMULATION.c', args=['0'], cflags=['-sLEGACY_GL_EMULATION=0', '-sGL_ENABLE_GET_PROC_ADDRESS'])
@@ -3378,6 +3385,28 @@ More info: https://emscripten.org
 
     self.run_process([path_from_root('emscons'), 'scons', '--expected-env', expected_to_propagate])
 
+  @crossplatform
+  @requires_tool('meson')
+  @requires_ninja
+  @with_env_modify({'PATH': path_from_root() + os.pathsep + os.getenv('PATH', '')})
+  def test_meson(self):
+    self.run_process(['meson', 'setup', '.', test_file('meson/simple'), '--cross-file', path_from_root('tools/meson/wasm32-emscripten.ini')])
+    self.run_process(['meson', 'compile', '-C', '.'])
+    output = self.run_js('hello.js')
+    self.assertContained('sizeof pointer: 4', output)
+    self.run_process(['meson', 'test', '-C', '.'])
+
+  @requires_tool('meson')
+  @requires_ninja
+  @requires_wasm64
+  @with_env_modify({'PATH': path_from_root() + os.pathsep + os.getenv('PATH', '')})
+  def test_meson_wasm64(self):
+    self.run_process(['meson', 'setup', '.', test_file('meson/simple'), '--cross-file', path_from_root('tools/meson/wasm64-emscripten.ini')])
+    self.run_process(['meson', 'compile', '-C', '.'])
+    output = self.run_js('hello.js')
+    self.assertContained('sizeof pointer: 8', output)
+    self.run_process(['meson', 'test', '-C', '.'])
+
   def test_embind_fail(self):
     self.assert_fail([EMXX, test_file('embind/test_unsigned.cpp')], 'undefined symbol: _embind_register_function')
 
@@ -3757,12 +3786,12 @@ More info: https://emscripten.org
 
   def test_embind_tsgen_val(self):
     # Check that any dependencies from val still works with TS generation enabled.
-    self.run_process([EMCC, test_file('other/embind_tsgen_val.cpp'),
+    self.run_process([EMXX, test_file('other/embind_tsgen_val.cpp'),
                       '-lembind', '--emit-tsd', 'embind_tsgen_val.d.ts'])
     self.assertExists('embind_tsgen_val.d.ts')
 
   def test_embind_tsgen_constant_only(self):
-    self.run_process([EMCC, test_file('other/embind_tsgen_constant_only.cpp'),
+    self.run_process([EMXX, test_file('other/embind_tsgen_constant_only.cpp'),
                       '-lembind', '--emit-tsd', 'out.d.ts'])
     self.assertFilesMatch(test_file('other/embind_tsgen_constant_only.d.ts'), 'out.d.ts')
 
@@ -9373,7 +9402,7 @@ end
     'gl_emu': (['-sLEGACY_GL_EMULATION', '-sMAXIMUM_MEMORY=4GB', '-sALLOW_MEMORY_GROWTH'],),
     'no_exception_throwing': (['-sDISABLE_EXCEPTION_THROWING'],),
     'minimal_runtime': (['-sMINIMAL_RUNTIME'],),
-    'embind': (['-lembind'],),
+    'embind': (['-lembind', '-sDEFAULT_TO_CXX'],),
   })
   def test_full_js_library(self, args):
     self.run_process([EMCC, test_file('hello_world.c'), '-sSTRICT_JS', '-sINCLUDE_FULL_LIBRARY'] + args)
@@ -11670,7 +11699,7 @@ int main(void) {
         throw 5;
       }
       ''')
-    self.run_process([EMCC, 'src.cpp', '-fexceptions', '--closure=1'])
+    self.run_process([EMXX, 'src.cpp', '-fexceptions', '--closure=1'])
 
   def test_assertions_on_incoming_module_api_changes(self):
     create_file('pre.js', 'Module.read = () => {};')
@@ -13400,6 +13429,20 @@ void foo() {}
   def test_emscripten_main_loop(self, args):
     self.do_runf('test_emscripten_main_loop.c', cflags=args)
 
+  @parameterized({
+    '': ([],),
+    'exit_runtime': (['-sEXIT_RUNTIME'],),
+  })
+  def test_emscripten_main_loop_cancel_exit(self, args):
+    self.do_runf('test_emscripten_main_loop_cancel_exit.c', cflags=['-sASSERTIONS=2'] + args)
+
+  @parameterized({
+    '': ([],),
+    'exit_runtime': (['-sEXIT_RUNTIME'],),
+  })
+  def test_emscripten_main_loop_cancel_force_exit(self, args):
+    self.do_runf('test_emscripten_main_loop_cancel_force_exit.c', cflags=['-sASSERTIONS=2'] + args)
+
   def test_emscripten_main_loop_and_blocker(self):
     self.do_runf('test_emscripten_main_loop_and_blocker.c')
 
@@ -14798,7 +14841,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
 
   def test_no_minify_and_later_closure(self):
     # test that running closure after --minify=0 works
-    self.run_process([EMCC, test_file('hello_libcxx.cpp'), '-O2', '--minify=0'])
+    self.run_process([EMXX, test_file('hello_libcxx.cpp'), '-O2', '--minify=0'])
     temp = building.closure_compiler('a.out.js',
                                      advanced=True,
                                      extra_closure_args=['--formatting', 'PRETTY_PRINT'])
@@ -15753,7 +15796,7 @@ addToLibrary({
       /emsdk/emscripten/system/lib/libcxx
     ''')
 
-    self.run_process([EMCC, 'main.cpp', 'foo.cpp', '-gsource-map', '-g2', '-o', 'test.js'])
+    self.run_process([EMXX, 'main.cpp', 'foo.cpp', '-gsource-map', '-g2', '-o', 'test.js'])
     empath_split_cmd = [empath_split, 'test.wasm', 'path_list.txt', '-g', '-o', 'test_primary.wasm', '--out-prefix=test_', '-v']
     out = self.run_process(empath_split_cmd, stdout=PIPE).stdout
 
@@ -15871,6 +15914,24 @@ console.log('OK');'''
 
     err = self.run_process([EMCC, '-sUSE_PTHREADS', test_file('hello_world.c')], stderr=PIPE).stderr
     self.assertContained('emcc: warning: USE_PTHREADS is deprecated (prefer the standard -pthread flag). Please open a bug if you have a continuing need for this setting [-Wdeprecated]', err)
+
+  def test_setting_sets_validity(self):
+    from tools.settings import (
+      COMPILE_TIME_SETTINGS,
+      EXPERIMENTAL_SETTINGS,
+      INTERNAL_SETTINGS,
+      JS_ONLY_SETTINGS,
+      MEM_SIZE_SETTINGS,
+    )
+    setting_names = (
+      COMPILE_TIME_SETTINGS
+      | JS_ONLY_SETTINGS
+      | MEM_SIZE_SETTINGS
+      | INTERNAL_SETTINGS
+      | set(EXPERIMENTAL_SETTINGS)
+    )
+    for name in setting_names:
+      self.assertIn(name, settings.attrs, f"setting '{name}' in tools/settings.py does not exist in settings.js or settings_internal.js")
 
   def test_cross_origin_storage(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-sCROSS_ORIGIN_STORAGE', '-o', 'hello.js'])

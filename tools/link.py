@@ -1222,7 +1222,6 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
   if settings.STRICT:
     if not settings.EXPORT_ES6:
       default_setting('STRICT_JS', 1)
-    default_setting('DEFAULT_TO_CXX', 0)
     default_setting('IGNORE_MISSING_MAIN', 0)
     default_setting('AUTO_NATIVE_LIBRARIES', 0)
     if settings.MAIN_MODULE != 1:
@@ -2198,6 +2197,7 @@ def node_detection_code():
 
 def create_esm_wrapper(wrapper_file, support_target, wasm_target):
   js_exports = building.user_requested_exports.union(settings.EXPORTED_RUNTIME_METHODS)
+  js_exports |= building.extra_js_exports
   js_exports = ', '.join(sorted(js_exports))
 
   wrapper = []
