@@ -891,6 +891,10 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
     # autoconf declares functions without their proper signatures, and STRICT causes that to trip up by passing --fatal-warnings to the linker.
     if settings.STRICT:
       exit_with_error('autoconfiguring is not compatible with STRICT')
+    # autoconf declares functions without their proper signatures, so turn off shared library signature checks
+    # TODO: Align defaults for signature checking with static and dynamic linking?
+    # See https://github.com/llvm/llvm-project/issues/214557
+    linker_args.append('--no-shlib-sigcheck')
 
   if settings.OPT_LEVEL >= 1:
     default_setting('ASSERTIONS', 0)
