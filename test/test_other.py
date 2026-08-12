@@ -3829,8 +3829,8 @@ More info: https://emscripten.org
     'legacy': (1,),
   })
   def test_embind_tsgen_exceptions(self, legacy):
-    if not legacy and shared.get_node_version(config.NODE_JS)[0] < 22:
-      self.skipTest('Node version needs to be 22 or greater to run tsgen with Wasm EH')
+    if not legacy and shared.get_node_version(config.NODE_JS) < (24, 15, 0):
+      self.skipTest('Node version needs to be v24.15 or greater to run tsgen with Wasm EH')
     self.set_setting('WASM_LEGACY_EXCEPTIONS', legacy)
 
     # Check that when Wasm exceptions and assertions are enabled bindings still generate.
@@ -9308,6 +9308,37 @@ int main() {
     self.do_runf_out_file('hello_world.c', cflags=['-sSINGLE_FILE'])
     self.assertExists('hello_world.js')
     self.assertFileContents('hello_world.wasm', 'not wasm')
+
+  def test_single_file_html_minified(self):
+    # Test that HTML minification in SINGLE_FILE mode does not corrupt
+    # WASM binary data containing custom fragment patterns like <?foo?>.
+    # The whitespace around <?foo?> must not be removed here.
+    create_file('src.c', '''
+#include <stdio.h>
+#include <string.h>
+volatile const char custom_fragment_test[] = "   <?foo?>   ";
+int main(int argc, char** argv) {
+  int len = 0;
+  for (int i = 0; i < 13; i++) {
+    if (custom_fragment_test[i]) len++;
+  }
+  printf("Length: %d\\n", len);
+  return 0;
+}
+''')
+    self.run_process([EMCC, 'src.c', '-O2', '-sSINGLE_FILE', '-o', 'out.html'])
+    html = read_file('out.html')
+    self.assertContained('   <?foo?>   ', html)
+
+  def test_single_file_instantiate_failure(self):
+    self.run_process([EMCC, test_file('hello_world.c'), '-sSINGLE_FILE', '-sASSERTIONS=1', '-o', 'out.js'])
+    code = read_file('out.js')
+    # Stub out binaryDecode so that it returns an invalid wasm binary.
+    code = code.replace('function binaryDecode(bin) {', 'function binaryDecode(bin) { return new Uint8Array([0]);')
+    write_file('out_bad.js', code)
+    out = self.run_js('out_bad.js', assert_returncode=1)
+    self.assertContained('Aborted(CompileError', out)
+    self.assertNotContained('startsWith is not a function', out)
 
   def test_single_file_disables_source_map(self):
     cmd = [EMCC, test_file('hello_world.c'), '-sSINGLE_FILE', '-gsource-map']
@@ -15461,7 +15492,11 @@ addToLibrary({
     ''')
     self.do_runf('main.cpp', 'Hello Module!', cflags=['-std=c++20', '-fmodules'])
 
-  def test_invalid_export_name(self):
+  @parameterized({
+    '': (['-sASSERTIONS'],),
+    'no_assertions': (['-sASSERTIONS=0'],),
+  })
+  def test_invalid_export_name(self, args):
     create_file('main.c', r'''
       #include <emscripten.h>
       #include <stdio.h>
@@ -15481,7 +15516,7 @@ addToLibrary({
     self.assert_fail([EMCC, '-Werror', 'main.c'], expected)
 
     # With warning suppressed the above program should work.
-    self.do_runf('main.c', 'got: 42\ngot2: 42\n', cflags=['-Wno-js-compiler'])
+    self.do_runf('main.c', 'got: 42\ngot2: 42\n', cflags=['-Wno-js-compiler'] + args)
 
     # When we are generating only wasm and not JS we don't need exports to
     # be valid JS symbols.

@@ -1334,9 +1334,6 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
   if settings.MAIN_MODULE == 1 or settings.SIDE_MODULE == 1:
     settings.LINKABLE = 1
 
-  if settings.LINKABLE and settings.USER_EXPORTS:
-    diagnostics.warning('unused-command-line-argument', 'EXPORTED_FUNCTIONS is not valid with LINKABLE set (normally due to SIDE_MODULE=1/MAIN_MODULE=1) since all functions are exported this mode.  To export only a subset use SIDE_MODULE=2/MAIN_MODULE=2')
-
   if settings.MAIN_MODULE:
     settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += [
       '$getDylinkMetadata',
@@ -2635,7 +2632,11 @@ def minify_html(filename):
              '--remove-style-link-type-attributes',
              '--use-short-doctype',
              '--minify-css', 'true',
-             '--minify-js', 'true']
+             '--minify-js', 'true',
+             # Disable default PHP/ASP fragment regexes (<?...?> and <%...%>)
+             # which can match raw byte sequences in embedded WASM binary
+             # data in SINGLE_FILE builds and corrupt surrounding whitespace.
+             '--ignore-custom-fragments', '[]']
 
   # html-minifier also has the following options, but they look unsafe for use:
   # '--collapse-inline-tag-whitespace': removes whitespace between inline tags in visible text,
