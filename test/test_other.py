@@ -10456,46 +10456,21 @@ int main() {
     compile(['-mno-sign-ext', '-c'])
     verify_features_sec('sign-ext', False)
 
-    # Disable via browser selection
-    compile(['-sMIN_SAFARI_VERSION=140100'])
-    verify_features_sec_linked('bulk-memory-opt', False)
-    verify_features_sec_linked('nontrapping-fptoint', False)
-    # Flag disabling overrides default browser versions
-    compile(['-mno-bulk-memory'])
-    verify_features_sec_linked('bulk-memory', False)
-    # Flag disabling overrides explicit browser version
-    compile(['-sMIN_SAFARI_VERSION=160000', '-mno-bulk-memory'])
-    verify_features_sec_linked('bulk-memory', False)
-    # Flag enabling overrides explicit browser version
-    compile(['-sMIN_SAFARI_VERSION=140100', '-mnontrapping-fptoint'])
-    verify_features_sec_linked('nontrapping-fptoint', True)
-    # Flag disabling overrides explicit version for bulk memory
-    compile(['-sMIN_SAFARI_VERSION=150000', '-mno-bulk-memory'])
-    verify_features_sec_linked('bulk-memory-opt', False)
+    # Feature is disabled by default browser versions
+    compile([])
+    verify_features_sec_linked('extended-const', False)
 
-    # Bigint ovrride does not cause other features to enable
-    compile(['-sMIN_SAFARI_VERSION=140100', '-sWASM_BIGINT=1'])
-    verify_features_sec_linked('bulk-memory-opt', False)
+    # Flag enabling overrides default browser versions
+    compile(['-mextended-const'])
+    verify_features_sec_linked('extended-const', True)
 
-    compile(['-sMIN_SAFARI_VERSION=140100', '-mbulk-memory'])
-    verify_features_sec_linked('nontrapping-fptoint', False)
+    # Enable via browser selection
+    compile(['-sMIN_CHROME_VERSION=114', '-sMIN_FIREFOX_VERSION=112', '-sMIN_SAFARI_VERSION=170400', '-sMIN_NODE_VERSION=210000'])
+    verify_features_sec_linked('extended-const', True)
 
-  def test_no_bulk_memory(self):
-    # The test_wasm_features test (above) uses the feature section to confirm
-    # if a feature is present, but that doesn't work in optimizing builds
-    # since we strip the feature section in release builds.
-    # This test confirms that no DATACOUNT section is present in the final
-    # binary.
-
-    def has_data_count(filename):
-      with webassembly.Module(filename) as wasm:
-        return wasm.get_section(webassembly.SecType.DATACOUNT)
-
-    self.emcc('hello_world.c', ['-O3', '-o', 'bulk.js'])
-    self.assertTrue(has_data_count('bulk.wasm'))
-
-    self.emcc('hello_world.c', ['-O3', '-o', 'nobulk.js', '-mno-bulk-memory', '-mno-bulk-memory-opt'])
-    self.assertFalse(has_data_count('nobulk.wasm'))
+    # Flag disabling overrides explicit browser versions
+    compile(['-sMIN_CHROME_VERSION=114', '-sMIN_FIREFOX_VERSION=112', '-sMIN_SAFARI_VERSION=170400', '-sMIN_NODE_VERSION=210000', '-mno-extended-const'])
+    verify_features_sec_linked('extended-const', False)
 
   @crossplatform
   def test_html_preprocess(self):
@@ -11649,6 +11624,9 @@ int main(void) {
   def test_mmap_empty_wasmfs(self):
     self.do_other_test('test_mmap_empty.c', cflags=['-sWASMFS'])
 
+  def test_shm_open(self):
+    self.do_runf('other/test_shm_open.c', 'done\n')
+
   def test_files_and_module_assignment(self):
     # a pre-js can set Module to a new object or otherwise undo file preloading/
     # embedding changes to Module.preRun. we show an error to avoid confusion
@@ -12213,7 +12191,6 @@ int main(void) {
     # plain -O0
     legalization_message = 'to disable int64 legalization (which requires changes after link) use -sWASM_BIGINT'
     fail(['-sWASM_BIGINT=0'], legalization_message)
-    fail(['-sMIN_SAFARI_VERSION=140100'], legalization_message)
     # optimized builds even without legalization
     optimization_message = '-O2+ optimizations always require changes, build with -O0 or -O1 instead'
     fail(['-O2'], optimization_message)
@@ -12228,9 +12205,9 @@ int main(void) {
   def test_drop_support_for_browser(self):
     # Test that -1 means "not supported"
     self.run_process([EMCC, test_file('browser/test_html5_core.c')])
-    self.assertContained('document.webkitFullscreenEnabled', read_file('a.out.js'))
+    self.assertContained('getContextSafariWebGL2Fixed', read_file('a.out.js'))
     self.run_process([EMCC, test_file('browser/test_html5_core.c'), '-sMIN_SAFARI_VERSION=-1'])
-    self.assertNotContained('document.webkitFullscreenEnabled', read_file('a.out.js'))
+    self.assertNotContained('getContextSafariWebGL2Fixed', read_file('a.out.js'))
 
   def test_errno_type(self):
     create_file('errno_type.c', '''
@@ -13530,6 +13507,19 @@ void foo() {}
   def test_emscripten_main_loop_setimmediate(self):
     self.do_runf('test_emscripten_main_loop_setimmediate.c')
 
+  # These exercise the epoll JS API/readiness logic, which does not vary by wasm
+  # config, so they live here rather than in the test_core.py config matrix.
+  def test_epoll_fairness(self):
+    # More ready fds than maxevents: successive waits rotate (round-robin) so no
+    # fd starves.
+    self.do_runf('other/test_epoll_fairness.c', 'done\n')
+
+  def test_epoll_dup(self):
+    # dup(2) of an epoll fd shares one instance: a registration added via the dup
+    # is visible to waits on the original fd, and closing one dup does not tear
+    # the instance down.
+    self.do_runf('other/test_epoll_dup.c', 'done\n')
+
   @requires_pthreads
   @no_bun('https://github.com/emscripten-core/emscripten/issues/26197')
   def test_pthread_trap(self):
@@ -14169,56 +14159,6 @@ int main() {
       }
     ''', assert_returncode=NON_ZERO, cflags=['-fexceptions'])
 
-  def test_bigint64array_polyfill(self):
-    bigint64array = read_file(path_from_root('src/polyfill/bigint64array.js'))
-    test_code = read_file(test_file('test_bigint64array_polyfill.js'))
-    bigint_list = [
-      0,
-      1,
-      -1,
-      5,
-      (1 << 64),
-      (1 << 64) - 1,
-      (1 << 64) + 1,
-      (1 << 63),
-      (1 << 63) - 1,
-      (1 << 63) + 1,
-    ]
-    bigint_list_strs = [str(x) for x in bigint_list]
-
-    bigint_list_unsigned = [x % (1 << 64) for x in bigint_list]
-    bigint_list_signed = [
-      x if x < 0 else (x % (1 << 64)) - 2 * (x & (1 << 63)) for x in bigint_list
-    ]
-    bigint_list_unsigned_n = [f'{x}n' for x in bigint_list_unsigned]
-    bigint_list_signed_n = [f'{x}n' for x in bigint_list_signed]
-
-    bigint64array = '\n'.join(bigint64array.splitlines()[3:])
-
-    create_file(
-      'test.js',
-      f'''
-      let bigint_list = {bigint_list_strs}.map(x => BigInt(x));
-      let arr1signed = new BigInt64Array(20);
-      let arr1unsigned = new BigUint64Array(20);
-      delete globalThis.BigInt64Array;
-      ''' + bigint64array + test_code,
-    )
-    output = json.loads(self.run_js('test.js'))
-    self.assertEqual(output['BigInt64Array_name'], 'createBigInt64Array')
-    for key in ('arr1_to_arr1', 'arr1_to_arr2', 'arr2_to_arr1'):
-      print(key + '_unsigned')
-      self.assertEqual(output[key + '_unsigned'], bigint_list_unsigned_n)
-    for key in ('arr1_to_arr1', 'arr1_to_arr2', 'arr2_to_arr1'):
-      print(key + '_signed')
-      self.assertEqual(output[key + '_signed'], bigint_list_signed_n)
-
-    self.assertEqual(output['arr2_slice'], ['2n', '3n', '4n', '5n'])
-    self.assertEqual(output['arr2_subarray'], ['2n', '3n', '4n', '5n'])
-
-    for m, [v1, v2] in output['assertEquals']:
-      self.assertEqual(v1, v2, msg=m)
-
   def test_warn_once(self):
     create_file('main.c', r'''\
       #include <stdio.h>
@@ -14391,8 +14331,8 @@ out.js
     self.do_test_reproduce([])
 
   def test_min_browser_version(self):
-    expected = 'emcc: error: MIN_SAFARI_VERSION=140100 is not compatible with WASM_BIGINT (MIN_SAFARI_VERSION=150000 or above required)'
-    self.assert_fail([EMCC, test_file('hello_world.c'), '-Werror', '-sWASM_BIGINT', '-sMIN_SAFARI_VERSION=140100'], expected)
+    expected = 'emcc: error: MIN_SAFARI_VERSION=150000 is not compatible with OFFSCREENCANVAS_SUPPORT (MIN_SAFARI_VERSION=170000 or above required)'
+    self.assert_fail([EMCC, test_file('hello_world.c'), '-Werror', '-sOFFSCREENCANVAS_SUPPORT', '-sMIN_SAFARI_VERSION=150000'], expected)
 
   # Test that using two different ways to disable a target environment at the same time will not produce a warning.
   def test_double_disable_environment(self):
@@ -15078,11 +15018,6 @@ addToLibrary({
     # Ensure passing std::optional to emscripten::val works if <emscripten/bind.h>
     # was not included in the compilation unit using val.
     self.do_runf('embind/test_optional_val_main.cpp', 'done\n', cflags=['-lembind', test_file('embind/test_optional_val_lib.cpp')])
-
-  def test_no_pthread(self):
-    self.do_runf_out_file('hello_world.c', cflags=['-pthread', '-no-pthread'])
-    self.assertExists('hello_world.js')
-    self.assertNotContained('new Worker(', read_file('hello_world.js'))
 
   def test_sysroot_includes_first(self):
     self.do_other_test('test_stdint_limits.c', cflags=['-iwithsysroot/include'])

@@ -18,8 +18,18 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-6.0.7 (in development)
+6.0.8 (in development)
 ----------------------
+- The `JSPI` setting is no longer considered experimental, and the compiler
+  diagnostic warning has been removed. (#27559)
+- Added support for `epoll` (`epoll_create1`/`epoll_ctl`/`epoll_wait`/
+  `epoll_pwait`) on the legacy (non-WASMFS) JS filesystem, including
+  level- and edge-triggered modes, `EPOLLONESHOT`, `EPOLLEXCLUSIVE`,
+  `EPOLLRDHUP`, nesting, and blocking waits under `PROXY_TO_PTHREAD`,
+  `ASYNCIFY`, and `JSPI`. (#27207)
+
+6.0.7 - 08/17/26
+----------------
 
 - JavaScript library symbols can now use the `__force` and `__export`
   decorators to control inclusion and export visibility. (#27436)
@@ -30,6 +40,12 @@ See docs/process.md for more on how version tagging works.
   non-C++ frontends (e.g. rustc, which links via `emcc`) link without
   requiring `em++` or `-sDEFAULT_TO_CXX`. (#27496)
 - FreeType was updated to 2.14.3 (#27518)
+- The oldest supported Safari version (`MIN_SAFARI_VERSION`) was raised from
+  14.1 to 15.0, making 15.0 the minimum version that can be targeted. This
+  allows assuming `bulk-memory`, `nontrapping-fptoint`, and `WASM_BIGINT`
+  (`JS_BIGINT_INTEGRATION`) are universally available across all supported
+  engines, and removes legacy JS polyfills and Binaryen lowering passes.
+  (#27542)
 
 6.0.6 - 08/05/26
 ----------------

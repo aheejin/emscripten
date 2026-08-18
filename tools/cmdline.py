@@ -498,18 +498,12 @@ def parse_args(newargs):  # ruff: ignore[complex-structure, too-many-branches, t
     elif arg == '-fno-exceptions':
       settings.DISABLE_EXCEPTION_CATCHING = 1
       settings.DISABLE_EXCEPTION_THROWING = 1
-    elif arg == '-mbulk-memory':
-      feature_matrix.enable_feature(feature_matrix.Feature.BULK_MEMORY,
-                                    '-mbulk-memory',
+    elif arg == '-mextended-const':
+      feature_matrix.enable_feature(feature_matrix.Feature.EXTENDED_CONST,
+                                    '-mextended-const',
                                     override=True)
-    elif arg == '-mno-bulk-memory':
-      feature_matrix.disable_feature(feature_matrix.Feature.BULK_MEMORY)
-    elif arg == '-mnontrapping-fptoint':
-      feature_matrix.enable_feature(feature_matrix.Feature.NON_TRAPPING_FPTOINT,
-                                    '-mnontrapping-fptoint',
-                                    override=True)
-    elif arg == '-mno-nontrapping-fptoint':
-      feature_matrix.disable_feature(feature_matrix.Feature.NON_TRAPPING_FPTOINT)
+    elif arg == '-mno-extended-const':
+      feature_matrix.disable_feature(feature_matrix.Feature.EXTENDED_CONST)
     elif arg == '-fexceptions':
       # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
       # exception handling by default when -fexceptions is given when wasm
@@ -541,10 +535,6 @@ def parse_args(newargs):  # ruff: ignore[complex-structure, too-many-branches, t
       settings.PTHREADS = 1
       # Also set the legacy setting name, in case use JS code depends on it.
       settings.USE_PTHREADS = 1
-    elif arg == '-no-pthread':
-      settings.PTHREADS = 0
-      # Also set the legacy setting name, in case use JS code depends on it.
-      settings.USE_PTHREADS = 0
     elif arg == '-pthreads':
       exit_with_error('unrecognized command-line option `-pthreads`; did you mean `-pthread`?')
     elif arg == '-fno-rtti':

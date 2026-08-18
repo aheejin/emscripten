@@ -1374,11 +1374,10 @@ JSPI
 ====
 
 Use VM support for the JavaScript Promise Integration proposal. This allows
-async operations to happen without the overhead of modifying the wasm. This
-is experimental at the moment while spec discussion is ongoing, see
-https://github.com/WebAssembly/js-promise-integration/ TODO: document which
-of the following flags are still relevant in this mode (e.g. IGNORE_INDIRECT
-etc. are not needed)
+async operations to happen without the overhead of modifying the wasm.
+See https://github.com/WebAssembly/js-promise-integration/
+TODO: document which of the following flags are still relevant in this mode
+(e.g. IGNORE_INDIRECT etc. are not needed)
 
 Default value: 0
 
@@ -2987,7 +2986,7 @@ NOTE: Emscripten is unable to produce code that would work in iOS 9.3.5 and
 older, i.e. iPhone 4s, iPad 2, iPad 3, iPad Mini 1, Pod Touch 5 and older,
 see https://github.com/emscripten-core/emscripten/pull/7191.
 MAX_INT (0x7FFFFFFF, or -1) specifies that target is not supported.
-Minimum supported value is 140100 which was released on 2021-04-26 (see
+Minimum supported value is 150000 which was released on 2021-09-20 (see
 feature_matrix.py).
 
 Default value: 150000
@@ -3221,10 +3220,9 @@ DWARF info from LLVM is preserved (wasm-opt can rewrite it in some cases, but
 not in others like split-dwarf).
 When this flag is turned on, we error at link time if the build requires any
 changes to the wasm after link. This can be useful in testing, for example.
-Some example of features that require post-link wasm changes are:
+Some examples of features that require post-link wasm changes are:
 
 - Lowering i64 to i32 pairs at the JS boundary (See WASM_BIGINT)
-- Lowering nontrapping-float-to-int operations when targeting older browsers.
 
 Default value: false
 
@@ -3343,8 +3341,8 @@ When targeting older browsers emscripten will sometimes require that
 polyfills be included in the output.  If you would prefer to take care of
 polyfilling yourself via some other mechanism you can prevent emscripten
 from generating these by passing ``-sNO_POLYFILL`` or ``-sPOLYFILL=0``
-With default browser targets emscripten does not need any polyfills so this
-settings is *only* needed when also explicitly targeting older browsers.
+Currently emscripten does not support targeting any browsers that require
+polyfills so this setting does nothing right now.
 
 Default value: true
 
