@@ -392,21 +392,6 @@ var DYLINK_DEBUG = 0;
 // [link]
 var FS_DEBUG = false;
 
-// Select socket backend, either webrtc or websockets. XXX webrtc is not
-// currently tested, may be broken
-
-// As well as being configurable at compile time via the "-s" option the
-// WEBSOCKET_URL and WEBSOCKET_SUBPROTOCOL
-// settings may be configured at run time via the Module object e.g.
-// Module['websocket'] = {subprotocol: 'base64, binary, text'};
-// Module['websocket'] = {url: 'wss://', subprotocol: 'base64'};
-// You can set 'subprotocol' to null, if you don't want to specify it.
-// Run time configuration may be useful as it lets an application select
-// multiple different services.
-// [link]
-// [deprecated]
-var SOCKET_WEBRTC = false;
-
 // A string containing either a WebSocket URL prefix (ws:// or wss://) or a
 // complete RFC 6455 URL - "ws[s]:" "//" host [ ":" port ] path [ "?" query ].
 // In the (default) case of only a prefix being specified the URL will be
@@ -435,7 +420,7 @@ var PROXY_POSIX_SOCKETS = false;
 // It is event-driven. Socket readiness comes through the same
 // ``emscripten_set_socket_*_callback`` hooks the WebSocket backend uses, so it
 // works with existing readiness reactors. It cannot be combined with the
-// WebSocket emulation, :ref:`PROXY_POSIX_SOCKETS` or :ref:`SOCKET_WEBRTC`.
+// WebSocket emulation or :ref:`PROXY_POSIX_SOCKETS`.
 //
 // It works under -pthread with :ref:`PROXY_TO_PTHREAD`, where main() and every socket
 // syscall run on a single worker alongside the node handles and their event
@@ -1505,6 +1490,7 @@ var DYNCALLS = false;
 // legalize i64s into pairs of i32s, as the wasm VM will use a BigInt where an
 // i64 is used.
 // [link]
+// [deprecated]
 var WASM_BIGINT = true;
 
 // WebAssembly defines a "producers section" which compilers and tools can
@@ -1520,14 +1506,6 @@ var EMIT_PRODUCERS_SECTION = false;
 // Emits emscripten license info in the JS output.
 // [link]
 var EMIT_EMSCRIPTEN_LICENSE = false;
-
-// Whether to legalize the JS FFI interfaces (imports/exports) by wrapping them
-// to automatically demote i64 to i32 and promote f32 to f64. This is necessary
-// in order to interface with JavaScript.  For non-web/non-JS embeddings,
-// setting this to 0 may be desirable.
-// [link]
-// [deprecated]
-var LEGALIZE_JS_FFI = true;
 
 // Ports
 

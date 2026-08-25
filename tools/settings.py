@@ -109,7 +109,7 @@ COMPILE_TIME_SETTINGS = {
 DEPRECATED_SETTINGS = {
     'RUNTIME_LINKED_LIBS': 'you can simply list the libraries directly on the commandline now',
     'CLOSURE_WARNINGS': 'use -Wclosure/-Wno-closure instead',
-    'LEGALIZE_JS_FFI': 'to disable JS type legalization use `-sWASM_BIGINT` or `-sSTANDALONE_WASM`',
+    'WASM_BIGINT': 'no longer needed. Should only ever be implicitly disabled by -sWASM=0',
     'ASYNCIFY_EXPORTS': 'please use JSPI_EXPORTS instead',
     'LINKABLE': 'under consideration for removal (https://github.com/emscripten-core/emscripten/issues/25262)',
     'EXPORT_EXCEPTION_HANDLING_HELPERS': 'getExceptionMessage is exported anyway when ASSERTIONS or EXCEPTION_STACK_TRACES is set, which are set by default at -O0. At -O1 or above, you can export it separately by -sEXPORTED_RUNTIME_METHODS=getExceptionMessage,decrementExceptionRefcount.',
@@ -155,7 +155,6 @@ INCOMPATIBLE_SETTINGS = [
     ('CROSS_ORIGIN_STORAGE', 'SIDE_MODULE', 'no JS glue is emitted to carry the hash or perform the COS lookup'),
     ('NODERAWSOCKETS', 'WASMFS', 'the node:net backend is not wired into WASMFS sockets'),
     ('NODERAWSOCKETS', 'PROXY_POSIX_SOCKETS', 'they are alternative socket backends'),
-    ('NODERAWSOCKETS', 'SOCKET_WEBRTC', 'they are alternative socket backends'),
     ('SHARED_WASMGC', 'NO_PTHREADS', 'SHARED_WASMGC requires threads to be enabled'),
 ]
 
@@ -265,6 +264,8 @@ LEGACY_SETTINGS = [
     ['RELOCATABLE', [0], 'No longer supported'],
     ['WASM_JS_TYPES', [0], 'No longer supported'],
     ['DETERMINISTIC', [0], 'No longer supported'],
+    ['LEGALIZE_JS_FFI', [0], 'legacy JS FFI legalization is no longer supported'],
+    ['SOCKET_WEBRTC', [0], 'No longer supported'],
 ]
 
 user_settings: dict[str, str] = {}

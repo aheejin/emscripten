@@ -549,24 +549,6 @@ Register file system callbacks using trackingDelegate in library_fs.js
 
 Default value: false
 
-.. _socket_webrtc:
-
-SOCKET_WEBRTC
-=============
-
-As well as being configurable at compile time via the "-s" option the
-WEBSOCKET_URL and WEBSOCKET_SUBPROTOCOL
-settings may be configured at run time via the Module object e.g.
-Module['websocket'] = {subprotocol: 'base64, binary, text'};
-Module['websocket'] = {url: 'wss://', subprotocol: 'base64'};
-You can set 'subprotocol' to null, if you don't want to specify it.
-Run time configuration may be useful as it lets an application select
-multiple different services.
-
-.. note:: This setting is deprecated
-
-Default value: false
-
 .. _websocket_url:
 
 WEBSOCKET_URL
@@ -610,7 +592,7 @@ Node.js.
 It is event-driven. Socket readiness comes through the same
 ``emscripten_set_socket_*_callback`` hooks the WebSocket backend uses, so it
 works with existing readiness reactors. It cannot be combined with the
-WebSocket emulation, :ref:`PROXY_POSIX_SOCKETS` or :ref:`SOCKET_WEBRTC`.
+WebSocket emulation or :ref:`PROXY_POSIX_SOCKETS`.
 
 It works under -pthread with :ref:`PROXY_TO_PTHREAD`, where main() and every socket
 syscall run on a single worker alongside the node handles and their event
@@ -2157,6 +2139,8 @@ WebAssembly integration with JavaScript BigInt. When enabled we don't need to
 legalize i64s into pairs of i32s, as the wasm VM will use a BigInt where an
 i64 is used.
 
+.. note:: This setting is deprecated
+
 Default value: true
 
 .. _emit_producers_section:
@@ -2182,20 +2166,6 @@ EMIT_EMSCRIPTEN_LICENSE
 Emits emscripten license info in the JS output.
 
 Default value: false
-
-.. _legalize_js_ffi:
-
-LEGALIZE_JS_FFI
-===============
-
-Whether to legalize the JS FFI interfaces (imports/exports) by wrapping them
-to automatically demote i64 to i32 and promote f32 to f64. This is necessary
-in order to interface with JavaScript.  For non-web/non-JS embeddings,
-setting this to 0 may be desirable.
-
-.. note:: This setting is deprecated
-
-Default value: true
 
 .. _use_sdl:
 
@@ -3553,7 +3523,7 @@ these settings please open a bug (or reply to one of the existing bugs).
 
  - ``RUNTIME_LINKED_LIBS``: you can simply list the libraries directly on the commandline now
  - ``CLOSURE_WARNINGS``: use -Wclosure/-Wno-closure instead
- - ``LEGALIZE_JS_FFI``: to disable JS type legalization use `-sWASM_BIGINT` or `-sSTANDALONE_WASM`
+ - ``WASM_BIGINT``: no longer needed. Should only ever be implicitly disabled by -sWASM=0
  - ``ASYNCIFY_EXPORTS``: please use JSPI_EXPORTS instead
  - ``LINKABLE``: under consideration for removal (https://github.com/emscripten-core/emscripten/issues/25262)
  - ``EXPORT_EXCEPTION_HANDLING_HELPERS``: getExceptionMessage is exported anyway when ASSERTIONS or EXCEPTION_STACK_TRACES is set, which are set by default at -O0. At -O1 or above, you can export it separately by -sEXPORTED_RUNTIME_METHODS=getExceptionMessage,decrementExceptionRefcount.
@@ -3653,3 +3623,5 @@ for backwards compatibility with older versions:
  - ``RELOCATABLE``: No longer supported (Valid values: [0])
  - ``WASM_JS_TYPES``: No longer supported (Valid values: [0])
  - ``DETERMINISTIC``: No longer supported (Valid values: [0])
+ - ``LEGALIZE_JS_FFI``: legacy JS FFI legalization is no longer supported (Valid values: [0])
+ - ``SOCKET_WEBRTC``: No longer supported (Valid values: [0])

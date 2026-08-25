@@ -18,8 +18,11 @@ to browse the changes between the tags.
 
 See docs/process.md for more on how version tagging works.
 
-6.0.8 (in development)
+6.0.9 (in development)
 ----------------------
+
+6.0.8 - 08/20/26
+----------------
 - The `JSPI` setting is no longer considered experimental, and the compiler
   diagnostic warning has been removed. (#27559)
 - Added support for `epoll` (`epoll_create1`/`epoll_ctl`/`epoll_wait`/
@@ -27,6 +30,15 @@ See docs/process.md for more on how version tagging works.
   level- and edge-triggered modes, `EPOLLONESHOT`, `EPOLLEXCLUSIVE`,
   `EPOLLRDHUP`, nesting, and blocking waits under `PROXY_TO_PTHREAD`,
   `ASYNCIFY`, and `JSPI`. (#27207)
+- The deprecated `LEGALIZE_JS_FFI` setting was completely removed and moved to
+  legacy settings.  This behaviour of lowering away i64 values at the
+  Wasm bounary is still used when `WASM_BIGINT` is disabled.  However
+  disabling of `WASM_BIGINT` itself should only be needed under `-sWASM=0`
+  (where it is automatically disabled). (#27568)
+- The `SOCKET_WEBRTC` setting was removed (#27367)
+- `WASM_BIGINT` was deprecated. BigInt integration is standard and enabled by
+  default across all supported engines; it should now only ever be disabled
+  implicitly when targeting JavaScript via `-sWASM=0`. (#27558)
 
 6.0.7 - 08/17/26
 ----------------
@@ -78,6 +90,7 @@ See docs/process.md for more on how version tagging works.
 - Backport fix for musl's qsort (CVE-2026-40200) (#27029)
 - `recvmmsg` and `sendmmsg` are now implemented in terms of `recvmsg` and
   `sendmsg`. (#27395)
+- The `SOCKET_WEBRTC` marked as deprecated (#27371)
 
 6.0.3 - 07/13/26
 ----------------
