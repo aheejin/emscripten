@@ -1125,6 +1125,7 @@ f.close()
     self.run_process([EMCC, test_file('hello_world.c'), '-sUSE_ZLIB'])
     self.run_process([EMCMAKE, 'cmake', test_file('cmake/find_stuff')])
 
+  @crossplatform
   def test_cmake_install(self):
     # Build and install a library `foo`
     os.mkdir('build1')
@@ -2629,7 +2630,6 @@ F1 -> ''
   def test_sdl3_linkable(self):
     # Ensure that SDL3 can be built with MAIN_MODULE.  This implies there are no undefined
     # symbols in the library (because MAIN_MODULE=1 includes the entire library).
-    self.cflags.append('-Wno-experimental')
     self.emcc('browser/test_sdl3_misc.c', ['-sMAIN_MODULE', '-sUSE_SDL=3', '-o', 'a.out.js'])
     self.emcc('browser/test_sdl3_misc.c', ['-sMAIN_MODULE', '--use-port=sdl3', '-o', 'a.out.js'])
 
@@ -2772,8 +2772,8 @@ F1 -> ''
   @requires_network
   def test_sdl3_ttf(self):
     # A compile-only test that checks if sdl3-ttf, and dependencies freetype and harfbuzz, are buildable.
-    self.emcc(test_file('browser/test_sdl3_ttf.c'), args=['-Wno-experimental', '-sUSE_SDL=3', '-sUSE_SDL_TTF=3'])
-    self.emcc(test_file('browser/test_sdl3_ttf.c'), args=['-Wno-experimental', '--use-port=sdl3', '--use-port=sdl3_ttf'])
+    self.emcc(test_file('browser/test_sdl3_ttf.c'), args=['-sUSE_SDL=3', '-sUSE_SDL_TTF=3'])
+    self.emcc(test_file('browser/test_sdl3_ttf.c'), args=['--use-port=sdl3', '--use-port=sdl3_ttf'])
 
   @requires_network
   def test_contrib_ports(self):
@@ -2825,6 +2825,7 @@ More info: https://emscripten.org
 ''', stdout)
 
   @requires_network
+  @also_with_pthreads
   def test_port_contrib_lua(self):
     self.do_runf('other/test_port_contrib_lua.c', 'hello world\nHELLO WORLD\nsqrt(16)=4\n', cflags=['--use-port=contrib.lua'])
 
