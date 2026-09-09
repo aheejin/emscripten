@@ -2025,12 +2025,12 @@ WASM
 ====
 
 Whether to use compile code to WebAssembly. Set this to 0 to compile to JS
-instead of wasm.
+instead of wasm (deprecated).
 
-Specify -sWASM=2 to target both WebAssembly and JavaScript at the same time.
-In that build mode, two files a.wasm and a.wasm.js are produced, and at runtime
-the WebAssembly file is loaded if browser/shell supports it. Otherwise the
-.wasm.js fallback will be used.
+Specify -sWASM=2 to target both WebAssembly and JavaScript at the same time
+(deprecated). In that build mode, two files a.wasm and a.wasm.js are produced,
+and at runtime the WebAssembly file is loaded if browser/shell supports it.
+Otherwise the .wasm.js fallback will be used.
 
 If WASM=2 is enabled and the browser fails to compile the WebAssembly module,
 the page will be reloaded in Wasm2JS mode.
@@ -2475,26 +2475,6 @@ SHARED_MEMORY
 If 1, target compiling a shared Wasm Memory.
 
 .. note:: Applicable during both linking and compilation
-
-Default value: false
-
-.. _shared_wasmgc:
-
-SHARED_WASMGC
-=============
-
-If true, enables support for experimental shared Wasm GC. Expects the
-module to contain a mutable shared anyref global to be imported as "env"
-"_shared_heap_root" and exported as "_shared_heap_root". The import will be
-provided a null value on the main thread, where the user code is expected to
-initialize it with some shared object during the start function. This shared
-object will then be provided as the import when instantiating the module on
-additional Workers. This shared anyref global can be used to bootstrap
-arbitrary shared Wasm GC state. Since LLVM cannot emit Wasm GC instructions
-or shared anyref globals, users are expected to use wasm-merge to add the
-_shared_heap_root global and additional Wasm GC code post-link.
-
-.. note:: This is an experimental setting
 
 Default value: false
 
@@ -3372,7 +3352,17 @@ Default value: []
 WASM_BINDGEN
 ============
 
-Run wasm-bindgen and integrate the rust-exported symbols into the rest of Emscripten's JS output.
+Run wasm-bindgen and integrate the rust-exported symbols into the rest of
+Emscripten's JS output.
+Even with this setting enabled, wasm-bindgen processing is only performed
+when the linker inputs carry the wasm-bindgen Emscripten marker section
+(emitted by the wasm-bindgen crate). When the marker is absent the build is
+unchanged, so -sWASM_BINDGEN can safely be passed unconditionally to
+non-wasm-bindgen builds, and by toolchains that link via emcc.
+If EXPORTED_FUNCTIONS is set it is taken as the complete export list and
+must include every export wasm-bindgen reaches by name (rustc supplies this
+when driving the link). Otherwise those exports are discovered from the
+linker inputs.
 
 .. note:: This is an experimental setting
 
@@ -3534,6 +3524,8 @@ these settings please open a bug (or reply to one of the existing bugs).
  - ``USE_PTHREADS``: prefer the standard -pthread flag
  - ``MEMORY64``: prefer the standard -m64 or --target=wasm64 flags
  - ``SOCKET_WEBRTC``: under consideration for removal (https://github.com/emscripten-core/emscripten/issues/27366)
+ - ``WASM=0``: under consideration for removal (https://github.com/emscripten-core/emscripten/issues/27608)
+ - ``WASM=2``: under consideration for removal (https://github.com/emscripten-core/emscripten/issues/27608)
 
 .. _legacy-settings:
 

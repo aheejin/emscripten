@@ -459,7 +459,7 @@ def emscript(in_wasm, out_wasm, outfile_js, js_syms, finalize=True, base_metadat
 
   building.extra_js_exports.update(forwarded_json['extraExports'])
 
-  asm_const_pairs = ['%s: %s' % (key, value) for key, value in asm_consts]
+  asm_const_pairs = [f'{key}: {value}' for key, value in asm_consts]
   if asm_const_pairs or settings.MAIN_MODULE:
     pre += 'var ASM_CONSTS = {\n  ' + ',  \n '.join(asm_const_pairs) + '\n};\n'
   if em_js_funcs:
@@ -610,6 +610,7 @@ def finalize_wasm(infile, outfile, js_syms):
   expected_exports = set(settings.EXPORTED_FUNCTIONS)
   expected_exports.update(asmjs_mangle(s) for s in settings.REQUIRED_EXPORTS)
   expected_exports.update(asmjs_mangle(s) for s in settings.EXPORT_IF_DEFINED)
+  expected_exports.update(building.wasm_bindgen_internal_exports)
   # Assume that when JS symbol dependencies are exported it is because they
   # are needed by by a JS symbol and are not being explicitly exported due
   # to EMSCRIPTEN_KEEPALIVE (llvm.used).
@@ -637,7 +638,7 @@ def finalize_wasm(infile, outfile, js_syms):
         metadata.all_exports.remove('main')
       else:
         metadata.all_exports.remove('__main_argc_argv')
-    else:
+    elif '_main' not in building.wasm_bindgen_internal_exports:
       unexpected_exports.append('_main')
 
   building.user_requested_exports.update(unexpected_exports)
@@ -652,7 +653,7 @@ def create_tsd_exported_runtime_methods(metadata):
   # for generation.
   js_doc = 'var RuntimeExports = {};\n'
   for name in settings.EXPORTED_RUNTIME_METHODS:
-    docs = '/** @type {{any}} */'
+    docs = '/** @type {any} */'
     snippet = ''
     if name in metadata.library_definitions:
       definition = metadata.library_definitions[name]
@@ -663,10 +664,10 @@ def create_tsd_exported_runtime_methods(metadata):
         docs = ''
       if definition['docs']:
         docs = definition['docs']
-        # TSC does not generate the correct type if there are jsdocs and nothing
-        # is assigned to the property.
-        if not snippet:
-          snippet = ' = null'
+    # TSC does not generate the correct type if there are jsdocs and nothing
+    # is assigned to the property.
+    if not snippet:
+      snippet = ' = null'
     js_doc += f'{docs}\nRuntimeExports[\'{name}\']{snippet};\n'
 
   file = 'jsdoc'
@@ -829,11 +830,6 @@ def add_standard_wasm_imports(send_items_map):
   # TODO(sbc): can we make these into normal library symbols?
   if settings.IMPORTED_MEMORY:
     send_items_map['memory'] = 'wasmMemory'
-
-  # This import should come from user code merged into the module with
-  # wasm-merge post-link.
-  if settings.SHARED_WASMGC:
-    send_items_map['_shared_heap_root'] = '__shared_heap_root'
 
   if settings.AUTODEBUG:
     extra_sent_items += [
@@ -1122,13 +1118,13 @@ def create_module(metadata, function_exports, other_exports, library_symbols, al
   else:
     if settings.PTHREADS or settings.WASM_WORKERS or (settings.IMPORTED_MEMORY and settings.MODULARIZE == 'instance'):
       sending = textwrap.indent(sending, '  ').strip()
-      module.append('''\
+      module.append(f'''\
   var wasmImports;
-  function assignWasmImports() {
-    wasmImports = %s;
-  }''' % sending)
+  function assignWasmImports() {{
+    wasmImports = {sending};
+  }}''')
     else:
-      module.append('var wasmImports = %s;' % sending)
+      module.append(f'var wasmImports = {sending};')
 
   if settings.SUPPORT_LONGJMP == 'emscripten' or not settings.DISABLE_EXCEPTION_CATCHING:
     module += create_invoke_wrappers(metadata)

@@ -38,6 +38,8 @@ from browser_common import (
   is_safari,
 )
 from common import (
+  EMCC,
+  FILE_PACKAGER,
   WEBIDL_BINDER,
   copy_asset,
   copytree,
@@ -72,7 +74,6 @@ from decorators import (
 from tools import ports, shared, utils
 from tools.feature_matrix import Feature
 from tools.link import binary_encode
-from tools.shared import EMCC, FILE_PACKAGER
 from tools.utils import WINDOWS, delete_dir, write_binary, write_file
 
 
@@ -5281,6 +5282,7 @@ Module["preRun"] = () => {
   @parameterized({
     '': (['-pthread', '-sPROXY_TO_PTHREAD'],),
     'jspi': (['-sJSPI'],),
+    'pthread_jspi': (['-pthread', '-sPROXY_TO_PTHREAD', '-sJSPI'],),
     'asyncify': (['-sASYNCIFY=1'],),
   })
   @no_safari('TODO: Fails with abort:Assertion failed: err == 0') # Fails in Safari 17.6 (17618.3.11.11.7, 17618), Safari 26.0.1 (21622.1.22.11.15)

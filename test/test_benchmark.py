@@ -17,6 +17,7 @@ import unittest
 import zlib
 from abc import ABC, abstractmethod
 from pathlib import Path
+from subprocess import PIPE
 
 if __name__ == '__main__':
   raise Exception('do not run this file directly; do something like: test/runner.py benchmark')
@@ -24,11 +25,11 @@ if __name__ == '__main__':
 import clang_native
 import common
 import jsrun
-from common import compiler_for, copy_asset, read_binary, read_file, test_file
+from common import EMCC, compiler_for, copy_asset, read_binary, read_file, test_file
 from decorators import needs_make, parameterized
 
 from tools import utils
-from tools.shared import CLANG_CC, CLANG_CXX, EMCC, PIPE, config
+from tools.shared import CLANG_CC, CLANG_CXX, config
 from tools.utils import run_process
 
 # standard arguments for timing:
@@ -117,12 +118,12 @@ class Benchmarker(ABC):
       else:
         median = sorted_times[count // 2]
 
-      print('   %10s: mean: %4.3f (+-%4.3f) secs  median: %4.3f  range: %4.3f-%4.3f  (noise: %4.3f%%)  (%d runs)' % (self.name, mean, std, median, min(self.times), max(self.times), 100 * std / mean, len(self.times)), end=' ')
+      print(f'   {self.name:>10}: mean: {mean:4.3f} (+-{std:4.3f}) secs  median: {median:4.3f}  range: {min(self.times):4.3f}-{max(self.times):4.3f}  (noise: {100 * std / mean:4.3f}%)  ({len(self.times)} runs)', end=' ')
 
       if baseline:
         mean_baseline = sum(baseline.times) / len(baseline.times)
         final = mean / mean_baseline
-        print('  Relative: %.2f X slower' % final)
+        print(f'  Relative: {final:.2f} X slower')
       else:
         print('  Relative: No baseline recorded yet')
 
@@ -156,7 +157,7 @@ class Benchmarker(ABC):
       if self.record_stats:
         add_stat('total', total_size, total_gzip_size)
 
-      print('        size: %8s, compressed: %8s' % (total_size, total_gzip_size), end=' ')
+      print(f'        size: {total_size:>8}, compressed: {total_gzip_size:>8}', end=' ')
 
       if self.get_size_text():
         print('  (' + self.get_size_text() + ')', end=' ')
@@ -434,7 +435,7 @@ class benchmark(common.RunnerCore):
     except Exception:
       pass
     fingerprint.append('llvm: ' + config.LLVM_ROOT)
-    print('Running Emscripten benchmarks... [ %s ]' % ' | '.join(fingerprint))
+    print(f"Running Emscripten benchmarks... [ {' | '.join(fingerprint)} ]")
 
   @classmethod
   def tearDownClass(cls):
@@ -504,7 +505,7 @@ class benchmark(common.RunnerCore):
       if not b.run:
         # If we won't run the benchmark, we don't need repetitions.
         reps = 0
-      print('Running benchmarker: %s: %s' % (b.__class__.__name__, b.name))
+      print(f'Running benchmarker: {b.__class__.__name__}: {b.name}')
       t1 = time.time()
       b.build(self, filename, shared_args, emcc_args, native_args, native_exec, lib_builder)
       build_time = time.time() - t1
@@ -1119,14 +1120,14 @@ class benchmark(common.RunnerCore):
   def test_zzz_bullet(self):
     self.cflags.remove('-Werror')
     bullet_cflags = [
-        '-Wno-int-to-void-pointer-cast',
-        '-Wno-c++11-narrowing',
-        '-Wno-deprecated-register',
-        '-Wno-writable-strings',
-        '-Wno-shift-negative-value',
-        '-Wno-format',
-        '-Wno-nontrivial-memcall',
-        '-Wno-single-bit-bitfield-constant-conversion',
+      '-Wno-int-to-void-pointer-cast',
+      '-Wno-c++11-narrowing',
+      '-Wno-deprecated-register',
+      '-Wno-writable-strings',
+      '-Wno-shift-negative-value',
+      '-Wno-format',
+      '-Wno-nontrivial-memcall',
+      '-Wno-single-bit-bitfield-constant-conversion',
     ]
     src = read_file(test_file('third_party/bullet/Demos/Benchmarks/BenchmarkDemo.cpp'))
     src += read_file(test_file('third_party/bullet/Demos/Benchmarks/main.cpp'))
