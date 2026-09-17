@@ -762,9 +762,9 @@ def get_dylibs(linker_args):
       if search_for_dylibs:
         for ext in DYLIB_EXTENSIONS:
           path = find_library('lib' + arg[2:] + ext, options.lib_dirs)
-          if path and building.is_wasm_dylib(path):
+          if path and webassembly.is_wasm_dylib(path):
             dylibs.append(path)
-    elif building.is_wasm_dylib(arg):
+    elif webassembly.is_wasm_dylib(arg):
       dylibs.append(arg)
   return dylibs
 
@@ -1082,7 +1082,7 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
     if '_main' in settings.EXPORTED_FUNCTIONS:
       # TODO(sbc): Make this into a warning?
       logger.debug('including `_main` in EXPORTED_FUNCTIONS is not necessary in standalone mode')
-  else:
+  else:  # ruff: ignore[collapsible-else-if]
     # In normal non-standalone mode we have special handling of `_main` in EXPORTED_FUNCTIONS.
     # 1. If the user specifies exports, but doesn't include `_main` we assume they want to build a
     #    reactor.
@@ -1737,12 +1737,6 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
     # WASM2JS does not support GROWABLE_ARRAYBUFFERS at all
     default_setting('GROWABLE_ARRAYBUFFERS', 0)
 
-  if settings.NODE_CODE_CACHING:
-    if settings.WASM_ASYNC_COMPILATION:
-      exit_with_error('NODE_CODE_CACHING requires sync compilation (WASM_ASYNC_COMPILATION=0)')
-    if not settings.ENVIRONMENT_MAY_BE_NODE:
-      exit_with_error('NODE_CODE_CACHING only works in node, but target environments do not include it')
-
   if not js_manipulation.isidentifier(settings.EXPORT_NAME):
     exit_with_error(f'EXPORT_NAME is not a valid JS identifier: `{settings.EXPORT_NAME}`')
 
@@ -1980,7 +1974,7 @@ def run_embind_gen(wasm_target, js_syms, extra_settings):
     # Copy libraries to the temp directory so they can be used when running
     # in node.
     for f in options.input_files:
-      if building.is_wasm_dylib(f):
+      if webassembly.is_wasm_dylib(f):
         safe_copy(f, in_temp(''))
 
   # Ignore any options or settings that can conflict with running the TS
@@ -2777,7 +2771,7 @@ def process_libraries(flags):
       for ext in DYLIB_EXTENSIONS:
         name = 'lib' + lib + ext
         path = find_library(name, options.lib_dirs)
-        if path and not building.is_wasm_dylib(path):
+        if path and not webassembly.is_wasm_dylib(path):
           found_dylib = True
           new_flags.append(path)
           break
@@ -2843,11 +2837,10 @@ class ScriptSource:
           initModule(Module);
         </script>
         '''
+      elif settings.MODULARIZE:
+        return f'<script type="text/javascript" src="{src}"></script>'
       else:
-        if settings.MODULARIZE:
-          return f'<script type="text/javascript" src="{src}"></script>'
-        else:
-          return f'<script async type="text/javascript" src="{src}"></script>'
+        return f'<script async type="text/javascript" src="{src}"></script>'
     else:
       return f'<script id="mainScript">\n{self.inline}\n</script>'
 
@@ -2855,7 +2848,7 @@ class ScriptSource:
 def filter_out_fake_dynamic_libs(inputs):
   """Filter out "fake" dynamic libraries that are really just intermediate object files."""
   def is_fake_dylib(input_file):
-    if get_file_suffix(input_file) in DYLIB_EXTENSIONS and os.path.exists(input_file) and not building.is_wasm_dylib(input_file):
+    if get_file_suffix(input_file) in DYLIB_EXTENSIONS and os.path.exists(input_file) and not webassembly.is_wasm_dylib(input_file):
       if not options.ignore_dynamic_linking:
         diagnostics.warning('emcc', 'ignoring dynamic library %s when generating an object file, this will need to be included explicitly in the final link', os.path.basename(input_file))
       return True
@@ -2873,7 +2866,7 @@ def filter_out_duplicate_fake_dynamic_libs(inputs):
   seen = set()
 
   def check(input_file):
-    if get_file_suffix(input_file) in DYLIB_EXTENSIONS and not building.is_wasm_dylib(input_file):
+    if get_file_suffix(input_file) in DYLIB_EXTENSIONS and not webassembly.is_wasm_dylib(input_file):
       abspath = os.path.abspath(input_file)
       if abspath in seen:
         return False

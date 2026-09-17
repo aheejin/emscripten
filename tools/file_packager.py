@@ -166,9 +166,8 @@ def should_ignore(fullname):
       if pattern.startswith("!"):
           if fnmatch.fnmatch(fullname, pattern[1:]):
               ignored = False
-      else:
-          if fnmatch.fnmatch(fullname, pattern):
-              ignored = True
+      elif fnmatch.fnmatch(fullname, pattern):
+          ignored = True
   return ignored
 
 
@@ -621,11 +620,10 @@ def generate_preload_js(data_target, data_files, metadata, js_file):
   # standalone calls
   if options.from_emcc:
     ret = ''
+  elif options.export_es6:
+    ret = 'export default async function loadDataFile(Module) {\n'
   else:
-    if options.export_es6:
-      ret = 'export default async function loadDataFile(Module) {\n'
-    else:
-      ret = f'''
+    ret = f'''
   var Module = typeof {options.export_name} != 'undefined' ? {options.export_name} : {{}};\n'''
 
   ret += '''

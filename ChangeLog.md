@@ -36,6 +36,9 @@ See docs/process.md for more on how version tagging works.
   the per-call garbage on such calls. The registration ABI gained size and
   triviality parameters, so object files built against an older `bind.h` need
   to be rebuilt. (#27610)
+- `emscripten_clear_timeout` now releases the runtime keepalive held by the
+  pending timeout, and both `emscripten_clear_timeout` and
+  `emscripten_clear_immediate` are no-ops for ids that already fired. (#27720)
 
 6.0.9 - 09/01/26
 ----------------
@@ -161,6 +164,10 @@ See docs/process.md for more on how version tagging works.
   process, or pthreads required. Supports incoming and outgoing TCP, UDP, IPv6,
   and `-pthread` with `PROXY_TO_PTHREAD`. Uses the public node APIs where
   available, falling back to `tcp_wrap`/`udp_wrap` on older Node.js. (#27080)
+- Under `-sNODERAWSOCKETS`, `getaddrinfo` now performs real name resolution
+  via `node:dns`, blocking the caller where its stack can wait (a proxied
+  pthread, `ASYNCIFY`/`JSPI`) and returning `EAI_AGAIN` otherwise. Results may
+  now be a linked list, which `freeaddrinfo` frees in full. (#27693)
 - The following symbols are no longer included in `INCOMING_MODULE_JS_API`
   by default:
   - GL_MAX_TEXTURE_IMAGE_UNITS

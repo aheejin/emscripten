@@ -36,10 +36,6 @@ from .shared import (
   EMCC,
   EMRANLIB,
   EMXX,
-  LLVM_DWARFDUMP,
-  LLVM_NM,
-  LLVM_OBJCOPY,
-  LLVM_OBJDUMP,
   asmjs_mangle,
   check_call,
   demangle_c_symbol_name,
@@ -59,6 +55,10 @@ logger = logging.getLogger('building')
 binaryen_checked = False
 EXPECTED_BINARYEN_VERSION = 132
 WASM_LD = shared.llvm_tool_path('wasm-ld')
+LLVM_DWARFDUMP = shared.llvm_tool_path('llvm-dwarfdump')
+LLVM_OBJCOPY = shared.llvm_tool_path('llvm-objcopy')
+LLVM_OBJDUMP = shared.llvm_tool_path('llvm-objdump')
+LLVM_NM = shared.llvm_tool_path('llvm-nm')
 
 # the exports the user requested
 user_requested_exports: set[str] = set()
@@ -264,15 +264,14 @@ def lld_flags_for_executable(external_symbols):
       # when settings.EXPECT_MAIN is set we fall back to wasm-ld default of _start
       if not settings.EXPECT_MAIN:
         cmd += ['--entry=_initialize']
+    elif settings.PROXY_TO_PTHREAD:
+      cmd += ['--entry=_emscripten_proxy_main']
     else:
-      if settings.PROXY_TO_PTHREAD:
-        cmd += ['--entry=_emscripten_proxy_main']
-      else:
-        # TODO(sbc): Avoid passing --no-entry when we know we have an entry point.
-        # For now we need to do this since the entry point can be either `main` or
-        # `__main_argv_argc`, but we should address that by using a single `_start`
-        # function like we do in STANDALONE_WASM mode.
-        cmd += ['--no-entry']
+      # TODO(sbc): Avoid passing --no-entry when we know we have an entry point.
+      # For now we need to do this since the entry point can be either `main` or
+      # `__main_argv_argc`, but we should address that by using a single `_start`
+      # function like we do in STANDALONE_WASM mode.
+      cmd += ['--no-entry']
 
   # The default for `--stack-first` is transitioning from disabled to
   # enabled.  So be explicit in all cases for now.
@@ -1169,37 +1168,6 @@ def write_symbol_map(wasm_file, symbols_file):
   strings = [f'{id}:{name}' for id, name in names.items()]
   contents = '\n'.join(strings) + '\n'
   utils.write_file(symbols_file, contents)
-
-
-def is_ar(filename):
-  """Return True if the given filename is an ar archive, False otherwise."""
-  try:
-    header = open(filename, 'rb').read(8)
-  except Exception as e:
-    logger.debug(f'is_ar failed to test whether file \'{filename}\' is a llvm archive file! Failed on exception: {e}')
-    return False
-
-  return header in {b'!<arch>\n', b'!<thin>\n'}
-
-
-def is_wasm(filename):
-  if not os.path.isfile(filename):
-    return False
-  header = open(filename, 'rb').read(webassembly.HEADER_SIZE)
-  return header == webassembly.MAGIC + webassembly.VERSION
-
-
-def is_wasm_dylib(filename):
-  """Detect wasm dynamic libraries by the presence of the "dylink" custom section."""
-  if not is_wasm(filename):
-    return False
-  with webassembly.Module(filename) as module:
-    section = next(module.sections())
-    if section.type == webassembly.SecType.CUSTOM:
-      module.seek(section.offset)
-      if module.read_string() in {'dylink', 'dylink.0'}:
-        return True
-  return False
 
 
 def emit_wasm_source_map(wasm_file, map_file, final_wasm):
