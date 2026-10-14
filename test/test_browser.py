@@ -63,7 +63,6 @@ from decorators import (
   no_2gb,
   no_4gb,
   no_highmem,
-  no_wasm64,
   parameterized,
   requires_dev_dependency,
   requires_wasm2js,
@@ -1645,12 +1644,11 @@ window.close = () => {
     'pthreads': (['-pthread'],),
   })
   def test_glgears(self, args):
-    self.reftest('hello_world_gles.c', 'gears.png', reference_slack=3, cflags=['-DHAVE_BUILTIN_SINCOS', '-lGL', '-lglut'] + args)
+    self.reftest('hello_world_gles.c', 'gears.png', reference_slack=3, cflags=['-lGL', '-lglut'] + args)
 
   @requires_graphics_hardware
   def test_glgears_long(self):
-    args = ['-DHAVE_BUILTIN_SINCOS', '-DLONGTEST', '-lGL', '-lglut', '-DANIMATE']
-    self.btest('hello_world_gles.c', expected='0', cflags=args)
+    self.btest('hello_world_gles.c', expected='0', cflags=['-DLONGTEST', '-lGL', '-lglut', '-DANIMATE'])
 
   @requires_graphics_hardware
   @parameterized({
@@ -1661,8 +1659,7 @@ window.close = () => {
   @flaky('https://github.com/emscripten-core/emscripten/issues/25329')
   def test_glgears_animation(self, filename):
     copy_asset('browser/fake_events.js')
-    args = ['-o', 'something.html',
-            '-DHAVE_BUILTIN_SINCOS', '-sGL_TESTING', '-lGL', '-lglut',
+    args = ['-o', 'something.html', '-sGL_TESTING', '-lGL', '-lglut',
             '--shell-file', test_file('hello_world_gles_shell.html')]
     if 'full' in filename:
       args += ['-sFULL_ES2']
@@ -1671,14 +1668,13 @@ window.close = () => {
 
   @requires_graphics_hardware
   def test_fulles2_sdlproc(self):
-    self.btest_exit('full_es2_sdlproc.c', cflags=['-sGL_TESTING', '-DHAVE_BUILTIN_SINCOS', '-sFULL_ES2', '-lGL', '-lSDL', '-lglut', '-sGL_ENABLE_GET_PROC_ADDRESS', '-Wno-int-conversion'])
+    self.btest_exit('full_es2_sdlproc.c', cflags=['-sGL_TESTING', '-sFULL_ES2', '-lGL', '-lSDL', '-lglut', '-sGL_ENABLE_GET_PROC_ADDRESS'])
 
   @requires_graphics_hardware
   @flaky('https://github.com/emscripten-core/emscripten/issues/25329')
   def test_glgears_deriv(self):
-    self.reftest('hello_world_gles_deriv.c', 'gears.png', reference_slack=2,
-                 cflags=['-DHAVE_BUILTIN_SINCOS', '-lGL', '-lglut'])
-    assert 'gl-matrix' not in read_file('test.html'), 'Should not include glMatrix when not needed'
+    self.reftest('hello_world_gles_deriv.c', 'gears.png', reference_slack=2, cflags=['-lGL', '-lglut'])
+    self.assertNotIn('gl-matrix', read_file('test.html'), 'Should not include glMatrix when not needed')
 
   @requires_graphics_hardware
   @parameterized({
@@ -3427,7 +3423,6 @@ Module["preRun"] = () => {
     self.assertExists('glue.js')
     self.btest('webidl/test.cpp', '1', cflags=['--post-js', 'glue.js', '-I.', '-DBROWSER'] + args)
 
-  @no_wasm64('https://github.com/llvm/llvm-project/issues/98778')
   def test_dylink(self):
     create_file('main.c', r'''
       #include <assert.h>
@@ -3511,7 +3506,6 @@ Module["preRun"] = () => {
     self._test_dylink_dso_needed(do_run)
 
   @requires_graphics_hardware
-  @no_wasm64('https://github.com/llvm/llvm-project/issues/98778')
   def test_dylink_glemu(self):
     create_file('main.c', r'''
       #include <stdio.h>
@@ -4375,14 +4369,6 @@ Module["preRun"] = () => {
     self.set_setting('DEFAULT_TO_CXX')  # emdawnwebgpu uses C++ internally
     self.btest_exit('webgpu_required_limits.c', cflags=['--use-port=emdawnwebgpu'])
 
-  # Tests the feature that shell html page can preallocate the typed array and place it
-  # to Module.buffer before loading the script page.
-  # In this build mode, the -sINITIAL_MEMORY=xxx option will be ignored.
-  # Preallocating the buffer in this was is asm.js only (wasm needs a Memory).
-  @requires_wasm2js
-  def test_preallocated_heap(self):
-    self.btest_exit('test_preallocated_heap.c', cflags=['-sWASM=0', '-sIMPORTED_MEMORY', '-sINITIAL_MEMORY=16MB', '-sABORTING_MALLOC=0', '--shell-file', test_file('browser/test_preallocated_heap_shell.html')])
-
   # Tests emscripten_fetch() usage to XHR data directly to memory without persisting results to IndexedDB.
   @also_with_wasm2js
   @also_with_fetch_streaming
@@ -4521,6 +4507,9 @@ Module["preRun"] = () => {
   def test_fetch_stream_abort(self):
     self.make_largefile()
     self.btest_exit('fetch/test_fetch_stream_abort.cpp', cflags=['-sFETCH', '-sFETCH_STREAMING', '-sALLOW_MEMORY_GROWTH'])
+
+  def test_fetch_stream_error(self):
+    self.btest_exit('fetch/test_fetch_stream_error.c', cflags=['-sFETCH', '-sFETCH_STREAMING'])
 
   @also_with_fetch_streaming
   def test_fetch_persist(self):
@@ -4709,8 +4698,6 @@ Module["preRun"] = () => {
     self.assertExists('test.html')
     self.assertNotExists('test.js')
     self.assertNotExists('test.wasm')
-    self.assertNotExists('test.asm.js')
-    self.assertNotExists('test.js')
     self.assertNotExists('test.worker.js')
 
   # Tests that SINGLE_FILE works when built with ENVIRONMENT=web and Closure enabled (#7933)
@@ -5146,7 +5133,6 @@ Module["preRun"] = () => {
 
   # Tests emscripten_lock_async_acquire() function.
   @also_with_minimal_runtime
-  @flaky('https://github.com/emscripten-core/emscripten/issues/25270')
   def test_wasm_worker_lock_async_acquire(self):
     self.btest_exit('wasm_worker/lock_async_acquire.c', cflags=['--closure=1', '-sWASM_WORKERS'])
 
@@ -5189,6 +5175,11 @@ Module["preRun"] = () => {
   @also_with_minimal_runtime
   def test_wasm_worker_semaphore_try_acquire(self):
     self.btest_exit('wasm_worker/semaphore_try_acquire.c', cflags=['-sWASM_WORKERS'])
+
+  # Tests emscripten_semaphore_async_acquire() function when semaphore is acquired both synchronously and asynchronously.
+  @also_with_minimal_runtime
+  def test_wasm_worker_semaphore_async_and_sync_acquire(self):
+    self.btest_exit('wasm_worker/semaphore_async_and_sync_acquire.c', cflags=['-sWASM_WORKERS'])
 
   @also_with_minimal_runtime
   def test_wasm_worker_condvar_waitinf(self):

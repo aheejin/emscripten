@@ -17,6 +17,7 @@ from decorators import (
   also_with_proxy_to_pthread,
   crossplatform,
   parameterized,
+  requires_dev_dependency,
   requires_native_clang,
   test_file,
 )
@@ -77,8 +78,22 @@ class sockets_node(RunnerCore):
       expected = 'do_msg_read: read 14 bytes'
       self.do_runf('sockets/test_sockets_echo_client.c', expected, cflags=[f'-DSOCKK={harness.listen_port}', *args])
 
+  @requires_dev_dependency('ws')
   def test_nodejs_sockets_connect_failure(self):
     self.do_runf('sockets/test_sockets_echo_client.c', r'connect failed: (Connection refused|Host is unreachable)', regex=True, cflags=['-DSOCKK=666'], assert_returncode=NON_ZERO)
+
+  @requires_dev_dependency('ws')
+  def test_nodejs_sockets_listen_inuse(self):
+    server = socketserver.TCPServer(('127.0.0.1', 0), EchoHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+      self.do_runf('sockets/test_sockets_listen_inuse.c', 'done\n', args=[str(port)])
+    finally:
+      server.shutdown()
+      server.server_close()
+      thread.join()
 
   def _run_against_echo_server(self, src):
     # Start a loopback TCP echo server on an ephemeral port and run the test
@@ -282,6 +297,21 @@ class sockets_node(RunnerCore):
     # call, updating msg_len per message.
     self.do_runf('sockets/test_udp_mmsg.c', 'done\n', cflags=['-sNODERAWSOCKETS'])
 
+  @parameterized({
+    '': ([],),
+    'unref': (['-DMODE_UNREF'],),
+  })
+  def test_noderawsockets_epoll_callback(self, cflags):
+    # An epoll listener callback woken repeatedly by arriving datagrams on a
+    # real socket via the SOCKFS -> wait-queue bridge, with no ASYNCIFY/JSPI.
+    # MODE_UNREF exits without waiting for delivery.
+    self.do_runf('sockets/test_epoll_callback.c', 'done\n', cflags=['-sNODERAWSOCKETS', '-sEXIT_RUNTIME', *cflags])
+
+  def test_noderawsockets_epoll_callback_force_exit(self):
+    # emscripten_force_exit with a listener registered on an armed socket:
+    # FS.quit closes the epoll on the way out, removing the listener.
+    self.do_runf('sockets/test_epoll_callback_force_exit.c', 'done\n', cflags=['-sNODERAWSOCKETS', '-sEXIT_RUNTIME'])
+
   @also_with_proxy_to_pthread
   def test_noderawsockets_udp_connect(self):
     # Connected UDP: sendto() with an address gives EISCONN, send() reaches the
@@ -290,22 +320,25 @@ class sockets_node(RunnerCore):
 
   @also_with_proxy_to_pthread
   def test_noderawsockets_udp_sockopts(self):
-    # UDP multicast socket options: IP_MULTICAST_TTL/LOOP and their IPv6
-    # counterparts round-trip through set/getsockopt, with POSIX defaults
-    # readable before any set. EXIT_RUNTIME so the plain synchronous main()
+    # UDP socket options: IP_MULTICAST_TTL/LOOP and their IPv6 counterparts
+    # round-trip through set/getsockopt, with POSIX defaults readable before
+    # any set, and SO_REUSEADDR/SO_REUSEPORT are applied at bind so sockets can
+    # share a port. EXIT_RUNTIME so the plain synchronous main()
     # tears down the proxy worker on return (otherwise noExitRuntime keeps the
     # worker, and thus node, alive under PROXY_TO_PTHREAD).
     self.do_runf('sockets/test_udp_sockopts.c', 'done\n', cflags=['-sNODERAWSOCKETS', '-sEXIT_RUNTIME'])
 
   @also_with_proxy_to_pthread
   def test_noderawsockets_socket_options(self):
-    # Socket metadata/options on a fresh socket: fstat reports S_ISSOCK, SO_TYPE
-    # reports the socket type, and SO_LINGER round-trips a struct linger.
+    # Socket metadata/options on a fresh socket: fstat reports S_ISSOCK, the
+    # read-only identity options, SO_LINGER/SO_RCVTIMEO/SO_SNDTIMEO struct
+    # round-trips, flag options, and symmetric ENOPROTOOPT for unknown options.
     self.do_runf('sockets/test_socket_options.c', 'done\n',
                  cflags=['-sNODERAWSOCKETS', '-sEXIT_RUNTIME'])
 
   @requires_native_clang
   @requires_python_dev_packages
+  @requires_dev_dependency('ws')
   def test_nodejs_sockets_echo_subprotocol(self):
     # Test against a Websockified server with compile time configured WebSocket subprotocol. We use a Websockified
     # server because as long as the subprotocol list contains binary it will configure itself to accept binary
@@ -319,6 +352,7 @@ class sockets_node(RunnerCore):
 
   @requires_native_clang
   @requires_python_dev_packages
+  @requires_dev_dependency('ws')
   def test_nodejs_sockets_echo_subprotocol_runtime(self):
     # Test against a Websockified server with runtime WebSocket configuration. We specify both url and subprotocol.
     # In this test we have *deliberately* used the wrong port '-DSOCKK=12345' to configure the echo_client.c, so

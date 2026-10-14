@@ -189,8 +189,12 @@ var INITIAL_HEAP = 16777216;
 var INITIAL_MEMORY = -1;
 
 // Set the maximum size of memory in the wasm module (in bytes). This is only
-// relevant when ALLOW_MEMORY_GROWTH is set, as without growth, the size of
-// INITIAL_MEMORY is the final size of memory anyhow.
+// relevant when ALLOW_MEMORY_GROWTH or IMPORTED_MEMORY is set, as otherwise the
+// size of INITIAL_MEMORY is the final size of memory anyhow. With
+// IMPORTED_MEMORY and without growth, the module accepts an imported memory of
+// any size up to this maximum, but never grows it. The memory must not be grown
+// from outside the module either; create it with its maximum equal to its
+// initial size to guarantee that.
 //
 // Note that the default value here is 2GB, which means that by default if you
 // enable memory growth then we can grow up to 2GB but no higher. 2GB is a
@@ -1183,10 +1187,13 @@ var LINKABLE = false;
 //
 //   - STRICT_JS is enabled.
 //   - IGNORE_MISSING_MAIN is disabled.
+//   - INCOMING_MODULE_JS_API is set to empty by default.
 //   - AUTO_JS_LIBRARIES is disabled.
 //   - AUTO_NATIVE_LIBRARIES is disabled.
 //   - ALLOW_UNIMPLEMENTED_SYSCALLS is disabled.
-//   - INCOMING_MODULE_JS_API is set to empty by default.
+//
+// Note: If you build with -sMAIN_MODULE=1 the last 3 are not disabled since
+// they would cause link failures.
 // [compile+link]
 var STRICT = false;
 
@@ -1858,16 +1865,14 @@ var FETCH_STREAMING = 0;
 // [experimental]
 var WASMFS = false;
 
-// If set to 1, embeds all subresources in the emitted file as base64 string
-// literals. Embedded subresources may include (but aren't limited to) wasm,
-// asm.js, and static memory initialization code.
+// If set to 1, embeds all subresources (for example, the Wasm file) as strings
+// in the generated JavaScript or HTML file.
 //
 // When using code that depends on this option, your Content Security Policy may
-// need to be updated. Specifically, embedding asm.js requires the script-src
-// directive to allow 'unsafe-inline', and using a Worker requires the
-// child-src directive to allow blob:. If you aren't using Content Security
-// Policy, or your CSP header doesn't include either script-src or child-src,
-// then you can safely ignore this warning.
+// need to be updated. Specifically, using a Worker requires the child-src
+// directive to allow blob:. If you aren't using Content Security Policy, or
+// your CSP header doesn't include child-src, then you can safely ignore this
+// warning.
 //
 // Note that SINGLE_FILE with binary encoding requires the HTML/JS files to be
 // served with UTF-8 encoding. See the details on SINGLE_FILE_BINARY_ENCODE.
@@ -1908,8 +1913,8 @@ var SINGLE_FILE_BINARY_ENCODE = true;
 var AUTO_JS_LIBRARIES = true;
 
 // Like AUTO_JS_LIBRARIES but for the native libraries such as libgl, libal
-// and libhtml5.   If this is disabled it is necessary to explicitly add
-// e.g. -lhtml5 and also to first build the library using ``embuilder``.
+// and libhtml5.  This gets set to 0 in STRICT mode.  If this is disabled it is
+// necessary to explicitly add libraries to the link command (e.g. -lhtml5).
 // [link]
 var AUTO_NATIVE_LIBRARIES = true;
 

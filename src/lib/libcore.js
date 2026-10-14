@@ -62,7 +62,7 @@ addToLibrary({
   // functions to continue to work in `__deps` entries.
   stackAlloc: '$stackAlloc',
   stackSave: '$stackSave',
-  stackRestore: '$stackSave',
+  stackRestore: '$stackRestore',
   setTempRet0: '$setTempRet0',
   getTempRet0: '$getTempRet0',
 
@@ -221,7 +221,7 @@ addToLibrary({
       updateMemoryViews();
 #endif
 #if MEMORYPROFILER
-      if (typeof emscriptenMemoryProfiler != 'undefined') {
+      if (typeof emscriptenMemoryProfiler !== 'undefined') {
         emscriptenMemoryProfiler.onMemoryResize(oldHeapSize, wasmMemory.buffer.byteLength);
       }
 #endif
@@ -701,7 +701,7 @@ addToLibrary({
 
     offset = 0; z = 0;
     for (w=0; w < words.length; w++) {
-      if (typeof words[w] == 'string') {
+      if (typeof words[w] === 'string') {
         if (words[w] === 'Z') {
           // compressed zeros - write appropriate number of zero words
           for (z = 0; z < (8 - words.length+1); z++) {
@@ -1001,6 +1001,9 @@ addToLibrary({
   },
 
   _emscripten_lookup_name__deps: ['$UTF8ToString', '$DNS', '$inetPton4'],
+  // Proxied so that there is a single DNS table, on the main thread, shared
+  // with getaddrinfo, getnameinfo and the socket syscalls.
+  _emscripten_lookup_name__proxy: 'sync',
   _emscripten_lookup_name: (name) => {
     // uint32_t _emscripten_lookup_name(const char *name);
     var nameString = UTF8ToString(name);
@@ -1073,7 +1076,7 @@ addToLibrary({
     // addrinfo per {family, addr} result into *out.
     async function lookupHostname() {
       var entries = await nodeSockHelpers.lookupHost(node, family);
-      if (typeof entries == 'number') return entries;
+      if (typeof entries === 'number') return entries;
       var head = 0, prev = 0;
       for (var entry of entries) {
         var ai = allocaddrinfo(entry.family, type, proto, null, entry.addr, port);
@@ -1235,6 +1238,7 @@ addToLibrary({
   },
 
   getnameinfo__deps: ['$DNS', '$readSockaddr', '$stringToUTF8'],
+  getnameinfo__proxy: 'sync',
   getnameinfo: (sa, salen, node, nodelen, serv, servlen, flags) => {
     var info = readSockaddr(sa, salen);
     if (info.errno) {
@@ -1365,27 +1369,6 @@ addToLibrary({
     return result;
   },
 
-  // ==========================================================================
-  // sockets. Note that the implementation assumes all sockets are always
-  // nonblocking
-  // ==========================================================================
-  $Sockets: {
-    BUFFER_SIZE: 10*1024, // initial size
-    MAX_BUFFER_SIZE: 10*1024*1024, // maximum size we will grow the buffer
-
-    nextFd: 1,
-    fds: {},
-    nextport: 1,
-    maxport: 65535,
-    peer: null,
-    connections: {},
-    portmap: {},
-    localAddr: 0xfe00000a, // Local address is always 10.0.0.254
-    addrPool: [            0x0200000a, 0x0300000a, 0x0400000a, 0x0500000a,
-               0x0600000a, 0x0700000a, 0x0800000a, 0x0900000a, 0x0a00000a,
-               0x0b00000a, 0x0c00000a, 0x0d00000a, 0x0e00000a] /* 0x0100000a is reserved */
-  },
-
 #endif // PROXY_POSIX_SOCKETS == 0
 
   $timers: {},
@@ -1425,7 +1408,7 @@ addToLibrary({
 #if RUNTIME_DEBUG
       dbg(`itimer fired: ${which}`);
 #endif
-      callUserCallback(() => __emscripten_timeout(which, _emscripten_get_now()));
+      callUserCallback(__emscripten_timeout, which, _emscripten_get_now());
     }, timeout_ms);
     timers[which] = { id, timeout_ms };
     return 0;
@@ -1508,10 +1491,10 @@ addToLibrary({
     }
 #endif
 #if AUDIO_WORKLET // https://github.com/WebAudio/web-audio-api/issues/2413
-    if (globalThis.performance?.now == 'function') {
+    if (globalThis.performance?.now) {
       return 1000; // microseconds (1/1000 of a millisecond)
     }
-    return 1000*1000; // milliseconds
+    return 1_000_000; // milliseconds
 #else
     // Modern environment where performance.now() is supported:
     return 1000; // microseconds (1/1000 of a millisecond)
@@ -1580,7 +1563,7 @@ addToLibrary({
     name = UTF8ToString(name);
 
     var ret = getCompilerSetting(name);
-    if (typeof ret == 'number' || typeof ret == 'boolean') return ret;
+    if (typeof ret === 'number' || typeof ret === 'boolean') return ret;
 
     var cache = _emscripten_get_compiler_setting.cache ??= {};
     var fullret = cache[name];
@@ -1757,7 +1740,7 @@ addToLibrary({
 #endif
       // Special handling for Wasm globals.  See `create_receiving` for the
       // static version of this code.
-      if (typeof exportedSymbol.value != 'undefined') {
+      if (typeof exportedSymbol.value !== 'undefined') {
 #if MEMORY64
         exportedSymbol = Number(exportedSymbol.value);
 #else
@@ -1992,7 +1975,7 @@ addToLibrary({
     // code size, but directly access wasmTable, which is a bit slower as uncached.
     return wasmTable.get({{{ toIndexType('funcPtr') }}});
   },
-#endif // SHRINK_LEVEL == 0
+#endif // SHRINK_LEVEL == 0 || ASYNCIFY == 2
 
   // Callable in pthread without __proxy needed.
   emscripten_exit_with_live_runtime: () => {
@@ -2145,7 +2128,7 @@ addToLibrary({
   // as ExitStatus and 'unwind' and prevent these from escaping to the top
   // level.
   $callUserCallback__deps: ['$handleException', '$maybeExit'],
-  $callUserCallback: (func) => {
+  $callUserCallback: (func, ...args) => {
 #if EXIT_RUNTIME
     if (runtimeExited || ABORT) {
 #else
@@ -2157,7 +2140,7 @@ addToLibrary({
       return;
     }
     try {
-      return func();
+      return func(...args);
     } catch (e) {
       handleException(e);
     } finally {
@@ -2212,7 +2195,7 @@ addToLibrary({
   },
 
 #else // MINIMAL_RUNTIME
-  $callUserCallback: (func) => {
+  $callUserCallback: (func, ...args) => {
     // MINIMAL_RUNTIME doesn't support the runtimeKeepalive stuff, but under
     // some circumstances it supportes `runtimeExited`
 #if EXIT_RUNTIME
@@ -2223,7 +2206,7 @@ addToLibrary({
       return;
     }
 #endif
-    func();
+    func(...args);
   },
 #endif // MINIMAL_RUNTIME
 
@@ -2410,7 +2393,7 @@ addToLibrary({
         if (shown) {
           err('(end of list)');
         }
-      }, 10000);
+      }, 10_000);
 #if ENVIRONMENT_MAY_BE_NODE
       // Prevent this timer from keeping the runtime alive if nothing
       // else is.
@@ -2579,7 +2562,7 @@ function wrapSyscallFunction(x, library, isWasi) {
   }
 
   var t = library[x];
-  if (typeof t == 'string') return;
+  if (typeof t === 'string') return;
   t = t.toString();
 
   // If a syscall uses FS, but !SYSCALLS_REQUIRE_FILESYSTEM, then the user
@@ -2643,7 +2626,7 @@ function wrapSyscallFunction(x, library, isWasi) {
     pre += 'try {\n';
     handler +=
     '} catch (e) {\n' +
-    "  if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;\n";
+    "  if (typeof FS === 'undefined' || !(e.name === 'ErrnoError')) throw e;\n";
 #if SYSCALL_DEBUG
     handler +=
     '  dbg(`error: syscall failed with ${e.errno} (${strError(e.errno)})`);\n' +

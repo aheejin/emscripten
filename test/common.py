@@ -83,6 +83,8 @@ WEBIDL_BINDER = exe_path_from_root('tools/webidl_binder')
 
 # binaryen tools
 WASM_DIS = os.path.join(building.get_binaryen_bin(), 'wasm-dis')
+WASM_SPLIT = os.path.join(building.get_binaryen_bin(), 'wasm-split')
+WASM_OPT = os.path.join(building.get_binaryen_bin(), 'wasm-opt')
 
 # llvm tools
 WASM_LD = shared.llvm_tool_path('wasm-ld')
@@ -771,7 +773,10 @@ class RunnerCore(RetryableTestCase, metaclass=RunnerMeta):
       if node_version < emcc_min_node_version:
         self.cflags.append('-sMIN_NODE_VERSION={:02d}{:02d}{:02d}'.format(*node_version))
 
-    self.v8_args = ['--wasm-staging']
+    # --no-test-only-unsafe is needed because jsvu's v8 wrapped adds --snapshot_blob flag
+    # which generates a "V8 is running with an unsupported configuration" warning.
+    # See: https://github.com/GoogleChromeLabs/jsvu/issues/178
+    self.v8_args = ['--wasm-staging', '--no-test-only-unsafe']
     self.env = {}
     self.temp_files_before_run = []
     self.required_engine = None

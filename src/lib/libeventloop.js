@@ -108,7 +108,7 @@ LibraryJSEventLoop = {
     }`,
   $emSetImmediate: undefined,
 
-  $emClearImmediate_deps: ['$emSetImmediate'],
+  $emClearImmediate__deps: ['$emSetImmediate'],
   $emClearImmediate: undefined,
 
   emscripten_set_immediate__deps: ['$emSetImmediate', '$callUserCallback'],
@@ -116,7 +116,7 @@ LibraryJSEventLoop = {
     {{{ runtimeKeepalivePush(); }}}
     return emSetImmediate(() => {
       {{{ runtimeKeepalivePop(); }}}
-      callUserCallback(() => {{{ makeDynCall('vp', 'cb') }}}(userData));
+      callUserCallback({{{ makeDynCall('vp', 'cb') }}}, userData);
     });
   },
 
@@ -176,9 +176,7 @@ LibraryJSEventLoop = {
   emscripten_set_interval__deps: ['$callUserCallback'],
   emscripten_set_interval: (cb, msecs, userData) => {
     {{{ runtimeKeepalivePush() }}}
-    return setInterval(() => {
-      callUserCallback(() => {{{ makeDynCall('vp', 'cb') }}}(userData));
-    }, msecs);
+    return setInterval(() => callUserCallback({{{ makeDynCall('vp', 'cb') }}}, userData), msecs);
   },
 
   emscripten_clear_interval: (id) => {
@@ -204,12 +202,12 @@ LibraryJSEventLoop = {
 
   $registerPostMainLoop: (f) => {
     // Does nothing unless $MainLoop is included/used.
-    typeof MainLoop != 'undefined' && MainLoop.postMainLoop.push(f);
+    typeof MainLoop !== 'undefined' && MainLoop.postMainLoop.push(f);
   },
 
   $registerPreMainLoop: (f) => {
     // Does nothing unless $MainLoop is included/used.
-    typeof MainLoop != 'undefined' && MainLoop.preMainLoop.push(f);
+    typeof MainLoop !== 'undefined' && MainLoop.preMainLoop.push(f);
   },
 
   $MainLoop__internal: true,
