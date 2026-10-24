@@ -413,6 +413,17 @@ class other(RunnerCore):
     self.assertContained(WASM_LD, proc.stderr)
     self.assertExists('a.out.js')
 
+  def test_clang_target_flags(self):
+    proc = self.run_process([EMCC, '-v', '-dumpmachine'], stdout=PIPE, stderr=PIPE)
+    self.assertTrue(proc.stderr.strip().endswith(' -target wasm32-unknown-emscripten -v -dumpmachine'))
+
+    # -print-search-dirs queries clang for `-print-resource-dir` via get_clang_resource_dir()
+    proc = self.run_process([EMCC, '-v', '-print-search-dirs'], stdout=PIPE, stderr=PIPE)
+    self.assertTrue(proc.stderr.strip().endswith(' -target wasm32-unknown-emscripten -print-resource-dir'))
+
+    proc = self.run_process([EMCC, '-v', '--check'], stdout=PIPE, stderr=PIPE)
+    self.assertContained(' --target=wasm32 --version\n', proc.stderr)
+
   def test_skip_subcommands(self):
     # The -### flag is like `-v` but it doesn't actually execute the sub-commands
     proc = self.run_process([EMCC, '-###', '-O3', test_file('hello_world.c')], stdout=PIPE, stderr=PIPE)
@@ -7325,6 +7336,10 @@ int main() {
 
       int main() {
         EM_ASM({
+          // Call gc() twice because V8 sweeps ArrayBuffer backing stores
+          // concurrently on a background thread; the start of the second gc()
+          // waits for the first gc()'s ArrayBufferSweeper job to finish.
+          gc();
           gc();
           globalThis.before = process.memoryUsage().arrayBuffers;
         });
@@ -7333,6 +7348,7 @@ int main() {
         int (*side_fn)(int) = dlsym(h, "side_fn");
         assert(side_fn && side_fn(1) == 2);
         int retained_mb = EM_ASM_INT({
+          gc();
           gc();
           return (process.memoryUsage().arrayBuffers - globalThis.before) >> 20;
         });
@@ -8432,6 +8448,7 @@ int main() {
     self.assertContained('Test_source_fixed_lang_hello', self.run_js('a.out.js'))
 
     self.assert_fail([EMXX, '-Wall', 'src_tmp_fixed_lang'], 'unknown file type: src_tmp_fixed_lang')
+    self.assert_fail([EMXX, '-Werror', 'src_tmp_fixed_lang', '-x', 'c++'], "'-x c++' after last input file has no effect [-Wunused-command-line-argument] [-Werror]")
 
   def test_disable_inlining(self):
     create_file('test.c', r'''
@@ -10095,6 +10112,41 @@ int main() {
     # has only two entries
     self.assertRegex(output, r'"mappings":\s*"[A-Za-z0-9+/]+,[A-Za-z0-9+/]+"')
 
+  def test_wasm_sourcemap_line_zero(self):
+    # code at DWARF line 0 should map to no location, not to the row before it
+    wasm_sourcemap = importlib.import_module('tools.wasm-sourcemap')
+    emsymbolizer = importlib.import_module('tools.emsymbolizer')
+    entries = [
+      {'address': 0x10, 'line': 5, 'column': 3, 'file': 'a.c', 'eos': False},
+      {'address': 0x18, 'line': 0, 'column': 0, 'file': 'a.c', 'eos': False},
+      {'address': 0x1a, 'line': 0, 'column': 0, 'file': 'a.c', 'eos': False},
+      {'address': 0x20, 'line': 6, 'column': 1, 'file': 'a.c', 'eos': False},
+    ]
+    options = wasm_sourcemap.parse_args(['unused.wasm'])
+    write_file('a.wasm.map', json.dumps(wasm_sourcemap.build_sourcemap(entries, [], 0, options)))
+    source_map = emsymbolizer.WasmSourceMap()
+    source_map.parse('a.wasm.map')
+    # consecutive line 0 rows share one segment
+    self.assertEqual(source_map.offsets, [0x10, 0x18, 0x20])
+    self.assertEqual(source_map.lookup(0x14).line, 5)
+    self.assertIsNone(source_map.lookup(0x18).source)
+    self.assertIsNone(source_map.lookup(0x1c).source)
+    self.assertEqual(source_map.lookup(0x20).line, 6)
+    # the runtime's reader in source_map_support.js should agree
+    js = read_file(path_from_root('src/source_map_support.js'))
+    js = js[js.index('class WasmSourceMap'):js.index('let wasmSourceMap;')]
+    create_file('lookup.js', js + '''
+const map = JSON.parse(require('fs').readFileSync('a.wasm.map', 'utf8'));
+const sm = new WasmSourceMap(map);
+console.log(JSON.stringify([0x14, 0x18, 0x1c, 0x20].map((pc) => sm.lookup(pc))));
+''')
+    self.assertEqual(json.loads(self.run_js('lookup.js')), [
+      {'file': 'a.c', 'line': 5, 'column': 3},
+      None,
+      None,
+      {'file': 'a.c', 'line': 6, 'column': 1},
+    ])
+
   def test_wasm_sourcemap_relative_paths(self):
     ensure_dir('build')
 
@@ -10407,27 +10459,27 @@ int main() {
   def test_split_dwarf_dwp(self):
     self.run_process([EMCC, test_file('hello_world.c'), '-g', '-gsplit-dwarf'])
     self.assertExists('a.out.wasm')
-    self.assertExists('hello_world.dwo')
+    self.assertExists('a.out.js-hello_world.dwo')
 
     # The wasm will have full debug info for libc (ignore that), but only a
     # skeleton for hello_world.c (no subprogram for main)
     dwdump = self.run_process([LLVM_DWARFDUMP, 'a.out.wasm'], stdout=PIPE).stdout
-    self.assertIn('DW_AT_GNU_dwo_name\t("hello_world.dwo")', dwdump)
+    self.assertIn('DW_AT_GNU_dwo_name\t("a.out.js-hello_world.dwo")', dwdump)
     self.assertNotIn('DW_AT_name\t("main")', dwdump)
 
     # The dwo will have a subprogram for main in a section with a .dwo suffix
-    dwdump = self.run_process([LLVM_DWARFDUMP, 'hello_world.dwo'],
+    dwdump = self.run_process([LLVM_DWARFDUMP, 'a.out.js-hello_world.dwo'],
                               stdout=PIPE).stdout
     self.assertIn('.debug_info.dwo contents:', dwdump)
-    self.assertIn('DW_AT_GNU_dwo_name\t("hello_world.dwo")', dwdump)
+    self.assertIn('DW_AT_GNU_dwo_name\t("a.out.js-hello_world.dwo")', dwdump)
     self.assertIn('DW_AT_name\t("main")', dwdump)
 
     # Check that dwp runs, and results in usable output as well
     self.run_process([LLVM_DWP, '-e', 'a.out.wasm', '-o', 'a.out.wasm.dwp'])
     self.assertExists('a.out.wasm.dwp')
-    self.run_process([LLVM_DWARFDUMP, 'a.out.wasm.dwp'], stdout=PIPE)
+    dwdump = self.run_process([LLVM_DWARFDUMP, 'a.out.wasm.dwp'], stdout=PIPE).stdout
     self.assertIn('.debug_info.dwo contents:', dwdump)
-    self.assertIn('DW_AT_GNU_dwo_name\t("hello_world.dwo")', dwdump)
+    self.assertIn('DW_AT_GNU_dwo_name\t("a.out.js-hello_world.dwo")', dwdump)
     self.assertIn('DW_AT_name\t("main")', dwdump)
 
   def test_separate_dwarf_with_filename(self):
@@ -13447,7 +13499,13 @@ void foo() {}
     # Verify that the dwo file is generated in the current working directory, even when implicitly
     # compiling (compile+link).
     self.run_process([EMCC, test_file('hello_world.c'), '-g', '-gsplit-dwarf'])
-    self.assertExists('hello_world.dwo')
+    self.assertExists('a.out.js-hello_world.dwo')
+
+  def test_ftime_trace_implicit_compile(self):
+    # Verify that the time-trace json file is generated in the current working directory, even when
+    # implicitly compiling (compile+link).
+    self.run_process([EMCC, test_file('hello_world.c'), '-ftime-trace'])
+    self.assertExists('a.out.js-hello_world.json')
 
   @parameterized({
     '': ([],),
@@ -14354,8 +14412,8 @@ int main() {
 
   def test_xlocale(self):
     # Test for xlocale.h compatibility header
-    self.do_other_test('test_xlocale.c')
-    self.do_other_test('test_xlocale.c', cflags=['-x', 'c++'])
+    self.do_other_test('test_xlocale.cpp')
+    self.do_other_test('test_xlocale.cpp', force_c=True)
 
   def test_print_map(self):
     self.run_process([EMCC, '-c', test_file('hello_world.c')])
