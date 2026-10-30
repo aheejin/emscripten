@@ -83,15 +83,14 @@ var LibraryGLFW = {
       this.userptr = 0;
     },
 
-  $GLFW__deps: ['emscripten_get_now', '$GL', '$Browser', '$GLFW_Window',
-    'malloc', 'free',
-    '$MainLoop',
-    '$stringToNewUTF8',
-    '$getFullscreenElement',
-    'emscripten_set_window_title',
-#if FILESYSTEM
-    '$FS',
+  $GLFW__deps: [
+#if !OFFSCREEN_FRAMEBUFFER
+    // Needed indirectly via `Browser.createContext` (which guards `GL` with
+    // `typeof GL !== 'undefined'`). Under `OFFSCREEN_FRAMEBUFFER`, `$GLFW`
+    // references `GL` directly so `$GL` is auto-detected.
+    '$GL',
 #endif
+    'malloc', 'free',
   ],
   $GLFW: {
     WindowFromId: (id) => {
@@ -995,7 +994,7 @@ var LibraryGLFW = {
             case 0x00034001: { // GLFW_CURSOR_NORMAL
               win.inputModes[mode] = value;
               canvas.removeEventListener('click', GLFW.onClickRequestPointerLock, true);
-              document.exitPointerLock();
+              document.exitPointerLock?.();
               break;
             }
             case 0x00034002: { // GLFW_CURSOR_HIDDEN
@@ -1005,7 +1004,7 @@ var LibraryGLFW = {
             case 0x00034003: { // GLFW_CURSOR_DISABLED
               win.inputModes[mode] = value;
               canvas.addEventListener('click', GLFW.onClickRequestPointerLock, true);
-              canvas.requestPointerLock();
+              canvas.requestPointerLock?.();
               break;
             }
             default: {
@@ -1223,7 +1222,7 @@ var LibraryGLFW = {
         var canvasContainer = canvas.parentNode;
         if (getFullscreenElement() === canvasContainer) {
           canvas.exitFullscreen = Browser.exitFullscreen;
-          if (Browser.lockPointer) canvas.requestPointerLock();
+          if (Browser.lockPointer) canvas.requestPointerLock?.();
           Browser.isFullscreen = true;
           if (Browser.resizeCanvas) {
             Browser.setFullscreenCanvasSize();
@@ -1529,7 +1528,7 @@ var LibraryGLFW = {
     GLFW.initialTime = GLFW.getTime() - time;
   },
 
-  glfwExtensionSupported__deps: ['glGetString', '$webglGetExtensions'],
+  glfwExtensionSupported__deps: ['glGetString'],
   glfwExtensionSupported: (extension) => {
     GLFW.extensions ||= webglGetExtensions();
 
@@ -1540,7 +1539,6 @@ var LibraryGLFW = {
     return (GLFW.extensions.includes('GL_' + extension));
   },
 
-  glfwSwapInterval__deps: ['emscripten_set_main_loop_timing'],
   glfwSwapInterval: (interval) => {
     interval = Math.abs(interval); // GLFW uses negative values to enable GLX_EXT_swap_control_tear, which we don't have, so just treat negative and positive the same.
     if (interval == 0) _emscripten_set_main_loop_timing({{{ cDefs.EM_TIMING_SETTIMEOUT }}}, 0);
@@ -2104,5 +2102,4 @@ var LibraryGLFW = {
 #endif // GLFW2
 };
 
-autoAddDeps(LibraryGLFW, '$GLFW');
 addToLibrary(LibraryGLFW);

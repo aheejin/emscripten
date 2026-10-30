@@ -2841,6 +2841,12 @@ Module["preRun"] = () => {
   def test_glfw3(self, args, opts):
     self.btest_exit('test_glfw3.c', cflags=['-sUSE_GLFW=3', '-lglfw', '-lGL'] + args + opts)
 
+  @requires_graphics_hardware
+  def test_glfw3_no_pointer_lock(self):
+    # Browsers without the Pointer Lock API, such as Safari on iOS
+    create_file('pre.js', 'delete Document.prototype.exitPointerLock; delete Element.prototype.requestPointerLock;')
+    self.btest_exit('test_glfw3.c', cflags=['-sUSE_GLFW=3', '-lglfw', '-lGL', '-DCLIENT_API=GLFW_OPENGL_ES_API', '-sGL_ENABLE_GET_PROC_ADDRESS', '--pre-js', 'pre.js'])
+
   @parameterized({
     '': (['-sUSE_GLFW=2', '-DUSE_GLFW=2'],),
     'glfw3': (['-sUSE_GLFW=3', '-DUSE_GLFW=3'],),
@@ -5284,6 +5290,11 @@ Module["preRun"] = () => {
       self.require_jspi()
     test = test_file('wasmfs/wasmfs_opfs.c')
     args = ['-sWASMFS', '-O3'] + args
+    # Read-only opens in pthreads builds use shared access handles, except on Chrome before 121,
+    # which lacks the `mode` option of createSyncAccessHandle and falls back to blobs.
+    is_old_chrome = is_chrome() and get_chrome_version() < 121
+    if '-pthread' in args and not is_old_chrome:
+      args.append('-DWASMFS_OPFS_SHARED_ACCESS')
     self.btest_exit(test, cflags=args + ['-DWASMFS_SETUP'])
     self.btest_exit(test, cflags=args + ['-DWASMFS_RESUME'])
 
@@ -5294,6 +5305,13 @@ Module["preRun"] = () => {
     postjs = test_file('wasmfs/wasmfs_opfs_errors_post.js')
     args = ['-sWASMFS', '-pthread', '-sPROXY_TO_PTHREAD', '--post-js', postjs]
     self.btest(test, cflags=args, expected='0')
+
+  @no_firefox('no OPFS support yet')
+  @no_safari('no support for the mode option of createSyncAccessHandle')
+  def test_wasmfs_opfs_shared(self):
+    postjs = test_file('wasmfs/wasmfs_opfs_shared_post.js')
+    args = ['-sWASMFS', '-pthread', '-sPROXY_TO_PTHREAD', '--post-js', postjs]
+    self.btest_exit('wasmfs/wasmfs_opfs_errors.c', cflags=args)
 
   def test_wasmfs_multi_environment(self):
     # Test that WasmFS's Node backend can be enabled conditionally, allowing

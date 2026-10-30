@@ -787,7 +787,7 @@ def setup_cross_origin_storage():
 def add_required_heap_symbols():
   """Auto-include heap views and helper symbols required by certain build modes or runtime.
 
-  Because addImplicitDeps only scans library functions and user code (pre-js/post-js/EM_JS),
+  Because calcImplicitDeps only scans library functions and user code (pre-js/post-js/EM_JS),
   runtime scaffolding files (e.g., postamble.js, runtime_stack_check.js, memoryprofiler.js)
   that access linear memory directly must have their heap views explicitly declared here
   so they are emitted in the final JS bundle.
@@ -834,7 +834,7 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
   apply_library_settings(linker_args)
 
   if options.shared and not settings.FAKE_DYLIBS:
-    default_setting('SIDE_MODULE', 1)
+    default_setting('SIDE_MODULE', 2)
 
   if not settings.SIDE_MODULE and not settings.FAKE_DYLIBS:
     options.dylibs = get_dylibs(linker_args)
@@ -1792,7 +1792,7 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
   if settings.SIDE_MODULE:
     # For side modules, we ignore all REQUIRED_EXPORTS that might have been added above.
     # They all come from either libc or compiler-rt.  The exception is __wasm_call_ctors
-    # and _emscripten_tls_init which are per-module exports.
+    # and _emscripten_tls_init/_emscripten_tls_free which are per-module exports.
     settings.REQUIRED_EXPORTS.clear()
 
   if not settings.STANDALONE_WASM:
@@ -1800,6 +1800,8 @@ def phase_linker_setup(linker_args):  # ruff: ignore[complex-structure, too-many
     settings.REQUIRED_EXPORTS.append('__wasm_call_ctors')
   if settings.PTHREADS:
     settings.REQUIRED_EXPORTS.append('_emscripten_tls_init')
+    if settings.SIDE_MODULE:
+      settings.REQUIRED_EXPORTS.append('_emscripten_tls_free')
 
   if settings.NODERAWFS:
     default_setting('NODE_HOST_ENV', 1)

@@ -7803,6 +7803,15 @@ addToLibrary({
   def test_resolve_mountpoint_parent(self):
     self.do_other_test('test_resolve_mountpoint_parent.c', cflags=['-sFORCE_FILESYSTEM', '-lnodefs.js'])
 
+  @requires_node
+  def test_nodefs_permission_model(self):
+    # Under node's permission model `process.binding` throws ERR_ACCESS_DENIED,
+    # so NODEFS must not use it to look up the fs open flags.
+    if not self.try_require_node_version(22, 13):
+      self.skipTest('test requires node v22.13 or above for --permission')
+    self.node_args += ['--permission', '--allow-fs-read=*', '--allow-fs-write=*']
+    self.do_runf('fs/test_nodefs_nofollow.c', 'done\n', cflags=['-lnodefs.js'])
+
   @with_env_modify({'EMCC_LOGGING': '0'})  # this test assumes no emcc output
   def test_no_warnings(self):
     # build once before to make sure system libs etc. exist
@@ -7835,10 +7844,10 @@ addToLibrary({
     'O2': (['-O2'], 137000),
     'emmalloc': (['-sMALLOC=emmalloc'], 185000),
     'dlmalloc': (['-sMALLOC=dlmalloc'], 191000),
-    'mimalloc': (['-sMALLOC=mimalloc'], 260000),
+    'mimalloc': (['-sMALLOC=mimalloc'], 254000),
     'emmalloc_O2': (['-sMALLOC=emmalloc', '-O2'], 131000),
     'dlmalloc_O2': (['-sMALLOC=dlmalloc', '-O2'], 137000),
-    'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 200000),
+    'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 198000),
   })
   # This test verifies the output code size of the different -sMALLOC= modes.
   def test_malloc_size(self, args, max_size):
@@ -12411,9 +12420,9 @@ int main(void) {
   def test_drop_support_for_browser(self):
     # Test that -1 means "not supported"
     self.run_process([EMCC, test_file('browser/test_html5_core.c')])
-    self.assertContained('getContextSafariWebGL2Fixed', read_file('a.out.js'))
+    self.assertContained('document.webkitFullscreenEnabled', read_file('a.out.js'))
     self.run_process([EMCC, test_file('browser/test_html5_core.c'), '-sMIN_SAFARI_VERSION=-1'])
-    self.assertNotContained('getContextSafariWebGL2Fixed', read_file('a.out.js'))
+    self.assertNotContained('document.webkitFullscreenEnabled', read_file('a.out.js'))
 
   def test_errno_type(self):
     create_file('errno_type.c', '''
@@ -12712,6 +12721,43 @@ int main () {
     err = self.run_process([EMCC, '-shared', '-fPIC', test_file('hello_world.c'), '-o', 'out.wasm'], stderr=PIPE).stderr
     self.assertNotContained('warning: -shared/-r used with executable output suffix', err)
     self.assertIsWasmDylib('out.wasm')
+
+    # Verify how `-shared` compares to `-sSIDE_MODULE=1` and `-sSIDE_MODULE=2`
+    # when linking object files and static archives.
+    create_file('foo.c', 'int foo() { return 1; }\n')
+    create_file('bar.c', 'int bar() { return 2; }\n')
+    self.run_process([EMCC, '-fPIC', '-c', 'foo.c'])
+    self.run_process([EMCC, '-fPIC', '-c', 'bar.c'])
+    self.run_process([EMAR, 'rc', 'libbar.a', 'bar.o'])
+
+    # `-shared`: exports `foo` from `foo.o`, but does not pull in unreferenced `libbar.a`
+    self.run_process([EMCC, '-shared', 'foo.o', 'libbar.a', '-o', 'out.so'])
+    exports = {e.name for e in webassembly.get_exports('out.so')}
+    self.assertIn('foo', exports)
+    self.assertNotIn('bar', exports)
+
+    # `-sSIDE_MODULE=1`: exports both `foo` and `bar` (`--whole-archive`)
+    self.run_process([EMCC, '-sSIDE_MODULE=1', 'foo.o', 'libbar.a', '-o', 'out.so'])
+    exports = {e.name for e in webassembly.get_exports('out.so')}
+    self.assertIn('foo', exports)
+    self.assertIn('bar', exports)
+
+    # `-sSIDE_MODULE=2`: exports neither `foo` nor `bar` (`--no-export-dynamic`)
+    self.run_process([EMCC, '-sSIDE_MODULE=2', 'foo.o', 'libbar.a', '-o', 'out.so'])
+    exports = {e.name for e in webassembly.get_exports('out.so')}
+    self.assertNotIn('foo', exports)
+    self.assertNotIn('bar', exports)
+
+    # When both `-shared` and `-sSIDE_MODULE` are specified, `SIDE_MODULE` takes precedence.
+    self.run_process([EMCC, '-shared', '-sSIDE_MODULE=1', 'foo.o', 'libbar.a', '-o', 'out.so'])
+    exports = {e.name for e in webassembly.get_exports('out.so')}
+    self.assertIn('foo', exports)
+    self.assertIn('bar', exports)
+
+    self.run_process([EMCC, '-shared', '-sSIDE_MODULE=2', 'foo.o', 'libbar.a', '-o', 'out.so'])
+    exports = {e.name for e in webassembly.get_exports('out.so')}
+    self.assertNotIn('foo', exports)
+    self.assertNotIn('bar', exports)
 
   @no_windows('windows does not support shbang syntax')
   @with_env_modify({'EMMAKEN_JUST_CONFIGURE': '1'})
@@ -13755,6 +13801,13 @@ void foo() {}
     # the callback every tick: documents the spin contract (use EPOLLET/unregister).
     self.do_runf('other/test_epoll_callback_level.c', 'done\n', cflags=['-sFORCE_FILESYSTEM', '-sEXIT_RUNTIME'])
 
+  def test_epoll_callback_coalesce(self):
+    # A burst of edges before the loop turns (many writes, a run of socket
+    # chunks) schedules one delivery task, not one per edge: on hosts where
+    # setImmediate is a counted timer not serviced while I/O completes, a task
+    # per edge piles up to the host's cap.
+    self.do_runf('other/test_epoll_callback_coalesce.c', 'done\n', cflags=['-sFORCE_FILESYSTEM', '-sEXIT_RUNTIME'])
+
   @parameterized({
     '': ([], 3),
     'pending': (['-DMODE_PENDING'], 3),
@@ -14086,6 +14139,47 @@ Module.postRun = () => {{
 
   def test_hello_world_above_2gb(self):
     self.do_runf_out_file('hello_world.c', cflags=['-sGLOBAL_BASE=2GB', '-sINITIAL_MEMORY=3GB'])
+
+  @parameterized({
+    '': ([],),
+    # Minified export names
+    'O3': (['-O3'],),
+  })
+  def test_signature_conversions(self, args):
+    # Exports returning pointers get wrapped so that they return unsigned
+    # values when memory can be above 2GB.  Check that the wrapped exports are
+    # used, and that all other exports are still present on `wasmExports`
+    # (including when enumerated).
+    create_file('main.c', r'''
+      #include <stdint.h>
+      #include <emscripten.h>
+
+      EMSCRIPTEN_KEEPALIVE void* get_high_ptr() { return (void*)(uintptr_t)0x90000000u; }
+      EMSCRIPTEN_KEEPALIVE int add_one(int x) { return x + 1; }
+
+      int main() {
+        EM_ASM({
+          out('_get_high_ptr: ' + _get_high_ptr());
+          out('wasmExports.get_high_ptr: ' + wasmExports['get_high_ptr']());
+          out('_add_one: ' + _add_one(41));
+          out('wasmExports.add_one: ' + wasmExports['add_one'](41));
+          var found = 0;
+          for (var name in wasmExports) {
+            if (wasmExports[name] === wasmExports['get_high_ptr']) found |= 1;
+            if (wasmExports[name] === wasmExports['add_one']) found |= 2;
+          }
+          out('enumerated: ' + found);
+        });
+      }
+    ''')
+    expected = '''\
+_get_high_ptr: 2415919104
+wasmExports.get_high_ptr: 2415919104
+_add_one: 42
+wasmExports.add_one: 42
+enumerated: 3
+'''
+    self.do_runf('main.c', expected, cflags=['-sALLOW_MEMORY_GROWTH', '-sMAXIMUM_MEMORY=4GB', '-sSIGNATURE_CONVERSIONS=get_high_ptr:p'] + args)
 
   def test_unistd_strerror(self):
     self.do_runf_out_file('unistd/strerror.c')
@@ -15489,16 +15583,8 @@ addToLibrary({
     self.assertFalse(os.path.exists('out.js'))
     self.assertContained('error with `--use-port=sdl2_image:formats=jpg:formats=png` | duplicate option `formats`', stderr)
 
-  def test_mimalloc_headers(self):
-    src = r'''
-      #include <mimalloc.h>
-
-      int main() {
-          mi_option_enable(mi_option_verbose);
-          return 0;
-      }
-    '''
-    self.do_run(src, cflags=['-sMALLOC=mimalloc'])
+  def test_mimalloc_options(self):
+    self.do_other_test('test_mimalloc_options.c', cflags=['-sMALLOC=mimalloc'])
 
   def test_SUPPORT_BIG_ENDIAN(self):
     # Just a simple build-only test for now
