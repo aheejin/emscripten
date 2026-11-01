@@ -55,7 +55,7 @@ if (ENVIRONMENT_IS_NODE && {{{ ENVIRONMENT_IS_WORKER_THREAD() }}}) {
 #if PTHREADS_DEBUG
     dbg(`uncaughtException on worker thread: ${err.message}`);
 #endif
-    postMessage({ cmd: {{{ CMD_UNCAUGHT_EXN }}}, error: err });
+    postMessage({ cmd: CMD_UNCAUGHT_EXN, error: err });
     // Also shut down the Worker to match the same semantics as if this uncaughtException
     // handler was not registered.
     // (n.b. this will not shut down the whole Node.js app process, but just the Worker)
@@ -63,10 +63,6 @@ if (ENVIRONMENT_IS_NODE && {{{ ENVIRONMENT_IS_WORKER_THREAD() }}}) {
   });
 }
 #endif // (PTHREADS || WASM_WORKERS) && (ENVIRONMENT_MAY_BE_NODE && !WASM_ESM_INTEGRATION)
-
-#if PTHREADS
-#include "runtime_pthread.js"
-#endif
 
 #if WASM_WORKERS
 #include "wasm_worker.js"

@@ -609,8 +609,8 @@ async function getWasmBinary(binaryFile) {
   if (!wasmBinary) {
     // Fetch the binary using readAsync
     try {
-      var response = await readAsync(binaryFile);
-      return new Uint8Array(response);
+      // Await so a rejection is caught and falls back to getBinarySync.
+      return await readAsync(binaryFile);
     } catch {
       // Fall back to getBinarySync below;
     }
@@ -798,6 +798,8 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'convertI32PairToI53',
   'convertI32PairToI53Checked',
   'convertU32PairToI53',
+  'INT53_MAX',
+  'INT53_MIN',
   'bigintToI53Checked',
   'stackAlloc',
   'getTempRet0',
@@ -966,8 +968,6 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'wasmExports',
   'writeStackCookie',
   'checkStackCookie',
-  'INT53_MAX',
-  'INT53_MIN',
   'HEAP8',
   'HEAPU8',
   'HEAP16',

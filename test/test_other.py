@@ -7870,10 +7870,10 @@ addToLibrary({
     'O2': (['-O2'], 137000),
     'emmalloc': (['-sMALLOC=emmalloc'], 185000),
     'dlmalloc': (['-sMALLOC=dlmalloc'], 191000),
-    'mimalloc': (['-sMALLOC=mimalloc'], 254000),
+    'mimalloc': (['-sMALLOC=mimalloc'], 258000),
     'emmalloc_O2': (['-sMALLOC=emmalloc', '-O2'], 131000),
     'dlmalloc_O2': (['-sMALLOC=dlmalloc', '-O2'], 137000),
-    'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 198000),
+    'mimalloc_O2': (['-sMALLOC=mimalloc', '-O2'], 201000),
   })
   # This test verifies the output code size of the different -sMALLOC= modes.
   def test_malloc_size(self, args, max_size):
@@ -9643,6 +9643,8 @@ end
     'wasmfs': (['-sWASMFS'],),
     'min_webgl_version': (['-sMIN_WEBGL_VERSION=2', '-sLEGACY_GL_EMULATION=0'],),
     'full_es3': (['-sMIN_WEBGL_VERSION=2', '-sLEGACY_GL_EMULATION=0', '-sFULL_ES3'],),
+    'nodefs_sockfs': (['-lnodefs.js', '-lsockfs.js'],),
+    'export_es6': (['-sEXPORT_ES6'],),
   })
   def test_closure_full_js_library(self, args):
     # Test for closure errors and warnings in the entire JS library.
@@ -9652,7 +9654,7 @@ end
       args += ['-sEXPORT_ALL']
     else:
       args += ['-sMAIN_MODULE']
-    self.build('hello_world.c', cflags=[
+    output = self.build('hello_world.c', cflags=[
       '--closure=1',
       '--minify=0',
       '-lbase64.js',
@@ -9701,7 +9703,7 @@ end
       'uniformBlockBindin',
       'vertexAttribIPointer',
     ]
-    js = read_file('hello_world.js')
+    js = read_file(output)
     for sym in glsyms:
       self.assertContained('.' + sym, js)
 
@@ -12535,27 +12537,6 @@ int main(void) {
         self.assertNotContained('WARNING', proc.stderr)
       else:
         self.assertContained(outcome, proc.stderr)
-
-  @parameterized({
-    '': ([],),
-    'nodefs_sockfs': (['-lnodefs.js', '-lsockfs.js'],),
-  })
-  def test_closure_fs_es6(self, args):
-    # TODO: Delete this test once test_closure_full_js_library can run with
-    # -sEXPORT_ES6. Currently -sINCLUDE_FULL_LIBRARY + -sEXPORT_ES6 fails due
-    # to Closure internal compiler errors (JSC_ILLEGAL_MODULE_RENAMING_CONFLICT):
-    # https://github.com/google/closure-compiler/issues/4344
-    self.build('hello_world.c', output_suffix='.mjs', cflags=[
-      '-O2',
-      '-sEXPORT_ES6',
-      '-sFORCE_FILESYSTEM',
-      '--closure=1',
-    ] + args)
-    create_file('run.mjs', '''
-      import Module from './hello_world.mjs';
-      await Module();
-    ''')
-    self.assertContained('Hello, world!\n', self.run_js('run.mjs'))
 
   def test_bitcode_input(self):
     # Verify that bitcode files are accepted as input
@@ -15953,6 +15934,19 @@ addToLibrary({
       ''')
     # Test with ASYNCIFY here to ensure that that wasmExports gets set to the wrapped version of the wasm exports.
     self.do_runf('test_manual_wasm_instantiate.c', cflags=['--pre-js=pre.js', '-sASYNCIFY', '-DASYNCIFY_ENABLED'])
+
+  @requires_node
+  def test_node_wasm_binary_not_copied(self):
+    # Under node, readAsync returns the Buffer from fs.readFileSync, which
+    # WebAssembly.instantiate accepts without copying it first.
+    create_file('pre.js', '''
+      var origInstantiate = WebAssembly.instantiate;
+      WebAssembly.instantiate = (binary, imports) => {
+        out('binary is a Buffer: ' + Buffer.isBuffer(binary));
+        return origInstantiate(binary, imports);
+      };
+      ''')
+    self.do_runf('hello_world.c', 'binary is a Buffer: true\nHello, world!\n', cflags=['--pre-js=pre.js'])
 
   def test_late_module_api_assignment(self):
     # When sync instantiation is used (or when async/await is used in MODULARIZE mode) certain

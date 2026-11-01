@@ -387,8 +387,8 @@ async function getWasmBinary(binaryFile) {
   if (!wasmBinary) {
     // Fetch the binary using readAsync
     try {
-      var response = await readAsync(binaryFile);
-      return new Uint8Array(response);
+      // Await so a rejection is caught and falls back to getBinarySync.
+      return await readAsync(binaryFile);
     } catch {}
   }
   // Otherwise, getBinarySync should be able to get it synchronously
@@ -637,7 +637,7 @@ var asyncLoad = async url => {
 
 var getUniqueRunDependency = id => id;
 
-var FS_preloadFile = async (parent, name, url, canRead, canWrite, dontCreateFile, canOwn, preFinish) => {
+var FS_preloadFile = async (parent, name, url, canRead = undefined, canWrite = undefined, dontCreateFile = undefined, canOwn = undefined, preFinish = undefined) => {
   // TODO we should allow people to just pass in a complete filename instead
   // of parent and name being that we just join them anyways
   var fullname = name ? PATH_FS.resolve(PATH.join2(parent, name)) : parent;
@@ -659,7 +659,7 @@ var FS_preloadFile = async (parent, name, url, canRead, canWrite, dontCreateFile
   }
 };
 
-var FS_createPreloadedFile = (parent, name, url, canRead, canWrite, onload, onerror, dontCreateFile, canOwn, preFinish) => {
+var FS_createPreloadedFile = (parent, name, url, canRead = undefined, canWrite = undefined, onload = undefined, onerror = undefined, dontCreateFile = undefined, canOwn = undefined, preFinish = undefined) => {
   FS_preloadFile(parent, name, url, canRead, canWrite, dontCreateFile, canOwn, preFinish).then(onload).catch(onerror);
 };
 
