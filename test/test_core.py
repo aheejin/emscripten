@@ -2559,8 +2559,14 @@ The current type of b is: 9
   @no_asan('cannot replace malloc/free with ASan')
   @no_lsan('cannot replace malloc/free with LSan')
   @requires_pthreads
-  def test_pthread_proxy_deadlock(self):
-    self.do_runf('pthread/test_pthread_proxy_deadlock.c')
+  @parameterized({
+    '': (['-DTEST_SYSTEM_QUEUE'],),
+    'user_queue': (['-DTEST_USER_QUEUE'],),
+    'user_queue_contended': (['-DTEST_USER_QUEUE_CONTENDED'],),
+    'lost_wakeup': (['-DTEST_LOST_WAKEUP'],),
+  })
+  def test_pthread_proxy_deadlock(self, args):
+    self.do_runf('pthread/test_pthread_proxy_deadlock.c', cflags=args)
 
   @no_asan('test relies on null pointer reads')
   def test_pthread_specific(self):
@@ -8051,6 +8057,7 @@ void* operator new(size_t size) {
     # Check that embind is usable from a library built with "-fvisibility=hidden"
 
     create_file('libside.cpp', r'''
+      #include <emscripten/bind.h>
       #include <emscripten/val.h>
       #define EXPORT __attribute__((visibility("default")))
       using namespace emscripten;
@@ -8058,18 +8065,26 @@ void* operator new(size_t size) {
         unsigned char buffer[1];
         val view(typed_memory_view(1, buffer));
       }
+      int side_add(int a, int b) {
+        return a + b;
+      }
+      EMSCRIPTEN_BINDINGS(side_module) {
+        function("side_add", &side_add);
+      }
     ''')
     self.build_dlfcn_lib('libside.cpp', cflags=['-fvisibility=hidden'])
 
     self.prep_dlfcn_main()
     self.clear_setting('NO_AUTOLOAD_DYLIBS')
     create_file('main.cpp', r'''
+      #include <assert.h>
       #include <stdio.h>
       #include <emscripten/val.h>
       using namespace emscripten;
       void liba_fun();
       int main() {
         liba_fun();
+        assert(val::module_property("side_add")(20, 22).as<int>() == 42);
         printf("done\n");
         return 0;
       }
@@ -9560,7 +9575,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @also_with_minimal_runtime
   @no_esm_integration('depends on wasmExports')
   def test_get_exported_function(self):
-    output = self.do_runf_out_file('core/test_get_exported_function.cpp', cflags=['-sALLOW_TABLE_GROWTH', '-lexports.js'])
+    output = self.do_runf_out_file('core/test_get_exported_function.c', cflags=['-sALLOW_TABLE_GROWTH', '-lexports.js'])
     self.assertContainedIf('No exported function found by name "no_such_function"', output, not self.is_optimizing())
 
   # Marked as impure since the WASI reactor modules (modules without main)

@@ -3507,6 +3507,8 @@ More info: https://emscripten.org
 
   def test_embind_fail(self):
     self.assert_fail([EMXX, test_file('embind/test_unsigned.cpp')], 'undefined symbol: _embind_register_function')
+    self.assert_fail([EMXX, '-Werror', test_file('embind/test_unsigned.cpp'), '-lembind', '-sEMBIND_AOT'],
+                     'EMBIND_AOT is only meaningful with MODULARIZE=instance or WASM_ESM_INTEGRATION')
 
   def test_embind_invalid_overload(self):
     expected = 'BindingError: Cannot register multiple overloads of a function with the same number of arguments'
@@ -3618,7 +3620,6 @@ More info: https://emscripten.org
     '': (),
     'no_utf8': ('-sEMBIND_STD_STRING_IS_UTF8=0',),
     'no_dynamic': ('-sDYNAMIC_EXECUTION=0',),
-    'aot_js': ('-sDYNAMIC_EXECUTION=0', '-sEMBIND_AOT', '-DSKIP_UNBOUND_TYPES'),
     'wasm64': ('-m64',),
     '2gb': ('-sINITIAL_MEMORY=2200mb', '-sGLOBAL_BASE=2gb'),
   })
@@ -3704,7 +3705,6 @@ More info: https://emscripten.org
   @parameterized({
     '': (),
     'no_dynamic': ('-sDYNAMIC_EXECUTION=0',),
-    'aot_js': ('-sDYNAMIC_EXECUTION=0', '-sEMBIND_AOT'),
     'wasm64': ('-m64', '-sDYNAMIC_EXECUTION=0'),
   })
   def test_embind_trivial_value_stack(self, *extra_args):
@@ -3793,7 +3793,6 @@ More info: https://emscripten.org
     # `type: "module"` in package.json, this still tests CommonJS.
     'commonjs': (['-sMODULARIZE'], ['--module', 'node16', '--moduleResolution', 'node16']),
     'esm': (['-sEXPORT_ES6'], ['--module', 'NodeNext', '--moduleResolution', 'nodenext']),
-    'esm_with_jsgen': (['-sEXPORT_ES6', '-sEMBIND_AOT'], ['--module', 'NodeNext', '--moduleResolution', 'nodenext']),
   })
   def test_embind_tsgen_end_to_end(self, opts, tsc_opts):
     # Check that TypeScript generation works and that the program is runs as
@@ -3952,11 +3951,6 @@ More info: https://emscripten.org
                       '--emit-tsd', 'embind_tsgen.d.ts', '-Wno-deprecated'] +
                      self.get_cflags())
     self.assertFilesMatch(test_file('other/embind_tsgen.d.ts'), 'embind_tsgen.d.ts')
-
-  def test_embind_jsgen_method_pointer_stability(self):
-    # Test that when method pointers are allocated at different addresses that
-    # AOT JS generation still works correctly.
-    self.do_runf('other/embind_jsgen_method_pointer_stability.cpp', 'done\n', cflags=['-lembind', '-sEMBIND_AOT'])
 
   @requires_dev_dependency('typescript')
   @parameterized({
@@ -13887,10 +13881,8 @@ void foo() {}
     self.do_runf('other/test_epoll_callback_level.c', 'done\n', cflags=['-sFORCE_FILESYSTEM', '-sEXIT_RUNTIME'])
 
   def test_epoll_callback_coalesce(self):
-    # A burst of edges before the loop turns (many writes, a run of socket
-    # chunks) schedules one delivery task, not one per edge: on hosts where
-    # setImmediate is a counted timer not serviced while I/O completes, a task
-    # per edge piles up to the host's cap.
+    # A burst of edges schedules one delivery, run as a microtask of the host
+    # task that made the set ready; redelivery yields to the event loop.
     self.do_runf('other/test_epoll_callback_coalesce.c', 'done\n', cflags=['-sFORCE_FILESYSTEM', '-sEXIT_RUNTIME'])
 
   @parameterized({
@@ -13905,11 +13897,6 @@ void foo() {}
     # alive. With an explicit keepalive the delivery runs and its pop exits.
     self.do_runf('other/test_epoll_callback_unref.c', 'done\nexited %d\n' % returncode,
                  cflags=['-sFORCE_FILESYSTEM', '-sEXIT_RUNTIME'] + cflags, assert_returncode=returncode)
-
-  def test_epoll_callback_macrotask(self):
-    # A delivery runs on a later event-loop turn, after the call that made the
-    # set ready and the current microtask checkpoint have completed.
-    self.do_runf('other/test_epoll_callback_macrotask.c', 'done\n', cflags=['-sFORCE_FILESYSTEM', '-sEXIT_RUNTIME'])
 
   def test_epoll_callback_abort(self):
     # A fatal error in the callback is an uncaught exception from the delivery
@@ -14290,7 +14277,7 @@ enumerated: 3
     self.build('fetch/test_fetch_to_memory_async.c')
     self.build('fetch/test_fetch_persist.c')
     self.build('fetch/test_fetch_idb_delete.c')
-    self.build('fetch/test_fetch_idb_store.c')
+    self.build('fetch/test_fetch_idb_store_async.c')
     self.build('fetch/test_fetch_redirect.c')
     self.build('fetch/test_fetch_stream_async.c')
     self.build('fetch/test_fetch_stream_error.c')
@@ -15822,8 +15809,14 @@ addToLibrary({
     self.run_process(['cargo', 'build'])
 
     # cargo copies only the .js and .wasm; the ESM support module and snippets
-    # stay in deps/, so run from there.
-    out_dir = 'target/wasm32-unknown-emscripten/debug/deps'
+    # stay in rustc's output directory (`deps/` before cargo 1.100, or
+    # `build/<pkg>/<hash>/out/` in cargo 1.100+), so run from there.
+    out_candidates = (
+      glob.glob('target/wasm32-unknown-emscripten/debug/deps/bindgen_greeter.js')
+      or glob.glob('target/wasm32-unknown-emscripten/debug/build/bindgen_greeter/*/out/bindgen_greeter.js')
+    )
+    self.assertEqual(len(out_candidates), 1, out_candidates)
+    out_dir = os.path.dirname(out_candidates[0])
     create_file(os.path.join(out_dir, 'run.mjs'), prelude + '''
       const greeting = new mod.Greeter('Hello').greet('world');
       if (greeting !== 'Hello, world!') throw new Error('unexpected greeting: ' + greeting);

@@ -126,7 +126,8 @@
             "AT_SYMLINK_NOFOLLOW",
             "AT_REMOVEDIR",
             "AT_EMPTY_PATH",
-            "AT_NO_AUTOMOUNT"
+            "AT_NO_AUTOMOUNT",
+            "AT_SYMLINK_FOLLOW"
         ],
         "structs": {
             "flock": [
@@ -284,8 +285,27 @@
              "IPPROTO_IPV6",
              "IPPROTO_UDP",
              "IPPROTO_TCP",
+             "IP_TTL",
+             "IP_MULTICAST_TTL",
+             "IP_MULTICAST_LOOP",
+             "IP_ADD_MEMBERSHIP",
+             "IP_DROP_MEMBERSHIP",
+             "IPV6_MULTICAST_HOPS",
+             "IPV6_MULTICAST_LOOP",
+             "IPV6_JOIN_GROUP",
+             "IPV6_LEAVE_GROUP",
              "IPV6_V6ONLY",
              "INADDR_LOOPBACK"
+         ]
+    },
+    {
+         "file": "netinet/tcp.h",
+         "defines": [
+             "TCP_NODELAY",
+             "TCP_MAXSEG",
+             "TCP_KEEPIDLE",
+             "TCP_KEEPINTVL",
+             "TCP_KEEPCNT"
          ]
     },
     {
@@ -334,19 +354,29 @@
             "SOCK_STREAM",
             "SOCK_CLOEXEC",
             "SOCK_NONBLOCK",
-             "MSG_PEEK",
-             "AF_INET",
-             "AF_UNSPEC",
-             "AF_INET6",
-             "AF_UNIX",
-             "SOL_SOCKET",
-             "SO_ERROR",
-             "SO_REUSEPORT",
-             "SO_RCVTIMEO",
-             "SO_SNDTIMEO",
-             "SO_ACCEPTCONN",
-             "SO_DOMAIN",
-             "SO_PROTOCOL"
+            "SHUT_RD",
+            "SHUT_WR",
+            "SHUT_RDWR",
+            "MSG_PEEK",
+            "AF_INET",
+            "AF_UNSPEC",
+            "AF_INET6",
+            "AF_UNIX",
+            "SOL_SOCKET",
+            "SO_REUSEADDR",
+            "SO_TYPE",
+            "SO_ERROR",
+            "SO_BROADCAST",
+            "SO_SNDBUF",
+            "SO_RCVBUF",
+            "SO_KEEPALIVE",
+            "SO_LINGER",
+            "SO_REUSEPORT",
+            "SO_RCVTIMEO",
+            "SO_SNDTIMEO",
+            "SO_ACCEPTCONN",
+            "SO_DOMAIN",
+            "SO_PROTOCOL"
         ]
     },
     {
@@ -400,7 +430,8 @@
         "defines": [
             "TZNAME_MAX",
             "SYMLOOP_MAX",
-            "PIPE_BUF"
+            "PIPE_BUF",
+            "NAME_MAX"
         ]
     },
     {
@@ -934,7 +965,11 @@
             "EMSCRIPTEN_DEVICE_MOTION_EVENT_SUPPORTS_ACCELERATION_INCLUDING_GRAVITY",
             "EMSCRIPTEN_DEVICE_MOTION_EVENT_SUPPORTS_ROTATION_RATE",
 
-            "EMSCRIPTEN_ORIENTATION_UNSUPPORTED"
+            "EMSCRIPTEN_ORIENTATION_UNSUPPORTED",
+            "EMSCRIPTEN_ORIENTATION_PORTRAIT_PRIMARY",
+            "EMSCRIPTEN_ORIENTATION_PORTRAIT_SECONDARY",
+            "EMSCRIPTEN_ORIENTATION_LANDSCAPE_PRIMARY",
+            "EMSCRIPTEN_ORIENTATION_LANDSCAPE_SECONDARY"
         ],
         "structs": {
             "EmscriptenKeyboardEvent": [
@@ -1116,6 +1151,7 @@
     {
         "file": "emscripten/wasm_worker.h",
         "defines": [
+            "ATOMICS_WAIT_OK",
             "ATOMICS_WAIT_NOT_EQUAL",
             "ATOMICS_WAIT_TIMED_OUT"
         ]
@@ -1309,6 +1345,12 @@
     },
     {
         "file": "emscripten/webaudio.h",
+        "defines": [
+            "EM_FALSE",
+            "EM_TRUE",
+            "AUDIO_CONTEXT_STATE_SUSPENDED",
+            "AUDIO_CONTEXT_STATE_RUNNING"
+        ],
         "structs": {
             "EmscriptenWebAudioCreateAttributes": [
               "latencyHint",
@@ -1386,7 +1428,101 @@
         "file": "GL/gl.h",
         "defines": [
           "GL_UNPACK_ALIGNMENT",
-          "GL_UNPACK_ROW_LENGTH"
+          "GL_UNPACK_ROW_LENGTH",
+          "GL_VIEWPORT"
+        ]
+    },
+    {
+        "file": "GL/glew.h",
+        "defines": [
+          "GLEW_OK",
+          "GLEW_NO_ERROR",
+          "GLEW_ERROR_NO_GL_VERSION",
+          "GLEW_ERROR_GL_VERSION_10_ONLY",
+          "GLEW_ERROR_GLX_VERSION_11_ONLY",
+          "GLEW_ERROR_NOT_GLES_VERSION",
+          "GLEW_ERROR_GLES_VERSION",
+          "GLEW_ERROR_NO_EGL_VERSION",
+          "GLEW_ERROR_EGL_VERSION_10_ONLY",
+          "GLEW_VERSION",
+          "GLEW_VERSION_MAJOR",
+          "GLEW_VERSION_MINOR",
+          "GLEW_VERSION_MICRO"
+        ]
+    },
+    {
+        "file": "GL/glut.h",
+        "defines": [
+          "GLUT_RGBA",
+          "GLUT_DOUBLE",
+          "GLUT_ALPHA",
+          "GLUT_DEPTH",
+          "GLUT_STENCIL",
+          "GLUT_MULTISAMPLE",
+          "GLUT_ACTIVE_SHIFT",
+          "GLUT_ACTIVE_CTRL",
+          "GLUT_ACTIVE_ALT",
+          "GLUT_DOWN",
+          "GLUT_UP",
+          "GLUT_KEY_F1",
+          "GLUT_KEY_F2",
+          "GLUT_KEY_F3",
+          "GLUT_KEY_F4",
+          "GLUT_KEY_F5",
+          "GLUT_KEY_F6",
+          "GLUT_KEY_F7",
+          "GLUT_KEY_F8",
+          "GLUT_KEY_F9",
+          "GLUT_KEY_F10",
+          "GLUT_KEY_F11",
+          "GLUT_KEY_F12",
+          "GLUT_KEY_LEFT",
+          "GLUT_KEY_UP",
+          "GLUT_KEY_RIGHT",
+          "GLUT_KEY_DOWN",
+          "GLUT_KEY_PAGE_UP",
+          "GLUT_KEY_PAGE_DOWN",
+          "GLUT_KEY_HOME",
+          "GLUT_KEY_END",
+          "GLUT_KEY_INSERT",
+          "GLUT_WINDOW_X",
+          "GLUT_WINDOW_Y",
+          "GLUT_WINDOW_WIDTH",
+          "GLUT_WINDOW_HEIGHT",
+          "GLUT_WINDOW_STENCIL_SIZE",
+          "GLUT_WINDOW_DEPTH_SIZE",
+          "GLUT_WINDOW_ALPHA_SIZE",
+          "GLUT_WINDOW_NUM_SAMPLES",
+          "GLUT_SCREEN_WIDTH",
+          "GLUT_SCREEN_HEIGHT",
+          "GLUT_INIT_WINDOW_X",
+          "GLUT_INIT_WINDOW_Y",
+          "GLUT_INIT_WINDOW_WIDTH",
+          "GLUT_INIT_WINDOW_HEIGHT",
+          "GLUT_ELAPSED_TIME",
+          "GLUT_CURSOR_RIGHT_ARROW",
+          "GLUT_CURSOR_LEFT_ARROW",
+          "GLUT_CURSOR_INFO",
+          "GLUT_CURSOR_DESTROY",
+          "GLUT_CURSOR_HELP",
+          "GLUT_CURSOR_CYCLE",
+          "GLUT_CURSOR_SPRAY",
+          "GLUT_CURSOR_WAIT",
+          "GLUT_CURSOR_TEXT",
+          "GLUT_CURSOR_CROSSHAIR",
+          "GLUT_CURSOR_UP_DOWN",
+          "GLUT_CURSOR_LEFT_RIGHT",
+          "GLUT_CURSOR_TOP_SIDE",
+          "GLUT_CURSOR_BOTTOM_SIDE",
+          "GLUT_CURSOR_LEFT_SIDE",
+          "GLUT_CURSOR_RIGHT_SIDE",
+          "GLUT_CURSOR_TOP_LEFT_CORNER",
+          "GLUT_CURSOR_TOP_RIGHT_CORNER",
+          "GLUT_CURSOR_BOTTOM_RIGHT_CORNER",
+          "GLUT_CURSOR_BOTTOM_LEFT_CORNER",
+          "GLUT_CURSOR_INHERIT",
+          "GLUT_CURSOR_NONE",
+          "GLUT_CURSOR_FULL_CROSSHAIR"
         ]
     }
 ]

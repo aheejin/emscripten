@@ -1082,6 +1082,9 @@ window.close = () => {
       window['simulateAxisMotion'] = (index, axis, value) => {
         gamepads[index].axes[axis] = value;
       };
+      window['disconnectGamepad'] = (index) => {
+        gamepads[index] = null;
+      };
     ''')
 
     self.btest_exit('test_sdl_joystick.c', cflags=['-O2', '--minify=0', '--pre-js', 'pre.js', '-lSDL', '-lGL'])
@@ -4479,6 +4482,9 @@ Module["preRun"] = () => {
   @disabled('https://github.com/emscripten-core/emscripten/issues/16746')
   def test_fetch_idb_store(self):
     self.btest_exit('fetch/test_fetch_idb_store.cpp', cflags=['-pthread', '-sFETCH', '-sPROXY_TO_PTHREAD'])
+
+  def test_fetch_idb_store_async(self):
+    self.btest_exit('fetch/test_fetch_idb_store_async.c', cflags=['-sFETCH'])
 
   @disabled('https://github.com/emscripten-core/emscripten/issues/16746')
   def test_fetch_idb_delete(self):

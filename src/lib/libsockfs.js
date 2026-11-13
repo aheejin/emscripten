@@ -52,7 +52,7 @@ addToLibrary({
       SOCKFS.on('close', (fd) => dbg(`websocket: close fd = ${fd}`));
 #endif
 
-      return FS.createNode(null, '/', S_IFDIR | 0o777, 0);
+      return FS.createNode(null, '/', S_IFDIR | S_IRWXUGO, 0);
     },
     createSocket(family, type, protocol) {
       if (family != AF_INET
@@ -104,7 +104,7 @@ addToLibrary({
         protocol,
         server: null,
         error: null, // Used in getsockopt for SOL_SOCKET/SO_ERROR test
-        peers: {},
+        peers: new Map(),
         pending: [],
         recv_queue: [],
 #if NODERAWSOCKETS
@@ -149,7 +149,7 @@ addToLibrary({
         return {
           dev: 1,
           ino: node.id,
-          mode: S_IFSOCK | 0o777,
+          mode: S_IFSOCK | S_IRWXUGO,
           nlink: 1,
           uid: 0,
           gid: 0,
@@ -321,13 +321,13 @@ addToLibrary({
         return peer;
       },
       getPeer(sock, addr, port) {
-        return sock.peers[addr + ':' + port];
+        return sock.peers.get(addr + ':' + port);
       },
       addPeer(sock, peer) {
-        sock.peers[peer.addr + ':' + peer.port] = peer;
+        sock.peers.set(peer.addr + ':' + peer.port, peer);
       },
       removePeer(sock, peer) {
-        delete sock.peers[peer.addr + ':' + peer.port];
+        sock.peers.delete(peer.addr + ':' + peer.port);
       },
       handlePeerEvents(sock, peer) {
         var first = true;
@@ -513,13 +513,13 @@ addToLibrary({
           sock.server = null;
         }
         // close any peer connections
-        for (var peer of Object.values(sock.peers)) {
+        for (var peer of sock.peers.values()) {
           try {
             peer.socket.close();
           } catch (e) {
           }
-          SOCKFS.websocket_sock_ops.removePeer(sock, peer);
         }
+        sock.peers.clear();
         return 0;
       },
       bind(sock, addr, port) {
