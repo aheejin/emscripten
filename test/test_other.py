@@ -196,6 +196,8 @@ def also_with_llvm_libc(func):
     if common.EMTEST_VERBOSE:
       print('parameterize:llvm_libc=%d' % llvm_libc)
     if llvm_libc:
+      if config.FROZEN_CACHE:
+        self.skipTest("llvm-libc test don't work with frozen cache")
       self.cflags += ['-lllvmlibc']
     return func(self, *args, **kwargs)
 
@@ -8217,6 +8219,8 @@ int main() {}
     # StackIR first and enable it at the end.
     'O2': (['-O2'], False),
     'O3': (['-O3'], True),
+    'O3_g3': (['-O3', '-g3'], False),
+    'O3_wasm': (['-O3', '-o', 'out.wasm'], False),
   })
   def test_binaryen_stack_ir(self, opts, disable_and_enable):
     err = self.run_process([EMXX, test_file('hello_world.c')] + opts, stderr=PIPE).stderr
