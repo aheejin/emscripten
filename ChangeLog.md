@@ -20,6 +20,11 @@ See docs/process.md for more on how version tagging works.
 
 7.0.1 (in development)
 ----------------------
+- Emscripten's JavaScript tools (`tools/compiler.mjs`, `tools/preprocessor.mjs`,
+  `tools/acorn-optimizer.mjs`, `tools/unsafe_optimizations.mjs`, and
+  `tools/lz4-compress.mjs`) are now bundled into `dist/` using `rolldown`. For
+  folks using a git checkout of emscripten, `./bootstrap.py` runs this bundling
+  step automatically. (#28281)
 - Embind now generates JavaScript invoker functions at link time instead of
   using `new Function` at runtime. This improves startup time, makes
   `-sDYNAMIC_EXECUTION=0` bindings just as fast as `-sDYNAMIC_EXECUTION=1`
@@ -29,6 +34,9 @@ See docs/process.md for more on how version tagging works.
   (e.g., `ENOENT`, `O_CREAT`) and referenced directly in JS library code,
   making unminified output more readable. (#28144)
 - zlib port updated from 1.3.2 to 1.4. (#28210)
+- `emscripten_get_now()` (and `clock_gettime(CLOCK_MONOTONIC)`) in pthreads
+  builds now reads `performance.timeOrigin` once per thread. In Safari its value
+  can vary between reads, which made the clock go backwards. (#28272)
 
 7.0.0 - 11/06/26
 ----------------

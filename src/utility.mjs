@@ -13,10 +13,6 @@ import * as fs from 'node:fs';
 import * as vm from 'node:vm';
 import assert from 'node:assert';
 
-export function safeQuote(x) {
-  return x.replace(/"/g, '\\"').replace(/'/g, "\\'");
-}
-
 export function dump(item) {
   let funcData;
   try {
@@ -104,7 +100,9 @@ export function mergeInto(obj, other, options = null) {
     if (options.noOverride) {
       for (const key of Object.keys(other)) {
         if (Object.hasOwn(obj, key)) {
-          error(`Symbol re-definition in JavaScript library: ${key}. Do not use noOverride if this is intended`);
+          error(
+            `Symbol re-definition in JavaScript library: ${key}. Do not use noOverride if this is intended`,
+          );
           return;
         }
       }
@@ -163,11 +161,15 @@ export function mergeInto(obj, other, options = null) {
       if (decoratorName === '__deps') {
         const deps = other[key];
         if (!Array.isArray(deps)) {
-          error(`JS library directive ${key}=${deps} is of type '${type}', but it should be an array`);
+          error(
+            `JS library directive ${key}=${deps} is of type '${type}', but it should be an array`,
+          );
         }
         for (const dep of deps) {
           if (dep && typeof dep !== 'string' && typeof dep !== 'function') {
-            error(`__deps entries must be of type 'string' or 'function' not '${typeof dep}': ${key}`);
+            error(
+              `__deps entries must be of type 'string' or 'function' not '${typeof dep}': ${key}`,
+            );
           }
         }
       } else {
@@ -259,9 +261,10 @@ export function readFile(filename) {
 }
 
 // Use import.meta.dirname here once we drop support for node v18.
-const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
-export const srcDir = __dirname;
+export const srcDir =
+  path.basename(__dirname) === 'src' ? __dirname : path.join(__dirname, '../src');
 
 // Returns an absolute path for a file, resolving it relative to this script
 // (i.e. relative to the src/ directory).
@@ -289,21 +292,19 @@ export function debugLog(...args) {
 
 class Profiler {
   ids = [];
-  lastTime = 0;
 
   constructor() {
-    this.start('overall')
-    this.startTime = performance.now();
+    this.start('overall');
   }
 
   log(msg) {
     const depth = this.ids.length;
-    const indent = ' '.repeat(depth)
+    const indent = ' '.repeat(depth);
     printErr('[prof] ' + indent + msg);
   }
 
   start(id) {
-    this.log(`-> ${id}`)
+    this.log(`-> ${id}`);
     const now = performance.now();
     this.ids.push([id, now]);
   }
@@ -313,7 +314,7 @@ class Profiler {
     assert(id === poppedId);
     const now = performance.now();
     const duration = now - startTime;
-    this.log(`<- ${id} [${duration.toFixed(1)} ms]`)
+    this.log(`<- ${id} [${duration.toFixed(1)} ms]`);
   }
 
   terminate() {
@@ -321,8 +322,6 @@ class Profiler {
       const lastID = this.ids.at(-1)[0];
       this.stop(lastID);
     }
-    // const overall = performance.now() - this.startTime
-    // printErr(`overall total: ${overall.toFixed(1)} ms`);
   }
 }
 
@@ -368,7 +367,7 @@ const setLikeSettings = [
   'ALL_INCOMING_MODULE_JS_API',
   'EXTRA_INCOMING_JS_API',
   'EXPORTED_RUNTIME_METHODS',
-  'WEAK_IMPORTS'
+  'WEAK_IMPORTS',
 ];
 
 const settingsCallbacks = [];
@@ -404,11 +403,11 @@ export function applySettings(obj) {
 }
 
 export function loadSettingsFile(f) {
-  timer.start('loadSettingsFile')
+  timer.start('loadSettingsFile');
   const settings = {};
   vm.runInNewContext(readFile(f), settings, {filename: f});
   setSettings(settings);
-  timer.stop('loadSettingsFile')
+  timer.stop('loadSettingsFile');
   return settings;
 }
 

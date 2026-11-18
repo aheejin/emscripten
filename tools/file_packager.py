@@ -733,7 +733,7 @@ def generate_preload_js(data_target, data_files, metadata, js_file):
       temp = data_target + '.orig'
       mylog.log_move(data_target, temp)
       shutil.move(data_target, temp)
-      meta = shared.run_js_tool(utils.path_from_root('tools/lz4-compress.mjs'),
+      meta = shared.run_js_tool(utils.path_from_root('dist/lz4-compress.mjs'),
                                 [temp, data_target], stdout=PIPE)
       os.unlink(temp)
       preload_plugins = "true" if options.use_preload_plugins else "false"
