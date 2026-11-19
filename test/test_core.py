@@ -4419,7 +4419,8 @@ caught outer int: 123
       #include <stdint.h>
       int64_t sidey() {
         volatile int64_t x = 0x12345678abcdef12LL;
-        x += x % 17;
+        int64_t y = x % 17;
+        x += y;
         x = 18 - x;
         return x;
       }
@@ -6118,6 +6119,7 @@ Module.onRuntimeInitialized = () => {
   def test_fs_readv_eagain(self):
     self.do_runf('fs/test_readv_eagain.c', 'done\n', cflags=['-sFORCE_FILESYSTEM'])
 
+  @no_wasmfs('WasmFS backends only see one write per iovec. https://github.com/emscripten-core/emscripten/issues/16269')
   def test_fs_writev_gather(self):
     self.do_runf('fs/test_writev_gather.c', 'done\n', cflags=['-sFORCE_FILESYSTEM'])
 
@@ -8073,6 +8075,7 @@ void* operator new(size_t size) {
     # Check that embind is usable from a library built with "-fvisibility=hidden"
 
     create_file('libside.cpp', r'''
+      #include <assert.h>
       #include <emscripten/bind.h>
       #include <emscripten/val.h>
       #define EXPORT __attribute__((visibility("default")))
@@ -8080,6 +8083,10 @@ void* operator new(size_t size) {
       EXPORT void liba_fun() {
         unsigned char buffer[1];
         val view(typed_memory_view(1, buffer));
+        assert(val::global("Math").call<int>("max", 1, 42, 3) == 42);
+        val arr = val::global("Array").new_(3);
+        arr.call<void>("fill", 7);
+        assert(arr[0].as<int>() == 7);
       }
       int side_add(int a, int b) {
         return a + b;
